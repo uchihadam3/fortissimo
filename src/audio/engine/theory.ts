@@ -158,6 +158,33 @@ export function pcOf(m: number): number {
   return ((m % 12) + 12) % 12;
 }
 
+const NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const transCache = new Map<string, Chord>();
+
+/** A chord moved `k` semitones (key lifts); the symbol is renamed so voice-leading spans stay distinct. */
+export function transpose(c: Chord, k: number): Chord {
+  const s = ((Math.round(k) % 12) + 12) % 12;
+  if (s === 0) return c;
+  const key = `${c.sym}|${s}`;
+  const hit = transCache.get(key);
+  if (hit) return hit;
+  const root = (c.root + s) % 12;
+  const bass = (c.bass + s) % 12;
+  const t: Chord = { sym: `${NAMES[root]}~${c.sym}${bass !== root ? `/${NAMES[bass]}` : ''}`, root, bass, pcs: c.pcs.map((p) => (p + s) % 12), tones: [...c.tones] };
+  transCache.set(key, t);
+  return t;
+}
+
+/** name of a pitch class (flats) */
+export function pcName(pc: number): string {
+  return NAMES[((pc % 12) + 12) % 12];
+}
+
+/** the major / minor triad on a scale's tonic (for stingers in the key of the music) */
+export function tonicChord(k: Scale, minor = false): Chord {
+  return chord(`${NAMES[k.tonicPc]}${minor ? 'm' : ''}`);
+}
+
 /** Chord-tone MIDI notes within [lo, hi]. */
 export function chordTones(c: Chord, lo: number, hi: number): number[] {
   const out: number[] = [];

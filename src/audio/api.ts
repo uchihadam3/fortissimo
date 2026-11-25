@@ -33,9 +33,20 @@ export interface SongClock {
   beatsPerBar: number;
 }
 
-/** One-shot cinematic moments, called by the cutscene scripts at the listed points. */
+/**
+ * Cinematic cues. EVERY cue that is not marked as a stinger is a MOOD: it starts on the next beat of
+ * the music that is playing and SUSTAINS — looping and evolving — until the next cue, stopMusic()
+ * or playSong(). Cutscenes can therefore be re-timed freely (the times below are only the original
+ * timings). Stingers sound at once: intro:shatter (then silence until the next cue), intro:title
+ * (the chord, then a soft afterglow mood), ending:fall (the crash, then the drone mood),
+ * ending:rest (a bar of true silence, a note answered, then a hushed mood), ending:bow (the bloom
+ * cadences at its next bar line, then a shimmering tail that sustains until the credits),
+ * world:restored and map:*.
+ * story:* moods take the colours of the land the story is in (the last land:* cue, the ambience
+ * place or the last land song). joinMotif() plays on top of any mood, which steps back for it.
+ */
 export type CinematicCue =
-  // intro cutscene (≈80 s): times are seconds from the start of the cutscene
+  // intro cutscene (originally ≈80 s; now any length): times are seconds from the start of the cutscene
   | 'intro:dawn'      //  0 s  Harmonia wakes: celesta/harp glimmers, strings swell into…
   | 'intro:festival'  //  8 s  …the main theme, joyful, the whole world dancing to it
   | 'intro:approach'  // 24 s  the Silence approaches: the music decays (filter closes, parts drop out, pitch sags), low drone
@@ -113,7 +124,9 @@ export interface AudioAPI {
   stopMusic(fade?: number): void;
   /**
    * Battle intensity: 0 calm (before/between waves) · 1 wave · 2 heavy wave · 3 climax (boss on the
-   * field / last wave). Takes effect at the next bar line.
+   * field / last wave). Takes effect at the next bar line. Once the field has been calm for a whole
+   * bar, a battle song turns into a composed breakdown (the land's leitmotif and its variations,
+   * a different one each time); the next wave resumes the battle at the start of a section.
    */
   setIntensity(level: 0 | 1 | 2 | 3): void;
   /** 0 = normal … 1 = fully muffled (pause menu / dialogs): low-pass + a little quieter. */
@@ -142,6 +155,11 @@ export interface AudioAPI {
   coin(t: number, pan: number, amount: number): void;
   /** An enemy reached the Heart. `livesLeft` 0..1. */
   heartHit(t: number, livesLeft: number): void;
+  /**
+   * The hymn duet heals the colossus (+1 life): a warm, rising, hopeful chime at t — the choir
+   * ('ah') rising through the chord with a bell and a shimmer of glass, ≈1.5 s, in the harmony of t.
+   */
+  heartHeal(t: number): void;
   build(t: number, pan: number): void;
   upgrade(t: number, pan: number, level: number): void;
   sell(t: number, pan: number): void;
@@ -170,16 +188,30 @@ export interface AudioAPI {
   /**
    * The band on the shell changed. Each section present adds its layer to the battle arrangement
    * (percussion → groove, strings → ostinato, bells → shimmer, brass → swells, voices → choir,
-   * low → bass line) and harmony makes it fuller. Changes land on the next bar line, smoothly.
+   * low → bass line) and harmony makes it fuller (h ≥ 2 counter-melodies, h ≥ 4 doublings,
+   * h = 5 the full glory). Duets change how partners play (towers and backing). Changes land on the
+   * next free bar line; a section that joins fades in over its first bar. Call it right after
+   * playSong() and whenever the band changes (built, sold, muted/disabled towers). Until the game
+   * reports a band, songs play with the full band. Garbage is sanitised.
    */
   setBand(mix: BandMix): void;
-  /** A duet just formed between two towers: a short flourish of the pair at time t. */
+  /** A duet just formed between two towers: a short flourish of the pair at time t (on the grid). */
   duet(id: DuetId, t: number, pan: number): void;
-  /** Movement `index` (0-based) of `total` of a long journey begins at t (downbeat). */
+  /**
+   * Movement `index` (0-based) of `total` of a long journey begins at t (a downbeat). Movement 0
+   * plays the song's home plan, the last one its grand final plan (a key lift), the middle ones the
+   * contrasting material (other sections, keys and modes). The change lands on the bar of t when
+   * that bar is not composed yet (call ≥ ~0.3 s ahead, e.g. when the breather before the movement
+   * begins — the breakdown then modulates into the new key); called later, at the next bar line.
+   * Without announced movements, long songs still travel (a new plan every few breakdowns).
+   */
   movement(index: number, total: number, t: number): void;
-  /** A new plate of the shell lights up. */
+  /** A new plate of the shell lights up: a bright little chime at t. */
   plateUnlock(t: number, pan: number): void;
-  /** Cinematics: a rescued musician plays its signature motif (≈2 bars), on top of any mood. */
+  /**
+   * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
+   * mood's next beat, in its key (the mood holds its tonic under it).
+   */
   joinMotif(kind: TowerKind): void;
 
   // ── title & cinema ────────────────────────────────────
