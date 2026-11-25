@@ -39,7 +39,8 @@ export class Showcase {
     this.sim.turtle.s = 30;
     this.view = new JourneyView(engine, def, this.sim);
     this.view.lifeTarget = this.view.life = opts.life ?? 1.1;
-    this.view.setCamera(opts.yaw ?? 2.3, opts.pitch ?? 0.26, opts.dist ?? 27, true);
+    this.baseDist = opts.dist ?? 27;
+    this.view.setCamera(opts.yaw ?? 2.3, opts.pitch ?? 0.26, this.baseDist, true);
     engine.setScene(this.view.scene);
     engine.camera.far = 5000;
     engine.camera.fov = 42;
@@ -52,6 +53,7 @@ export class Showcase {
   }
 
   private onResize: () => void;
+  private baseDist = 27;
   /** shift the picture so the colossus stands beside the menu */
   shift = 0.2;
   private frame() {
@@ -59,6 +61,11 @@ export class Showcase {
     const cam = this.engine.camera;
     if (w > h * 1.1) cam.setViewOffset(w, h, -w * this.shift, 0, w, h);
     else cam.clearViewOffset();
+    // held upright: a wider lens and a step back, so the whole colossus fits between logo and buttons
+    const portrait = Math.max(0, Math.min(1, (1.1 - w / h) / 0.6));
+    cam.fov = 42 + portrait * 16;
+    cam.updateProjectionMatrix();
+    this.view.setDistance(this.baseDist * (1 + portrait * 0.55));
   }
 
   private update(dt: number, t: number) {

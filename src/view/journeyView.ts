@@ -425,6 +425,11 @@ export class JourneyView {
     }
   }
 
+  /** change only the orbit distance (eased) */
+  setDistance(d: number) {
+    this.camDistGoal = d;
+  }
+
   /** jump straight to the camera goal (no easing) */
   snapCamera() {
     this.camYaw = this.camYawGoal;
@@ -543,6 +548,9 @@ export class JourneyView {
           this.scene.add(v.group);
           v.push(ev.t, ev.enemy.x, ev.enemy.z);
         }
+        // a Mimic (Sombra) shows which of the band's instruments it copies
+        const mk = (ev.enemy as { mimicKind?: TowerKind | null }).mimicKind;
+        if (mk) v.setMimicKind(mk);
         if (!ev.enemy.structure && ev.enemy.wave >= 0) {
           const p = new THREE.Vector3(ev.enemy.x, this.land.heightAt(ev.enemy.x, ev.enemy.z) + 0.3, ev.enemy.z);
           this.fx.burst(p, '#5a5378', 10, 2, 0.4, 0.8, false, 0.5);
