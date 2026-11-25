@@ -55,7 +55,7 @@ export class Turtle {
   readonly body = new THREE.Group();
   readonly shell = new THREE.Group();
   readonly slots: Slot[] = [];
-  private legs: { hip: THREE.Vector3; mesh: THREE.Mesh; lower: THREE.Mesh; elbow: THREE.Mesh; foot: THREE.Group; front: boolean; side: number; phase: number; plant: THREE.Vector3; from: THREE.Vector3; swinging: boolean; to: THREE.Vector3 }[] = [];
+  private legs: { hip: THREE.Vector3; mesh: THREE.Mesh; lower: THREE.Mesh; elbow: THREE.Mesh; foot: THREE.Group; footW: THREE.Vector3; front: boolean; side: number; phase: number; plant: THREE.Vector3; from: THREE.Vector3; swinging: boolean; to: THREE.Vector3 }[] = [];
   private head = new THREE.Group();
   private neck: THREE.Mesh;
   private lids: THREE.Mesh[] = [];
@@ -445,19 +445,31 @@ export class Turtle {
       this.body.add(lower);
       const elbow = new THREE.Mesh(sph(0.86, 20, 14), this.skinMat);
       this.body.add(elbow);
+      // a broad, flat elephant-like foot planted on the ground: a wide pad, a scaly ankle cuff
+      // and four big ivory toenails, so it never reads as standing on tiptoe
       const foot = new THREE.Group();
-      const pad = new THREE.Mesh(sph(1, 20, 12), this.skinMat);
-      pad.scale.set(0.98, 0.5, 1.1);
-      pad.position.y = 0.32;
+      const pad = new THREE.Mesh(sph(1, 24, 12), this.skinMat);
+      pad.scale.set(1.3, 0.5, 1.42);
+      pad.position.y = 0.36;
       foot.add(pad);
-      for (let k = -1; k <= 1; k++) {
-        const nail = new THREE.Mesh(sph(0.2, 10, 8), stdMat('#f3ead2', 0.5));
-        nail.scale.set(1, 0.7, 1.2);
-        nail.position.set(k * 0.42, 0.18, -0.92 + Math.abs(k) * 0.12);
+      const sole = new THREE.Mesh(cyl(1.28, 1.34, 0.16, 24), this.skinMat);
+      sole.scale.z = 1.08;
+      sole.position.y = 0.08;
+      foot.add(sole);
+      const cuff = new THREE.Mesh(torus(0.92, 0.2, 10, 24), stdMat('#3f8a78', 0.85));
+      cuff.rotation.x = Math.PI / 2;
+      cuff.position.y = 0.72;
+      foot.add(cuff);
+      for (let k = 0; k < 4; k++) {
+        const a = -0.95 + (k / 3) * 1.9;
+        const nail = new THREE.Mesh(sph(0.27, 12, 8), stdMat('#f3ead2', 0.45));
+        nail.scale.set(0.95, 0.72, 1.15);
+        nail.position.set(Math.sin(a) * 1.12, 0.22, -Math.cos(a) * 1.3);
+        nail.rotation.y = a;
         foot.add(nail);
       }
       this.group.add(foot);
-      this.legs.push({ hip, mesh: leg, lower, elbow, foot, front, side: Math.sign(x), phase: ph, plant: new THREE.Vector3(), from: new THREE.Vector3(), to: new THREE.Vector3(), swinging: false });
+      this.legs.push({ hip, mesh: leg, lower, elbow, foot, footW: new THREE.Vector3(), front, side: Math.sign(x), phase: ph, plant: new THREE.Vector3(), from: new THREE.Vector3(), to: new THREE.Vector3(), swinging: false });
     }
   }
 
@@ -476,6 +488,11 @@ export class Turtle {
   slotWorld(id: number, out = new THREE.Vector3()): THREE.Vector3 {
     const s = this.slots[id];
     return this.shell.localToWorld(out.copy(s.pos));
+  }
+
+  /** world positions of the four feet (for pressing the grass flat under them) */
+  feet(): THREE.Vector3[] {
+    return this.legs.map((L) => L.footW);
   }
 
   hurt() {
@@ -513,8 +530,10 @@ export class Turtle {
         const hp = L.hip.clone().applyMatrix4(mm);
         // reach a little forward of the hip
         const fwd = new THREE.Vector3(0, 0, -1).transformDirection(mm);
+        const right = new THREE.Vector3(1, 0, 0).transformDirection(mm);
         hp.addScaledVector(fwd, L.front ? 0.5 : 0.3);
-        hp.x += L.side * 0.0;
+        // a wide, sturdy stance: the feet land a little outside the hips
+        hp.addScaledVector(right, L.side * 0.6);
         hp.y = ground(hp.x, hp.z);
         return hp;
       };
@@ -529,7 +548,7 @@ export class Turtle {
       if (!walking) {
         const hp = hipAt(beatPos);
         L.plant.lerp(hp, Math.min(1, dt * 4));
-        L.foot.position.copy(L.plant);
+        L.footW.copy(L.plant);
       } else if (beatPos >= swingStart) {
         const s = (beatPos - swingStart) / swingLen;
         if (!L.swinging) {
@@ -538,8 +557,8 @@ export class Turtle {
           L.to.copy(hipAt(plantBeat));
         }
         const e = s * s * (3 - 2 * s);
-        L.foot.position.lerpVectors(L.from, L.to, e);
-        L.foot.position.y += Math.sin(s * Math.PI) * 0.75;
+        L.footW.lerpVectors(L.from, L.to, e);
+        L.footW.y += Math.sin(s * Math.PI) * 0.75;
         roll += L.side * Math.sin(s * Math.PI) * 0.02;
       } else {
         if (L.swinging) {
@@ -548,29 +567,30 @@ export class Turtle {
           this.onStep(L.plant.clone(), L.front);
         }
         if (!L.plant.lengthSq()) L.plant.copy(hipAt(beatPos));
-        L.foot.position.copy(L.plant);
+        L.footW.copy(L.plant);
         // body dips right after a plant
         const since = beatPos - (plantBeat - cycle);
         if (since >= 0 && since < 1) dip += Math.exp(-since * 5) * 0.12;
       }
       // a stomp lifts the front feet
-      if (this.rear > 0 && L.front) L.foot.position.y += this.rear * 1.4;
-      // orient the foot along the body
-      L.foot.quaternion.copy(this.group.quaternion);
+      if (this.rear > 0 && L.front) L.footW.y += this.rear * 1.4;
+      // the foot is a child of the colossus: place it from its world position, aligned with the body
+      L.foot.position.copy(this.group.worldToLocal(L.footW.clone()));
+      L.foot.quaternion.identity();
       // leg: from hip (in body space) to the foot
       const hipW = L.hip.clone();
       this.body.localToWorld(hipW);
-      const footTop = L.foot.position.clone();
-      footTop.y += 0.45;
+      const footTop = L.footW.clone();
+      footTop.y += 0.7;
       const dir = footTop.clone().sub(hipW);
       const len = dir.length();
       void len;
       const hipLocal = this.body.worldToLocal(hipW.clone());
       const footLocal = this.body.worldToLocal(footTop.clone());
       // elbow bends outward, like a tortoise's sturdy legs
-      const elbow = hipLocal.clone().lerp(footLocal, 0.5);
-      elbow.x += L.side * 0.75;
-      elbow.y += 0.25;
+      const elbow = hipLocal.clone().lerp(footLocal, 0.52);
+      elbow.x += L.side * 0.95;
+      elbow.y += 0.15;
       const down = new THREE.Vector3(0, -1, 0);
       const setSeg = (m: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3) => {
         m.position.copy(a);

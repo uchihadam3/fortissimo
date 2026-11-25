@@ -388,3 +388,11 @@
   #go .ico { inset: 24px 20px 24px 28px; }
   .wave-pips span { width: 7px; height: 7px; }
 }
+
+/* phones held upright: the stats get their own rows and the journey bar sits below them */
+@media (orientation: portrait) and (max-width: 640px) {
+  .hud-tl { max-width: calc(100vw - 86px); }
+  #journey { top: calc(108px + var(--safe-t)); width: calc(100vw - 92px); left: calc(50% - 10px); height: 40px; }
+  #journey .me, #journey .goal { width: 32px; height: 32px; }
+  #journey .goal { right: -26px; }
+}

@@ -74,6 +74,9 @@ export class JourneyBattle {
     engine.camera.far = 5000;
     engine.camera.fov = 42;
     engine.camera.updateProjectionMatrix();
+    this.view.adaptiveFov = true;
+    this.view.resetCamera();
+    this.view.snapCamera();
     engine.renderer.toneMappingExposure = this.view.look.exposure;
     this.hud = new Hud(uiRoot);
     this.hud.show(true);
@@ -147,6 +150,7 @@ export class JourneyBattle {
       pts.delete(e.pointerId);
       if (!p) return;
       if (moved <= 8 && pts.size === 0) this.tap(e.clientX, e.clientY);
+      else if (pts.size === 0) this.view.orbitEnd();
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();

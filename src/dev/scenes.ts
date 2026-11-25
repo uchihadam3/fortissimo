@@ -174,8 +174,14 @@ export function turtleScene(app: HTMLElement) {
   engine.onUpdate((dt, time) => {
     t.update(dt, time, time * 1.6, (b, out) => out.compose(new THREE.Vector3(0, 0, -b * 0.4), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1)), () => 0, true);
     void m;
-    cam.position.set(-16, 8, -14 - time * 1.6 * 0.4);
-    cam.lookAt(0, 3, -2 - time * 1.6 * 0.4);
+    const z = -time * 1.6 * 0.4;
+    if (new URLSearchParams(location.search).get('cam') === 'side') {
+      cam.position.set(-21, 3.2, z - 1);
+      cam.lookAt(0, 2.4, z - 1);
+    } else {
+      cam.position.set(-16, 8, -14 + z);
+      cam.lookAt(0, 3, -2 + z);
+    }
   });
   engine.start();
   (window as unknown as { __ready: boolean }).__ready = true;

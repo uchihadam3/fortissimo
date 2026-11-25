@@ -289,9 +289,40 @@ export class JourneyView {
 
   // ───────────────────────────── camera ─────────────────────────────
 
+  /**
+   * Drag to orbit, "grabbing" the world: the ground under the finger follows it (drag right and the
+   * near side of the world moves right). Speed scales with the screen so a full-width swipe turns
+   * about 160°, and a flick keeps spinning briefly (inertia) after release.
+   */
   orbit(dx: number, dy: number) {
-    this.camYawGoal -= dx * 0.006;
-    this.camPitchGoal = Math.max(0.18, Math.min(1.25, this.camPitchGoal + dy * 0.004));
+    const k = 2.8 / Math.max(320, Math.min(window.innerWidth, 1400));
+    const dyaw = dx * k;
+    this.camYawGoal += dyaw;
+    this.camPitchGoal = Math.max(0.18, Math.min(1.25, this.camPitchGoal + dy * k * 0.7));
+    const now = performance.now() / 1000;
+    const step = Math.max(1 / 120, now - this.lastOrbitT);
+    this.orbitVel = this.lastOrbitT > 0 && now - this.lastOrbitT < 0.1 ? this.orbitVel * 0.5 + (dyaw / step) * 0.5 : dyaw / step;
+    this.lastOrbitT = now;
+    this.spin = 0;
+    this.dragging = true;
+  }
+
+  /** the finger left the screen: a quick flick keeps the camera turning for a moment */
+  orbitEnd() {
+    const now = performance.now() / 1000;
+    this.dragging = false;
+    if (now - this.lastOrbitT < 0.08) this.spin = Math.max(-5, Math.min(5, this.orbitVel));
+    this.lastOrbitT = 0;
+  }
+  private orbitVel = 0;
+  private lastOrbitT = 0;
+  private spin = 0;
+  private dragging = false;
+  /** battles fit the view to the screen shape (wider lens and a higher, farther camera when held upright) */
+  adaptiveFov = false;
+  private portrait(): number {
+    const a = window.innerWidth / Math.max(1, window.innerHeight);
+    return Math.max(0, Math.min(1, (1.3 - a) / 0.85));
   }
 
   zoom(f: number) {
@@ -311,14 +342,24 @@ export class JourneyView {
     }
   }
 
+  /** jump straight to the camera goal (no easing) */
+  snapCamera() {
+    this.camYaw = this.camYawGoal;
+    this.camPitch = this.camPitchGoal;
+    this.camDist = this.camDistGoal;
+    this.firstCam = true;
+  }
+
   addYaw(d: number) {
     this.camYawGoal += d;
   }
 
   resetCamera() {
+    const p = this.adaptiveFov ? this.portrait() : 0;
     this.camYawGoal = 0.42;
-    this.camPitchGoal = 0.46;
-    this.camDistGoal = 27;
+    this.camPitchGoal = 0.46 + p * 0.3;
+    this.camDistGoal = 27 + p * 8;
+    this.spin = 0;
   }
 
   shake(a: number) {
@@ -336,9 +377,23 @@ export class JourneyView {
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     this.camHeading += dh * Math.min(1, dt * 1.2);
-    this.camYaw = damp(this.camYaw, this.camYawGoal, 6, dt);
-    this.camPitch = damp(this.camPitch, this.camPitchGoal, 6, dt);
+    if (this.spin) {
+      this.camYawGoal += this.spin * dt;
+      this.spin *= Math.exp(-dt * 3.5);
+      if (Math.abs(this.spin) < 0.02) this.spin = 0;
+    }
+    // follow the finger closely while dragging; ease gently otherwise
+    const follow = this.dragging || this.spin ? 16 : 6;
+    this.camYaw = damp(this.camYaw, this.camYawGoal, follow, dt);
+    this.camPitch = damp(this.camPitch, this.camPitchGoal, follow, dt);
     this.camDist = damp(this.camDist, this.camDistGoal, 6, dt);
+    if (this.adaptiveFov && !this.cine) {
+      const fov = 42 + this.portrait() * 20;
+      if (Math.abs(cam.fov - fov) > 0.05) {
+        cam.fov = fov;
+        cam.updateProjectionMatrix();
+      }
+    }
     // behind the colossus (opposite of its heading), turned by the orbit yaw
     const back = this.camHeading + Math.PI + this.camYaw;
     const horiz = Math.cos(this.camPitch) * this.camDist;
@@ -353,8 +408,9 @@ export class JourneyView {
       this.camLook.copy(look);
       this.firstCam = false;
     }
-    this.camPos.lerp(desired, 1 - Math.exp(-dt * 4));
-    this.camLook.lerp(look, 1 - Math.exp(-dt * 5));
+    const posRate = this.dragging || this.spin ? 14 : 4;
+    this.camPos.lerp(desired, 1 - Math.exp(-dt * posRate));
+    this.camLook.lerp(look, 1 - Math.exp(-dt * Math.max(5, posRate)));
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
     this.cineMix = damp(this.cineMix, this.cine ? 1 : 0, this.cineRate, dt);
@@ -750,7 +806,10 @@ export class JourneyView {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.turtle.group.quaternion);
     this.grass.follow(tpos.x + fwd.x * 12, tpos.z + fwd.z * 12);
     this.grass.update(t);
-    this.grass.setPushers([{ x: tpos.x, z: tpos.z, r: 6.2, s: 1 }]);
+    // the body presses the grass, and each foot flattens a patch so it is seen planted on the ground
+    const push = [{ x: tpos.x, z: tpos.z, r: 6.2, s: 1 }];
+    for (const f of this.turtle.feet()) push.push({ x: f.x, z: f.z, r: 2.3, s: 1.35 });
+    this.grass.setPushers(push);
     this.pMat.uniforms.uTime.value = t;
     this.particles.position.set(this.engine.camera.position.x, 0, this.engine.camera.position.z);
     // colour: around the colossus and in its wake
