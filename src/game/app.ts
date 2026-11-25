@@ -330,6 +330,7 @@ export class App {
     if (!guardian || !this.save || (this.save.levels[guardian.id]?.stars ?? 0) > 0) return;
     const lm = b.view.landmark;
     lm.setCorrupt(1);
+    // INTEGRATION: the arrival is detected through landmark.ring() (JourneyView calls it on 'arrive')
     const ring = lm.ring.bind(lm);
     lm.ring = () => {
       ring();

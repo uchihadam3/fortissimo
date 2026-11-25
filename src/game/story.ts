@@ -41,7 +41,7 @@ export interface SceneDef {
   world: WorldId;
   /** the journey it follows (interludes) */
   level?: string;
-  play: (app: App) => Promise<void>;
+  play: (app: App) => Promise<unknown>;
 }
 
 const INTERLUDE_KIND: Record<string, SceneKind> = { m4: 'guardian', d4: 'guardian', i4: 'guardian', f4: 'guardian', mx: 'memory', dx: 'memory', ix: 'memory', fx: 'memory' };
@@ -127,6 +127,11 @@ export async function devCine(app: App, p: URLSearchParams): Promise<void> {
     app.storyGallery();
     return;
   }
+  if (what === 'tour') {
+    // the second half of the epilogue on its own (for captures)
+    await playCutscene(app, 'tour');
+    return;
+  }
   if (!SCENE_BY_ID.has(id)) id = 'intro';
   await playStory(app, id);
   (window as unknown as { __done?: boolean }).__done = true;
@@ -204,7 +209,7 @@ function serenade(c: Cine, t0: number, dur: number, kinds: TowerKind[] | 'all', 
       const a = c.band.get(k);
       if (!a) continue;
       const p = a.world(new THREE.Vector3()).add(tmp.set(0, 1.4, 0));
-      stream.add(p, c.t + (i / n) * dur * 0.8, 1.6 + Math.random() * 0.6, BAND_COLORS[k], 0.34, 2.5 + Math.random() * 3);
+      stream.add(p, c.wt + (i / n) * dur * 0.8, 1.6 + Math.random() * 0.6, BAND_COLORS[k], 0.34, 2.5 + Math.random() * 3);
     }
   });
   return stream;
@@ -248,8 +253,8 @@ function shardHome(c: Cine, world: WorldId, t0: number, from: Anchor, rise = 2.2
   const turtle = c.view.turtle;
   c.cue(t0, 'story:shard');
   const hang = () => from().add(tmp.set(0, 4, 0));
-  c.shardFlight(t0, rise, color, from, hang, 1, 1.4);
-  c.shardFlight(t0 + rise, fly, color, hang, () => turtle.facetWorld(i), 8, 1.3, () => {
+  const rising = c.shardFlight(t0, rise, color, from, hang, 1, 1.4);
+  const flying = c.shardFlight(t0 + rise, fly, color, hang, () => turtle.facetWorld(i), 8, 1.3, () => {
     turtle.setShards(i + 1);
     turtle.flashFacet(i);
     const h = turtle.heartWorld(new THREE.Vector3());
@@ -258,7 +263,9 @@ function shardHome(c: Cine, world: WorldId, t0: number, from: Anchor, rise = 2.2
     c.view.fx.ring(turtle.group.position.clone().setY(turtle.group.position.y + 0.4), 30, color, 1.4, 0.05);
     c.shake(0.4);
   });
-  return t0 + rise + fly;
+  // where the shard is right now (for the camera to follow it)
+  const at = () => (c.t < t0 + rise ? rising.group.position : c.t < t0 + rise + fly ? flying.group.position : turtle.heartWorld(new THREE.Vector3()));
+  return { end: t0 + rise + fly, at };
 }
 
 /** the great Voice of the land rings, a thread of light links it to the Heart again, colour sweeps the land */
@@ -298,7 +305,7 @@ function corruptVoice(c: Cine, k = 1) {
 
 // ───────────────────────────── chapter openings ─────────────────────────────
 
-const CHAPTERS: Record<WorldId, (app: App) => Promise<void>> = {
+const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
   // the meadow, grey at dawn; far away, the Bell wrapped in ink
   meadow: (app) => {
     audio.setAmbience('meadow', 0.5);
@@ -315,7 +322,7 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<void>> = {
       c.shot(0, 6, { pos: [c.T(-30, 26, 34), c.T(-22, 17, 24)], look: [c.T(0, 2, -14), c.T(0, 4, -8)], fov: 44 });
       cardChapter(app, c, 'meadow', 0.8, 5.4);
       // 2. long lens down the road: the Bell on its hill, coiled in ink
-      c.shot(6, 10.5, { pos: [c.T(1.2, 7.2, 2), c.T(1.0, 7.4, 1.2)], look: c.add3(() => v.landmark.group.position, 0, 14, 0), fov: [12, 10] });
+      c.shot(6, 10.5, { pos: [c.T(1.1, 7.3, -1.9), c.T(1.0, 7.5, -2.3)], look: c.add3(() => v.landmark.group.position, 0, 14, 0), fov: [12, 10] });
       c.at(8.4, () => {
         c.shake(0.1);
         v.fx.burst(blot.pos.clone().setY(blot.pos.y + 4), '#1d1a2b', 30, 5, 0.6, 1.2, false, 2);
@@ -512,15 +519,22 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<void>> = {
   // endless grey marble stairs; the Heart (4 of 5) points the way
   citadel: (app) => {
     audio.setAmbience('citadel', 0.6);
-    return runScene(app, setFor('ch-citadel', 'citadel', { bars: 80, s0: 10, seed: 61, curviness: 0, life: 0.15, colorScale: 0.6, features: [{ kind: 'ruins', from: 0, to: 160 }] }), (c) => {
+    return runScene(app, setFor('ch-citadel', 'citadel', { bars: 80, s0: 27, seed: 61, curviness: 0, life: 0.15, colorScale: 0.6, features: [{ kind: 'meadow', from: 0, to: 200 }] }), (c) => {
       const v = c.view;
-      const stairs = new MarbleStairs(46, 0.5, 2.0, 18);
+      // endless stairs from the road up to the Needle, which stands on the top landing
       const s1 = 22;
+      const L = 80 * 4 * 0.42;
+      const steps = Math.ceil((L + 22 - s1) / 2.0) + 2;
+      const stairs = new MarbleStairs(steps, 0.4, 2.0, 18);
       const base = c.roadPoint(s1, 0, 0);
       stairs.group.position.copy(base).setY(base.y - 0.05);
       stairs.group.rotation.y = c.roadYaw(s1);
       c.place(stairs.group);
+      stairs.group.updateMatrixWorld(true);
+      v.landmark.group.position.y = base.y + steps * 0.4 - 0.4;
       const inv = new THREE.Matrix4();
+      // INTEGRATION: no JourneyView hook raises the ground, so this scene's own view gets a heightAt that
+      // includes the set piece (the colossus' body and feet then walk on it).
       const orig = v.land.heightAt;
       v.land.heightAt = (x: number, z: number) => {
         inv.copy(stairs.group.matrixWorld).invert();
@@ -568,7 +582,7 @@ function campSet(c: Cine, sleep = 1) {
   return fire;
 }
 
-const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
+const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
   // ── Meadow ──
   // a grey village square: Bumbo, a statue in mid-beat; colour pours into him; he wakes with a start
   m1: (app) => {
@@ -594,7 +608,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.shot(0, 4.6, { pos: [c.R(() => top, -4.6, 0.6, -5.2), c.R(() => top, -3.8, 0.9, -4.6)], look: [c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 3), 0.55), c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 2), 0.4)], fov: 44 });
       c.placeName(0.8, 4.2, placeOf('m2', lang));
       // 2. the statue, close: frozen in the middle of a beat
-      c.shot(4.6, 7.4, { pos: [c.R(bumbo, -1.8, 1.1, -2.4), c.R(bumbo, -1.4, 1.0, -1.9)], look: c.R(bumbo, 0, 0.8, 0), fov: 30 });
+      c.shot(4.6, 7.4, { pos: [c.R(bumbo, 2.2, 1.0, -1.6), c.R(bumbo, 1.8, 0.95, -1.3)], look: c.R(bumbo, 0, 0.8, 0), fov: 30 });
       // 3. Lira plucks; golden notes fly to the statue
       c.cue(7.4, 'story:wake');
       const lira = c.band.get('harp')!;
@@ -602,7 +616,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.at(7.6, () => c.mpose('conduct'));
       serenade(c, 7.8, 2.2, ['harp'], () => top.clone().setY(top.y + 0.8), 18);
       // 4. colour runs down into the stone
-      c.shot(10.2, 12.4, { pos: [c.R(bumbo, -1.6, 1.4, -2.2), c.R(bumbo, -1.3, 1.2, -1.8)], look: c.R(bumbo, 0, 0.8, 0), fov: 32 });
+      c.shot(10.2, 12.4, { pos: [c.R(bumbo, 2.0, 1.3, -1.8), c.R(bumbo, 1.7, 1.15, -1.5)], look: c.R(bumbo, 0, 0.8, 0), fov: 32 });
       c.during(10.3, 11.8, (k) => (bumbo.view as MusicianView).setFrozen(1 - ease.inOut(k)));
       c.colourCircle(10.4, 3, () => top, 0.5, 12, 1.15);
       c.at(10.4, () => v.fx.burst(top.clone().setY(top.y + 2.2), '#ffd36b', 40, 2, 0.16, 1.2, true, 2));
@@ -610,7 +624,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       startled(c, bumbo, 11.9);
       c.during(12.3, 12.9, (k) => (bumbo.holder.position.y = top.y - k * k * 1.45));
       c.at(12.0, () => audio.cinematic('story:comic'));
-      c.shot(12.4, 15, { pos: [c.R(bumbo, -2.8, 1.0, -3.4), c.R(bumbo, -2.4, 0.9, -3.0)], look: c.R(bumbo, 0, 0.6, 0), fov: 38 });
+      c.shot(12.4, 15, { pos: [c.R(bumbo, 3.2, 1.2, -2.6), c.R(bumbo, 2.8, 1.1, -2.2)], look: c.R(bumbo, 0, 0.6, 0), fov: 38 });
       // 6. …then drums for joy and jumps onto the shell
       joinBand(c, bumbo, 'drum', 14.2, 1.6, 8);
       c.shot(15, 19.4, { pos: [c.T(-17, 6, -6), c.T(-15, 7, -3)], look: c.T(-4, 4.4, -1), fov: 42 });
@@ -660,7 +674,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.shot(12.6, 15.8, { pos: [c.T(-14, 8, -9), c.T(-12, 8.5, -6)], look: [() => hang.clone().lerp(v.turtle.group.position.clone().setY(hang.y - 2), 0.4), c.T(0, 5, -1)], fov: 44 });
       // far away: the giant Bell in the arms of the Great Blot
       c.cue(15.8, 'story:threat');
-      c.shot(15.8, 19.6, { pos: [c.T(1.6, 7.6, 2.4), c.T(1.4, 7.8, 1.8)], look: c.add3(() => v.landmark.group.position, 0, 13, 0), fov: [11, 9.5] });
+      c.shot(15.8, 19.6, { pos: [c.T(1.2, 7.4, -1.9), c.T(1.1, 7.6, -2.3)], look: c.add3(() => v.landmark.group.position, 0, 13, 0), fov: [11, 9.5] });
       c.end(19.6);
     });
   },
@@ -701,7 +715,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
         v.fx.burst(blot.pos.clone().setY(blot.pos.y + 6), '#1d1a2b', 40, 6, 0.8, 1.4, false, 2);
       });
       c.during(13.6, 15, (k) => (blot.lift = 1.4 * (1 - k)));
-      c.shot(13.2, 16.6, { pos: [c.T(0.6, 6.8, 1), c.T(0.6, 6.9, 0.6)], look: c.add3(() => blot.pos, 0, 6, 0), fov: [13, 11] });
+      c.shot(13.2, 16.6, { pos: [c.T(1.0, 7.1, -1.9), c.T(1.0, 7.2, -2.2)], look: c.add3(() => blot.pos, 0, 6, 0), fov: [13, 11] });
       c.end(16.6);
     });
   },
@@ -862,7 +876,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
         if (Math.random() < 0.4) v.fx.dust(spot.clone().add(tmp.set((Math.random() - 0.5) * 8, 0.3, (Math.random() - 0.5) * 8)), '#e8c890', 12);
       });
       c.at(5.2, () => c.pose('all', 'scared'));
-      c.shot(4, 6, { pos: c.T(-2, 7.4, 3), look: () => spot.clone().setY(spot.y + 1), fov: 32, shake: 0.2 });
+      c.shot(4, 6, { pos: c.T(-1.4, 7.4, -2.6), look: () => spot.clone().setY(spot.y + 1), fov: 32, shake: 0.2 });
       // it bursts out
       c.during(6, 7.2, (k) => (scarab.lift = -9 + 9 * ease.outBack(k)));
       c.at(6, () => {
@@ -1031,12 +1045,17 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       const pond = new MirrorPond(8.5, 512);
       pond.group.position.set(pondAt.x, maxY + 0.05, pondAt.z);
       c.place(pond.group);
+      c.onDispose(() => pond.dispose());
       c.add({ update: () => {} }, null);
       // the Silence exists only in the reflection, behind the Maestro
       const ghost = c.silence(7, new THREE.Vector3());
       ghost.pose = 'loom';
-      pond.ghosts.push(ghost.group);
-      ghost.group.visible = false;
+      // a wrapper only the mirror's render shows (whatever the Silence does with its own visibility)
+      const ghostWrap = new THREE.Group();
+      v.scene.add(ghostWrap);
+      ghostWrap.add(ghost.group);
+      ghostWrap.visible = false;
+      pond.ghosts.push(ghostWrap);
       c.add({ update: () => {
         const back = v.turtle.group.localToWorld(new THREE.Vector3(1.5, 0, 3.5));
         ghost.group.position.set(back.x, maxY, back.z);
@@ -1055,7 +1074,13 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       // in the ice: his face… and behind him, the mask
       c.cue(7.6, 'story:threat');
       const mirrorEye = () => pond.group.position.clone().add(tmp.set(0, 0.2, 0));
-      c.shot(7, 10.4, { pos: [() => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.55).add(tmp.set(0, 0.6, 0)), () => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.6).add(tmp.set(0, 0.5, 0))], look: () => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 1.04), fov: [34, 28] });
+      // where the Maestro's reflection is (mirrored below the ice)
+      const mirrored = () => {
+        const m = c.maestro.world(new THREE.Vector3()).add(tmp.set(0, 1.0, 0));
+        m.y = 2 * pond.group.position.y - m.y;
+        return m;
+      };
+      c.shot(7, 10.4, { pos: [() => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.55).add(tmp.set(0, 0.6, 0)), () => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.6).add(tmp.set(0, 0.5, 0))], look: () => mirrored(), fov: [34, 28] });
       c.at(8.6, () => {
         c.maestro.tremble = 1;
         c.mpose('sad');
@@ -1072,7 +1097,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       // back to the ice: only him now
       c.at(12.6, () => (pond.ghosts.length = 0));
       c.at(12.6, () => (c.maestro.holder.rotation.y = -Math.PI / 2));
-      c.shot(12.6, 15.2, { pos: [() => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.6).add(tmp.set(0, 0.5, 0))], look: () => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 1.04), fov: 30 });
+      c.shot(12.6, 15.2, { pos: [() => c.maestro.world(new THREE.Vector3()).lerp(mirrorEye(), 0.6).add(tmp.set(0, 0.5, 0))], look: () => mirrored(), fov: 30 });
       c.end(15.2);
     });
   },
@@ -1087,8 +1112,8 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.walk(0, 0.6);
       c.walk(4, 0, 1.4);
       c.sky(0, 0.01, { aurora: 1.6 });
-      const moth = c.creature('bossMoth', 9, new THREE.Vector3(), 0);
       const from = c.roadPoint(c.s0 + 40, 60, 40), to = c.roadPoint(c.s0 + 30, -70, 30);
+      const moth = c.creature('bossMoth', 9, from, Math.atan2(to.x - from.x, to.z - from.z));
       const dust = c.add(new Fall(['#9a96a8', '#d0ccd8'], 700, 40, 40, 40, 1.6), null);
       v.scene.add(dust.points);
       dust.alpha = 0;
@@ -1133,7 +1158,9 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
         moth.group.visible = true;
       });
       c.during(1.4, 4, (k) => (moth.aurora = ease.inOut(k)));
-      c.during(10, 20, (k) => hover.add(tmp.set(0, k * 0.4, -k * 0.6)));
+      // she rises into the restored aurora and drifts away
+      const hover0 = hover.clone();
+      c.during(10, 20, (k) => hover.copy(hover0).add(tmp.set(0, ease.in(k) * 30, 0)).add(new THREE.Vector3(0, 0, -ease.in(k) * 40).applyQuaternion(c.view.turtle.group.quaternion)));
       c.sky(9, 4, { aurora: 1.4 });
     },
   }),
@@ -1204,6 +1231,8 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.place(bridge.group);
       bridge.group.updateMatrixWorld(true);
       const inv = new THREE.Matrix4().copy(bridge.group.matrixWorld).invert();
+      // INTEGRATION: no JourneyView hook raises the ground, so this scene's own view gets a heightAt that
+      // includes the set piece (the colossus' body and feet then walk on it).
       const orig = v.land.heightAt;
       v.land.heightAt = (x: number, z: number) => {
         const l = tmp.set(x, 0, z).applyMatrix4(inv);
@@ -1261,7 +1290,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.placeName(0.8, 4.4, placeOf('f3', lang));
       c.shot(5, 9.6, { pos: [c.R(() => anvilAt, -8, 3, -8), c.R(() => anvilAt, -7, 3.4, -6)], look: () => anvilAt.clone().setY(anvilAt.y + 5), fov: 40 });
       c.cue(9.6, 'story:threat');
-      c.shot(9.6, 14, { pos: [c.T(0.5, 6.8, 1), c.T(0.4, 7.0, 0)], look: () => golemAt.clone().setY(golemAt.y + 6), fov: [22, 16] });
+      c.shot(9.6, 14, { pos: [c.T(1.0, 7.1, -1.9), c.T(0.9, 7.3, -2.3)], look: () => golemAt.clone().setY(golemAt.y + 6), fov: [22, 16] });
       c.end(14);
     });
   },
@@ -1357,7 +1386,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
         const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 40;
         const p = at.clone().add(tmp.set(Math.cos(a) * r, 0, Math.sin(a) * r));
         p.y = c.view.land.heightAt(p.x, p.z) + Math.random() * 6;
-        stream.add(p, c.t + Math.random() * 9, 1.6 + Math.random(), i % 2 ? '#ffd36b' : '#ff9a5a', 0.5, 6);
+        stream.add(p, c.wt + Math.random() * 9, 1.6 + Math.random(), i % 2 ? '#ffd36b' : '#ff9a5a', 0.5, 6);
       }
     });
     c.during(2, 11, (k) => (size = 0.6 + Math.pow(k, 2.2) * 24));
@@ -1453,7 +1482,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<void>> = {
       c.placeName(0.8, 4, placeOf('c3', lang));
       c.cue(4.4, 'story:threat');
       c.during(5, 9.4, (k) => (k0 = ease.inOut(k)));
-      c.shot(4.4, 10, { pos: [c.T(0.6, 7, 0.5), c.T(0.6, 7.1, 0.2)], look: c.R(() => top, 0, 1.6 * 2.5, 0), fov: [9, 6.5] });
+      c.shot(4.4, 10, { pos: [c.T(1.0, 7.2, -1.9), c.T(1.0, 7.3, -2.2)], look: c.R(() => top, 0, 1.6 * 2.5, 0), fov: [9, 6.5] });
       c.shot(10, 13, { pos: [c.R(c.maestro, -0.8, 0.9, -1.6), c.R(c.maestro, -0.7, 0.85, -1.4)], look: c.R(c.maestro, 0, 0.7, 0), fov: 30 });
       c.at(10.2, () => {
         c.mpose('sad');
@@ -1537,9 +1566,11 @@ function guardianScene(app: App, world: WorldId, id: string, o: { time?: Time; g
     c.shot(0, 3.4, { pos: [c.T(-9, 4, -6), c.T(-8, 4.6, -7)], look: () => spot.clone().setY(spot.y + 3), fov: 42 });
     c.placeName(0.6, 3.2, VOICE_NAMES[world][app.screens.lang]);
     // 2. its shard rises and flies home to the Heart
-    const tHome = shardHome(c, world, 3.4, () => spot.clone().setY(spot.y + 2), 2.2, 3.0);
+    const home = shardHome(c, world, 3.4, () => spot.clone().setY(spot.y + 2), 2.2, 3.0);
+    const tHome = home.end;
     c.shot(3.4, 5.6, { pos: [c.T(-5, 3, -9), c.T(-4.6, 3.6, -9.6)], look: () => spot.clone().setY(spot.y + 5), fov: 38 });
-    c.shot(5.6, tHome + 0.6, { pos: [c.T(-6, 9, -9), c.Sh(-2.4, 8.2, -2.6)], look: [() => spot.clone().setY(spot.y + 6).lerp(v.turtle.heartWorld(new THREE.Vector3()), 0.3), c.Sh(0, 7.4, 0)], fov: [42, 32], ease: ease.inOut });
+    // follow the shard over the colossus' head down into the Heart
+    c.shot(5.6, tHome + 0.6, { pos: [c.T(-7, 7.5, -11), c.Sh(-3.2, 8.6, -3.4)], look: () => home.at().clone(), fov: [44, 32], ease: ease.inOut, lookEase: ease.linear });
     // 3. the Voice rings
     const tVoice = tHome + 0.8;
     voiceSings(c, world, tVoice);

@@ -418,8 +418,8 @@ export class Landmark {
     for (const p of this.pipes) {
       const wave = Math.max(0, Math.sin(t * 2.2 - p.i * 0.45));
       const c = AURORA[(p.i + Math.floor(t * 0.5)) % AURORA.length];
-      p.mat.emissive.copy(c);
-      p.mat.emissiveIntensity = 0.25 + k * (0.5 + wave * 1.2) * sing;
+      p.mat.emissive.copy(ICE_DIM).lerp(c, k);
+      p.mat.emissiveIntensity = 0.12 + k * (0.6 + wave * 1.2) * sing;
     }
     this.flags.forEach((f, i) => (f.rotation.x = Math.sin(t * 2.6 + i) * 0.18));
     this.rings.forEach((r, i) => (r.rotation.z = t * (0.12 + i * 0.03) * (i % 2 ? 1 : -1)));
@@ -436,6 +436,7 @@ export class Landmark {
 
 const VOICE_COLOR: Record<LandmarkKind, string> = { bell: '#e9ffd2', harp: '#fff0c8', organ: '#d2f2ff', chimes: '#ffd9b8', spire: '#fff2c2' };
 const AURORA = ['#5fffb0', '#5fd8ff', '#9a7aff', '#ff8ad8', '#7affd2'].map((c) => new THREE.Color(c));
+const ICE_DIM = new THREE.Color('#5f8fb8');
 
 // ───────────────────────────── note pickups ─────────────────────────────
 

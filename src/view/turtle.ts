@@ -395,7 +395,7 @@ export class Turtle {
 
   private updateHeart(dt: number, t: number, bp: number) {
     const pulse = Math.exp(-bp * 5);
-    this.heartMat.emissiveIntensity = 0.12 + 1.6 * this.heartGlow * (1 + pulse * 0.3);
+    this.heartMat.emissiveIntensity = 0.12 + 1.25 * this.heartGlow * (1 + pulse * 0.3);
     this.heart.rotation.y = t * 0.7;
     this.heart.scale.setScalar((1 + pulse * 0.08 * this.heartGlow) * (0.7 + 0.3 * Math.min(1, this.heartGlow * 2)));
     const light = new THREE.Color('#9fe0ff').multiplyScalar(0.6 + 0.4 * this.heartGlow);
@@ -409,8 +409,8 @@ export class Turtle {
       f.mesh.visible = show > 0.01;
       f.mat.opacity = Math.min(1, 0.42 + k * 0.58) * show;
       f.mat.color.setRGB(0.23 + (f.color.r * 0.9 - 0.23) * k, 0.25 + (f.color.g * 0.9 - 0.25) * k, 0.35 + (f.color.b * 0.9 - 0.35) * k);
-      f.mat.emissive.copy(f.color).lerp(new THREE.Color(1, 1, 1), f.flash * 0.6);
-      f.mat.emissiveIntensity = k * (1.3 + pulse * 0.5) + f.flash * 4;
+      f.mat.emissive.copy(f.color).lerp(new THREE.Color(1, 1, 1), f.flash * 0.4);
+      f.mat.emissiveIntensity = k * (0.9 + pulse * 0.45) + f.flash * 1.6;
       const s = 1 + f.flash * 0.45 * Math.sin(f.flash * Math.PI) + k * pulse * 0.05;
       f.mesh.scale.setScalar(s);
       light.add(f.color.clone().multiplyScalar(k * 0.35));
@@ -418,7 +418,7 @@ export class Turtle {
     });
     this.heartGroup.rotation.y = t * 0.25;
     this.heartLight.color.copy(light).multiplyScalar(1 / Math.max(1, 0.6 + 0.4 * this.heartGlow + litSum * 0.35));
-    this.heartLight.intensity = 4 * this.heartGlow + litSum * 1.2;
+    this.heartLight.intensity = 3.2 * this.heartGlow + litSum * 0.7;
     this.heartRings.forEach((r, i) => {
       r.rotation.x = t * (0.5 + i * 0.3) + i;
       r.rotation.y = t * (0.35 + i * 0.2);

@@ -34,7 +34,7 @@ import { LOOKS, FINALE_LOOK, type WorldLook } from '../view/styles';
 import { Landmark } from '../view/journeyProps';
 import { SHARD_COLORS } from '../view/turtle';
 import {
-  AuroraMoth, Debris, Fall, Fireflies, GentleGolem, GoldenScarab, Gust, InkCoil, LightThread, MusicMotes, NoteFirework, NoteStream,
+  AuroraMoth, Debris, Fall, Fireflies, GentleGolem, GoldenScarab, Gust, InkCoil, InkStorm, LightThread, MusicMotes, NoteFirework, NoteStream,
   RestGlyph, ShardView, StaffCrown, Villager, glowSprite,
 } from '../view/storyProps';
 
@@ -221,6 +221,8 @@ interface GradeState {
   tint: THREE.Color;
 }
 
+// INTEGRATION: the cinematic overlay styles (chapter card, place name, cast credits, memory frame,
+// rolling credits) are injected here; the integrator may move them into ui.css next to `.cine-overlay`.
 const STYLE_ID = 'cine-story-css';
 const CINE_CSS = `
 .cine-overlay .cine-chapter { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; opacity: 0; transition: opacity 1.6s ease; pointer-events: none; text-align: center; }
@@ -336,6 +338,8 @@ export class Cine {
     };
     this.bloomBase = eng.bloom.strength;
     // the colossus' head can be steered by the script (the view resets its look target every frame)
+    // INTEGRATION: JourneyView overwrites turtle.lookAt each frame (nearest enemy); a `lookOverride`
+    // on JourneyView/Turtle would replace this property trick.
     const turtle = this.view.turtle;
     let viewLook: THREE.Vector3 | null = null;
     Object.defineProperty(turtle, 'lookAt', {
@@ -1133,7 +1137,19 @@ export class Cine {
     g.uPulse.value = 0;
     this.app.engine.bloom.strength = this.bloomBase;
     this.view.dispose();
+    // free the buffers of everything built for the scene (shared caches simply upload again if reused)
+    this.view.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry && !(o as THREE.Sprite).isSprite) m.geometry.dispose();
+    });
+    // nothing of the scene is drawn again; the next screen sets its own
+    this.app.engine.setScene(new THREE.Scene());
     worldColor.uWorldSat.value = 1;
+  }
+
+  /** something to release when the scene ends (render targets…) */
+  onDispose(fn: () => void) {
+    this.cleanups.push(fn);
   }
 }
 
@@ -1144,16 +1160,18 @@ function evalPath(pts: Anchor[], k: number): THREE.Vector3 {
   return curve.getPoint(k);
 }
 
-/** run a whole scene: build the set, let the script stage it, play it */
-export async function runScene(app: App, set: SetSpec, script: (c: Cine) => void | Promise<void>, fadeIn = 1400): Promise<void> {
+/** run a whole scene: build the set, let the script stage it, play it (resolves true if it was skipped) */
+export async function runScene(app: App, set: SetSpec, script: (c: Cine) => void | Promise<void>, fadeIn = 1400): Promise<boolean> {
   const c = new Cine(app, set);
   await script(c);
   await c.run(fadeIn);
+  return c.skipped;
 }
 
-export async function playCutscene(app: App, name: 'intro' | 'ending' | 'epilogue'): Promise<void> {
+export async function playCutscene(app: App, name: 'intro' | 'ending' | 'epilogue' | 'tour'): Promise<void> {
   if (name === 'intro') return intro(app);
   if (name === 'epilogue') return epilogue(app);
+  if (name === 'tour') return nextTour(app);
   return ending(app);
 }
 
@@ -1194,7 +1212,7 @@ export function bandMontage(c: Cine, t0: number, list: [TowerKind, number][], ho
     const s = SEATS[k];
     const len = Math.hypot(s.x, s.z) || 1;
     const base = Math.atan2(s.x / len, s.z / len) + (i % 2 ? 0.5 : -0.5);
-    const d = k === 'bass' ? 4.3 : 3.4;
+    const d = k === 'bass' ? 4.8 : 3.9;
     const y = seatPos(s.x, s.z).y;
     const p0 = c.Sh(s.x + Math.sin(base) * d, y + 1.45, s.z + Math.cos(base) * d);
     const p1 = c.Sh(s.x + Math.sin(base + (i % 2 ? -0.12 : 0.12)) * (d - 0.45), y + 1.25, s.z + Math.cos(base + (i % 2 ? -0.12 : 0.12)) * (d - 0.45));
@@ -1267,36 +1285,40 @@ function openingScript(app: App, c: Cine) {
 
   // ── 1. dawn: high over Harmonia, the threads of light converge on the colossus
   c.cue(0.2, 'intro:dawn');
-  c.shot(0, 7.5, { pos: [c.T(-9, 16, 30), c.T(-6, 10.5, 19)], look: [c.T(0, 16, -80), c.T(0, 9, -60)], fov: [50, 46], ease: ease.sine });
+  c.shot(0, 6.6, { pos: [c.T(-8, 14, 28), c.T(-5.5, 10, 18)], look: [c.T(0, 9, -60), c.T(0, 6, -50)], fov: [50, 46], ease: ease.sine });
   // ── 2. the Heart: complete, five facets singing
-  c.shot(7.5, 11.5, { pos: [c.Sh(2.9, 7.1, -2.5), c.Sh(-2.6, 7.6, -2.9)], look: c.Sh(0, 7.4, 0), fov: [36, 33] });
+  c.bloom(6.6, 0.2, 0.2);
+  c.bloom(10.2, 0.2, 0.38);
+  c.shot(6.6, 10.2, { pos: [c.Sh(3.4, 7.0, -3.0), c.Sh(-3.1, 7.5, -3.4)], look: c.Sh(0, 7.4, 0), fov: [36, 33] });
   // ── 3. the Maestro raises his baton: the band gets ready
-  c.shot(11.5, 15, { pos: [c.Sh(0.5, 6.35, -4.9), c.Sh(-0.2, 6.5, -4.4)], look: c.Sh(0, 6.35, -1.25), fov: 34 });
-  c.at(12.2, () => c.mpose('raise'));
-  c.at(13.4, () => c.pose('all', 'idle'));
-  c.at(14.6, () => {
+  c.shot(10.2, 13.4, { pos: [c.Sh(0.5, 6.35, -4.9), c.Sh(-0.2, 6.5, -4.4)], look: c.Sh(0, 6.35, -1.25), fov: 34 });
+  c.at(10.8, () => c.mpose('raise'));
+  c.at(11.9, () => c.pose('all', 'idle'));
+  c.at(13.0, () => {
     audio.cinematic('intro:festival');
     c.mpose('conduct');
     c.play('all');
     villagers.forEach((vg) => (vg.dance = 1));
     turtle.cheer();
   });
-  c.during(14.6, 18, (k) => (petals.alpha = k * 0.9));
+  c.during(13.0, 16.4, (k) => (petals.alpha = k * 0.9));
   // ── 4. the festival: around the shell, the whole band playing
-  c.shot(15, 21, { pos: [c.T(10.5, 9.5, -9), c.T(13, 8.4, 3), c.T(5, 9.6, 12)], look: c.T(0, 5.6, 0), fov: 42 });
+  c.shot(13.4, 18.6, { pos: [c.T(10.5, 9.5, -9), c.T(13, 8.4, 3), c.T(5, 9.6, 12)], look: c.T(0, 5.6, 0), fov: 42 });
   // ── 5. the band, one by one, cut on the beat
-  const tJoy = bandMontage(c, 21, [['drum', 1], ['harp', 2], ['bell', 1], ['shaker', 1], ['crystal', 1], ['horn', 2], ['choir', 2], ['bass', 2]]);
+  const tJoy = bandMontage(c, 18.6, [['drum', 1], ['harp', 2], ['bell', 1], ['shaker', 1], ['crystal', 1], ['horn', 2], ['choir', 2], ['bass', 2]]);
   // ── 6. joy: low beside the road as the colossus strides through the flowers
-  c.shot(tJoy, tJoy + 5.2, { pos: [c.T(-15, 1.8, -12), c.T(-14, 2.4, 1)], look: [c.T(0, 5.2, -4), c.T(0, 5.6, 0)], fov: 40 });
+  c.shot(tJoy, tJoy + 4.4, { pos: [c.T(-15, 1.8, -12), c.T(-14, 2.4, 1)], look: [c.T(0, 5.2, -4), c.T(0, 5.6, 0)], fov: 40 });
 
   // ── the Silence
-  const T_SHADOW = tJoy + 5.2;
+  const T_SHADOW = tJoy + 4.4;
   const giantAt = c.roadPoint(S0 + 205, 14, -2);
   const giant = c.silence(32, giantAt);
   giant.emerge = 0;
   giant.pose = 'loom';
   giant.group.visible = false;
   const giantHead = () => giant.group.localToWorld(new THREE.Vector3(0, 2.9, 0.25));
+  // INTEGRATION: if SilenceView exposes handWorld(out) (its reaching hand), the theft aims at it;
+  // otherwise this estimates where a hand reaching over the colossus would be.
   const handOf = (): THREE.Vector3 => {
     const hw = (giant as unknown as { handWorld?: (o: THREE.Vector3) => THREE.Vector3 }).handWorld;
     if (typeof hw === 'function') return hw.call(giant, new THREE.Vector3());
@@ -1304,6 +1326,13 @@ function openingScript(app: App, c: Cine) {
     return h.clone().lerp(giant.group.position.clone().setY(h.y + 40), 0.28).setY(h.y + 22);
   };
   c.add({ update: () => giant.lookAt(turtle.group.position) }, null);
+  // its storm front: a wall of ink-smoke boiling up over the horizon
+  const storm = c.add(new InkStorm(175, 170, Math.PI * 0.8), null);
+  v.scene.add(storm.mesh);
+  c.add({ update: () => {
+    storm.mesh.position.copy(turtle.group.position).setY(turtle.group.position.y - 6);
+    storm.mesh.rotation.y = Math.atan2(giantAt.x - turtle.group.position.x, giantAt.z - turtle.group.position.z);
+  } }, null);
   // ── 7. the shadow: the sky darkens, the music falters, one by one the musicians stop and look up
   c.cue(T_SHADOW, 'intro:approach');
   c.sky(T_SHADOW, 9, { top: '#24203e', horizon: '#6d6488', glow: '#8a6a9a', cloud: '#8a86a6', shade: '#3a3656', cover: 0.62 });
@@ -1324,10 +1353,19 @@ function openingScript(app: App, c: Cine) {
   c.walk(T_SHADOW + 3.0, 0, 2.2);
   // everyone turns to the horizon
   for (const k of FULL_BAND) c.face(c.band.get(k)!, T_SHADOW + 3.2 + Math.random() * 0.4, 0.8, () => giantAt);
-  c.during(T_SHADOW + 1, T_SHADOW + 8, (k) => {
-    threads.forEach((th, i) => (th.mat.uniforms.uOpacity.value = 1 - k * 0.55 + Math.sin(c.wt * (9 + i)) * 0.25 * k));
-    voices.forEach((lm) => lm.setAwake(0.45 - k * 0.3));
+  c.during(T_SHADOW + 1, T_SHADOW + 13, (k) => {
+    // the threads of light flicker and weaken as it comes (they snap when its fist closes)
+    threads.forEach((th, i) => (th.mat.uniforms.uOpacity.value = Math.max(0, (1 - ease.out(k) * 0.7) * (0.85 + Math.sin(c.wt * (9 + i)) * 0.3 * k))));
+    voices.forEach((lm) => lm.setAwake(0.45 * (1 - k)));
   });
+  // a cold key light picks out its mask against the storm
+  const key = new THREE.SpotLight('#d8d0ff', 0, 0, 0.16, 0.6, 0);
+  v.scene.add(key, key.target);
+  c.add({ update: () => {
+    key.position.copy(turtle.group.position).add(tmpV.set(0, 26, 0));
+    key.target.position.copy(giantHead());
+  } }, null);
+  c.during(T_SHADOW + 7, T_SHADOW + 11, (k) => (key.intensity = 2.6 * k));
   // ── 8. over the Maestro's shoulder: something rises on the horizon
   const T_RISE = T_SHADOW + 5;
   c.at(T_RISE, () => {
@@ -1339,13 +1377,26 @@ function openingScript(app: App, c: Cine) {
     if (Math.random() < 0.35) fx.burst(giant.group.position.clone().add(tmpV.set((Math.random() - 0.5) * 40, 2, (Math.random() - 0.5) * 40)), '#2a2238', 6, 6, 9, 3.2, false, -1.2);
   });
   c.during(T_RISE, T_RISE + 9, () => c.shake(0.12));
-  c.shot(T_RISE, T_RISE + 3.6, { pos: c.Sh(0.9, 6.9, 0.6), look: [c.add3(() => giantAt, 0, 20, 0), c.add3(() => giantAt, 0, 46, 0)], fov: [36, 32] });
+  c.during(T_SHADOW + 0.5, T_RISE + 7, (k) => (storm.mat.uniforms.uRise.value = ease.inOut(k)));
+  // the grey creeps in from the horizon; only a ring of colour is left around the colossus
+  c.life(T_RISE + 1, 9, 0.12);
+  c.colour(T_RISE + 1, 9, 0.6);
+  c.shot(T_RISE, T_RISE + 3.6, { pos: c.Sh(0.95, 6.7, -0.45), look: [c.add3(() => giantAt, 0, 20, 0), c.add3(() => giantAt, 0, 46, 0)], fov: [36, 32] });
   c.at(T_RISE + 0.4, () => c.mpose('point'));
   // ── 9. the rise: low on the ground, the giant towers over the hills behind the colossus' head
-  c.shot(T_RISE + 3.6, T_RISE + 9.6, { pos: [c.T(-3.4, 1.5, -1.6), c.T(-3.1, 1.3, -2.4)], look: [c.add3(() => giant.group.position, 0, 30, 0), c.add3(() => giant.group.position, 0, 56, 0)], fov: [52, 46] });
+  c.shot(T_RISE + 3.6, T_RISE + 9.6, { pos: [c.T(-6.4, 1.5, -4.2), c.T(-6.0, 1.3, -5.0)], look: [c.add3(() => giant.group.position, 0, 30, 0), c.add3(() => giant.group.position, 0, 56, 0)], fov: [52, 46] });
   // it glides closer, looming
   const giantNear = c.roadPoint(S0 + 120, 8, -2);
   c.during(T_RISE + 6, T_RISE + 16, (k) => giant.group.position.lerpVectors(giantAt, giantNear, ease.inOut(k)));
+  // every glide forward is a tremor and a dark pulse
+  for (let i = 0; i < 6; i++) {
+    const t = T_RISE + 6.4 + i * 1.7;
+    c.at(t, () => {
+      c.shake(0.35);
+      fx.dust(giant.group.position.clone().setY(v.land.heightAt(giant.group.position.x, giant.group.position.z) + 1), '#2a2238', 40);
+    });
+    c.during(t, t + 0.6, (k) => (app.engine.grade.uniforms.uPulse.value = -2.2 * Math.sin(Math.PI * k)));
+  }
   // ── 10. the mask: a slow push with a long lens
   const T_MASK = T_RISE + 9.6;
   c.shot(T_MASK, T_MASK + 4.4, { pos: [c.T(5, 7.5, -12), c.T(4.6, 7.8, -12.6)], look: () => giantHead(), fov: [17, 10.5] });
@@ -1355,7 +1406,7 @@ function openingScript(app: App, c: Cine) {
   });
   // ── 11. the Maestro's face: a beat of terror
   const T_FACE = T_MASK + 4.4;
-  c.shot(T_FACE, T_FACE + 1.7, { pos: [c.Sh(0.25, 6.75, -3.3), c.Sh(0.2, 6.7, -3.0)], look: c.Sh(0, 6.55, -1.25), fov: 28, shake: 0.4 });
+  c.shot(T_FACE, T_FACE + 1.7, { pos: [c.Sh(0.35, 6.6, -3.9), c.Sh(0.3, 6.55, -3.6)], look: c.Sh(0, 6.3, -1.4), fov: 30, shake: 0.4 });
   c.at(T_FACE, () => {
     c.mpose('sad');
     c.maestro.tremble = 1;
@@ -1366,8 +1417,11 @@ function openingScript(app: App, c: Cine) {
     giant.pose = 'reach';
     giant.reach(heart());
   });
-  c.shot(T_HAND, T_HAND + 4.2, { pos: [c.Sh(-2.6, 5.9, 3.2), c.Sh(-2.9, 5.7, 3.6)], look: [() => heart().lerp(handOf(), 0.55), () => handOf()], fov: [52, 56], roll: [0.05, 0.12] });
+  c.shot(T_HAND, T_HAND + 4.2, { pos: [c.Sh(-3.4, 6.4, 3.4), c.Sh(-3.7, 6.2, 3.8)], look: [() => heart().lerp(handOf(), 0.55), () => handOf()], fov: [52, 56], roll: [0.05, 0.12] });
   c.during(T_HAND, T_HAND + 4.2, () => c.shake(0.08));
+  // its shadow falls over the colossus: the light goes out
+  c.light(T_HAND + 0.4, 1.6, 0.15, 0.3);
+  c.grade(T_HAND + 0.4, 1.6, { vignette: 0.75 });
   for (const k of FULL_BAND) c.at(T_HAND + 0.3, () => (c.musicianView(k).pose = 'scared'));
   for (const k of FULL_BAND) c.shiver(c.band.get(k)!, T_HAND + 0.3, T_HAND + 11, 0.7);
   // ── 13. the theft: the fist closes; the music is torn out of the world in streams of notes
@@ -1393,22 +1447,30 @@ function openingScript(app: App, c: Cine) {
         p = new THREE.Vector3(tp.x + Math.cos(ang) * r, 0, tp.z + Math.sin(ang) * r);
         p.y = v.land.heightAt(p.x, p.z) + rng(0.3, 2);
       }
-      stream.add(p, c.t + rng(0, 2.2) + (fromShell ? 0 : 0.4), rng(1.6, 2.6), i % 3 ? '#ffd36b' : SHARD_COLORS[i % 5], 0.4, rng(2, 9));
+      stream.add(p, c.wt + rng(0, 2.2) + (fromShell ? 0 : 0.4), rng(1.6, 2.6), i % 3 ? '#ffd36b' : SHARD_COLORS[i % 5], 0.4, rng(2, 9));
     }
   });
-  c.shot(T_GRASP, T_GRASP + 4.4, { pos: [c.T(-24, 9, 9), c.T(-26, 12, 13)], look: [() => turtle.group.position.clone().lerp(handOf(), 0.4), () => turtle.group.position.clone().lerp(handOf(), 0.65)], fov: [44, 48] });
+  c.shot(T_GRASP, T_GRASP + 4.4, { pos: [c.T(-11, 5, 17), c.T(-14, 7, 21)], look: [() => turtle.group.position.clone().setY(turtle.group.position.y + 4).lerp(handOf(), 0.42), () => turtle.group.position.clone().setY(turtle.group.position.y + 4).lerp(handOf(), 0.6)], fov: [48, 52] });
   c.life(T_GRASP + 0.3, 3.4, 0.05);
   c.colour(T_GRASP + 0.3, 3.4, 0);
-  c.grade(T_GRASP, 0.6, { aberration: 2.2, contrast: 1.12, vignette: 0.55 });
+  c.grade(T_GRASP, 0.6, { aberration: 1.3, contrast: 1.12, vignette: 0.55 });
   c.grade(T_GRASP + 2.6, 1.6, { aberration: 0.4 });
-  c.during(T_GRASP, T_GRASP + 3, (k) => {
-    threads.forEach((th) => (th.mat.uniforms.uOpacity.value = 0.45 * (1 - k)));
-    voices.forEach((lm) => lm.setAwake(0.15 * (1 - k)));
-    turtle.lights = 1 - k;
+  c.during(T_GRASP, T_GRASP + 3, (k) => (turtle.lights = 1 - k));
+  // the threads snap
+  c.at(T_GRASP + 0.25, () => {
+    threads.forEach((th) => (th.mat.uniforms.uOpacity.value = 0));
+    fx.burst(heart(), '#ffffff', 40, 6, 0.2, 0.8);
+    fx.flash(heart(), 2.5, '#ffffff', 0.3);
   });
   // ── 14. the Heart cracks… and shatters
   const T_CRACK = T_GRASP + 4.4;
-  c.shot(T_CRACK, T_CRACK + 2.2, { pos: [c.Sh(1.8, 7.7, -2.1), c.Sh(1.4, 7.6, -1.7)], look: c.Sh(0, 7.4, 0), fov: [30, 26], shake: 0.15 });
+  c.shot(T_CRACK, T_CRACK + 2.2, { pos: [c.Sh(2.7, 7.6, -3.6), c.Sh(2.2, 7.6, -3.0)], look: c.Sh(0, 7.25, 0), fov: [32, 28], shake: 0.15 });
+  c.bloom(T_CRACK, 0.3, 0.24);
+  c.bloom(T_CRACK + 3.2, 1.5, 0.38);
+  // the Heart trembles before it breaks
+  const hg = turtle.heartGroup;
+  c.during(T_CRACK, T_CRACK + 2.0, (k) => hg.position.set(Math.sin(c.t * 83) * 0.06 * k, hg.position.y, Math.cos(c.t * 71) * 0.06 * k));
+  c.at(T_CRACK + 2.0, () => hg.position.set(0, hg.position.y, 0));
   c.at(T_CRACK + 0.5, () => turtle.flashFacet(1));
   c.at(T_CRACK + 0.9, () => turtle.flashFacet(3));
   c.at(T_CRACK + 1.3, () => {
@@ -1466,13 +1528,22 @@ function openingScript(app: App, c: Cine) {
     coil.grow = ease.outCubic(k);
     blot.lift = -9 + 9 * ease.outBack(Math.min(1, k * 1.3));
   });
+  const bellView = (d: number, h: number) => () => {
+    const b = voices[0].group.position;
+    const dir = turtle.group.position.clone().sub(b).setY(0).normalize();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    return b.clone().addScaledVector(dir, d).addScaledVector(side, d * 0.25).setY(b.y + h);
+  };
   c.shot(T_SHATTER + 5.4, T_SHATTER + 8.6, {
-    pos: [c.add3(() => voices[0].group.position, -26, 6, 30), c.add3(() => voices[0].group.position, -22, 4, 26)],
-    look: c.add3(() => voices[0].group.position, 0, 16, 0),
-    fov: [40, 36],
+    pos: [bellView(56, 9), bellView(50, 8)],
+    look: c.add3(() => voices[0].group.position, 0, 15, 0),
+    fov: [46, 44],
   });
+  // the world is grey now, not dark: the light comes back without colour
+  c.light(T_SHATTER + 0.3, 1.6, 1.5, 0.8, '#e6e4ee');
+  c.grade(T_SHATTER + 0.3, 1.6, { vignette: 0.4 });
   // ── 16. the grey gust sweeps the musicians off the shell like leaves
-  const T_GUST = T_SHATTER + 8.6;
+  const T_GUST = T_SHATTER + 8.4;
   const gustDir = new THREE.Vector3();
   const gust = c.add(new Gust(() => turtle.group.position.clone().setY(turtle.group.position.y + 4), gustDir, 18, 180), null);
   v.scene.add(gust.mesh);
@@ -1480,7 +1551,8 @@ function openingScript(app: App, c: Cine) {
     gustDir.copy(turtle.group.position).sub(giant.group.position).setY(0).normalize();
   });
   c.during(T_GUST, T_GUST + 5.5, (k) => (gust.strength = Math.sin(Math.PI * Math.min(1, k * 1.3)) * 1.1));
-  c.shot(T_GUST, T_GUST + 5.2, { pos: [c.Sh(-5.2, 7.2, 4.6), c.Sh(-4.1, 6.6, 3.4)], look: [c.Sh(0.6, 5.6, -1.2), c.Sh(0.4, 5.9, 0.4)], fov: 46, shake: 0.25 });
+  // across the shell, looking down-wind: the musicians are torn off and tumble away into the grey
+  c.shot(T_GUST, T_GUST + 4.8, { pos: [c.Sh(-6.0, 7.6, -4.2), c.Sh(-6.6, 8.2, -3.0)], look: [c.Sh(1.0, 5.8, 2.0), c.Sh(2.5, 6.8, 6.0)], fov: [48, 54], shake: 0.25 });
   const blown: TowerKind[] = ['choir', 'shaker', 'bell', 'crystal', 'horn', 'drum', 'bass'];
   blown.forEach((k, i) => {
     const a = c.band.get(k)!;
@@ -1496,8 +1568,8 @@ function openingScript(app: App, c: Cine) {
       const side = new THREE.Vector3(-gustDir.z, 0, gustDir.x).multiplyScalar((i % 2 ? 1 : -1) * (12 + i * 5));
       return (fixed = p.clone().addScaledVector(gustDir, 70 + i * 9).add(side).setY(p.y + 14 + (i % 3) * 6));
     };
-    c.arc(a, t0, 2.4, dest, 9, { spins: 2 + (i % 2), tumble: 1.5 });
-    c.during(t0 + 1.4, t0 + 2.4, (kk) => (a.scale = 1 - kk));
+    c.arc(a, t0, 2.6, dest, 9, { spins: 2 + (i % 2), tumble: 1.5, ease: ease.inCubic });
+    c.during(t0 + 1.8, t0 + 2.6, (kk) => (a.scale = 1 - kk));
   });
   villagers.forEach((vg, i) => c.during(T_GUST + 0.3 + i * 0.15, T_GUST + 0.9 + i * 0.15, (k) => (vg.hide = k)));
   // Lira clings to the pedestal and ducks behind it; the Maestro is bowled over
@@ -1510,42 +1582,49 @@ function openingScript(app: App, c: Cine) {
     c.fall(c.maestro, T_GUST + 1.1, 6.5);
   });
   // ── grey
-  const T_GREY = T_GUST + 5.2;
+  const T_GREY = T_GUST + 4.8;
   c.cue(T_GREY, 'intro:grey');
-  const ash = c.add(new Fall(['#bdb8cc', '#8f8aa3'], 500, 34, 26, 26, 1.0), null);
+  const ash = c.add(new Fall(['#bdb8cc', '#8f8aa3'], 700, 34, 26, 11, 0.9), null);
   v.scene.add(ash.points);
   c.add({ update: () => ash.points.position.copy(turtle.group.position) }, null);
   c.during(T_GREY, T_GREY + 3, (k) => (ash.alpha = k * 0.7));
-  c.during(T_GREY + 1, T_GREY + 8, (k) => (giant.dissolve = ease.inOut(k)));
+  c.during(T_GREY, T_GREY + 4, (k) => (key.intensity = 2.6 * (1 - k)));
+  c.during(T_GREY + 1, T_GREY + 8, (k) => {
+    giant.dissolve = ease.inOut(k);
+    storm.mat.uniforms.uOpacity.value = 1 - ease.inOut(k);
+  });
   c.during(T_GREY + 2, T_GREY + 6.5, (k) => {
     turtle.sleep = ease.inOut(k);
   });
   c.at(T_GREY + 2, () => (c.turtleLook = null));
   c.grade(T_GREY, 3, { saturation: 0.55, contrast: 1.02, vignette: 0.42, aberration: 0 });
-  c.sky(T_GREY, 6, { top: '#5a5870', horizon: '#a9a6b8', glow: '#a9a6b8', cover: 0.5 });
-  c.fog(T_GREY, 6, '#a6a3b4', 0.005);
+  c.sky(T_SHATTER + 2, 10, { top: '#5a5870', horizon: '#a9a6b8', glow: '#a9a6b8', cover: 0.5 });
+  c.fog(T_SHATTER + 2, 10, '#a6a3b4', 0.005);
   c.light(T_GREY, 6, 1.6, 0.8, '#e6e4ee');
   c.exposure(T_GREY, 4, 0.95);
-  c.shot(T_GREY, T_GREY + 8, { pos: [c.T(-27, 16, 19), c.T(-25, 14.5, 17)], look: [c.T(0, 4, -22), c.T(0, 3.6, -18)], fov: 44 });
+  c.shot(T_GREY, T_GREY + 6.6, { pos: [c.T(-27, 16, 19), c.T(-25, 14.5, 17)], look: [c.T(0, 4, -22), c.T(0, 3.6, -18)], fov: 44 });
   // ── the Maestro, alone, walks around the empty shell
-  const T_ALONE = T_GREY + 8;
+  const T_ALONE = T_GREY + 6.6;
   c.at(T_ALONE - 0.5, () => c.mpose('sad'));
   const pathAround = [seatPos(0, -1.25), seatPos(-1.1, -0.65), seatPos(-1.3, 0.35), seatPos(-0.8, 1.1)];
-  pathAround.slice(1).forEach((p, i) => c.move(c.maestro, T_ALONE + i * 1.7, 1.7, () => turtle.shell.localToWorld(p.clone()), { local: true, hops: 3, hopH: 0.06, ease: ease.linear, face: true }));
-  c.shot(T_ALONE, T_ALONE + 5.4, { pos: [c.Sh(-3.6, 6.4, -4.4), c.Sh(-4.4, 6.5, -0.6), c.Sh(-3.8, 6.6, 2.6)], look: c.R(c.maestro, 0, 0.6, 0), fov: 34 });
+  pathAround.slice(1).forEach((p, i) => c.move(c.maestro, T_ALONE + i * 1.55, 1.55, () => turtle.shell.localToWorld(p.clone()), { local: true, hops: 3, hopH: 0.06, ease: ease.linear, face: true }));
+  c.shot(T_ALONE, T_ALONE + 4.8, { pos: [c.Sh(-2.8, 6.2, -3.6), c.Sh(-3.8, 6.3, -0.6), c.Sh(-3.4, 6.4, 2.4)], look: c.R(c.maestro, 0, 0.6, 0), fov: 36 });
+  // Lira stays ducked behind the pedestal, out of sight, until she peeks out
+  c.during(T_GUST + 2.2, T_GUST + 2.8, (k) => (lira.hop = -0.75 * k));
   // ── hope: behind the empty pedestal, Lira, hiding
-  const T_LIRA = T_ALONE + 5.4;
+  const T_LIRA = T_ALONE + 4.8;
   c.cue(T_LIRA + 0.8, 'intro:hope');
   c.at(T_LIRA, () => {
     c.maestro.holder.rotation.y = Math.atan2(0.35 - -0.8, 1.05 - 1.1);
     (lira.view as MusicianView).pose = 'scared';
   });
   c.shiver(lira, T_LIRA, T_LIRA + 3.4, 0.8);
-  c.shot(T_LIRA, T_LIRA + 3.8, { pos: [c.Sh(1.5, 6.3, 3.1), c.Sh(1.3, 6.2, 2.8)], look: c.mix(c.R(lira, 0, 0.7, 0), c.R(c.maestro, 0, 0.8, 0), 0.4), fov: 32 });
+  c.during(T_LIRA + 0.5, T_LIRA + 1.3, (k) => (lira.hop = -0.75 * (1 - ease.outBack(k))));
+  c.shot(T_LIRA, T_LIRA + 3.4, { pos: [c.Sh(2.7, 6.6, 4.2), c.Sh(2.4, 6.5, 3.8)], look: c.mix(c.R(lira, 0, 0.7, 0), c.R(c.maestro, 0, 0.8, 0), 0.45), fov: 34 });
   c.hop(lira, T_LIRA + 1.4, 0.3, 0.12);
   c.face(lira, T_LIRA + 1.2, 0.6, () => c.maestro.world(new THREE.Vector3()));
   // the last note, still alight on the tip of the baton
-  const T_NOTE = T_LIRA + 3.8;
+  const T_NOTE = T_LIRA + 3.4;
   c.at(T_NOTE, () => {
     c.mpose('raise');
     c.maestroView.glow = 1.4;
@@ -1558,9 +1637,10 @@ function openingScript(app: App, c: Cine) {
     (lastNote.material as THREE.SpriteMaterial).opacity = Math.min(1, k * 6) * (0.75 + Math.sin(c.wt * 6) * 0.25);
     lastNote.scale.setScalar(0.9 + k * 0.8);
   });
-  c.shot(T_NOTE, T_NOTE + 3.6, { pos: [c.R(c.maestro, -1.4, 1.5, -1.9), c.R(c.maestro, -1.1, 1.8, -1.5)], look: () => c.maestroView.tipWorld(new THREE.Vector3()).add(tmpV.set(0, 0.35, 0)), fov: [28, 24] });
+  // over Lira's shoulder: the Maestro lifts the baton; the last note shines on its tip
+  c.shot(T_NOTE, T_NOTE + 3.3, { pos: [c.Sh(2.6, 6.5, 1.9), c.Sh(2.3, 6.6, 1.75)], look: () => c.maestroView.tipWorld(new THREE.Vector3()).add(tmpV.set(0, 0.1, 0)), fov: [32, 27] });
   // Lira plucks a string; the note answers; a circle of colour is born
-  const T_PLUCK = T_NOTE + 3.6;
+  const T_PLUCK = T_NOTE + 3.3;
   c.at(T_PLUCK + 0.6, () => {
     (lira.view as MusicianView).pose = 'play';
     lira.tremble = 0;
@@ -1579,14 +1659,14 @@ function openingScript(app: App, c: Cine) {
   c.at(T_PLUCK + 1.3, () => fx.ring(turtle.group.position.clone().setY(turtle.group.position.y - 0.8), 24, '#ffd36b', 2.4, 0.05));
   c.grade(T_PLUCK + 0.8, 4, { saturation: 1, vignette: 0.3 });
   c.during(T_PLUCK + 1, T_PLUCK + 5, (k) => (ash.alpha = 0.7 * (1 - k)));
-  c.shot(T_PLUCK, T_PLUCK + 4.2, { pos: [c.Sh(-3.6, 6.9, 2.4), c.Sh(-4.4, 7.4, 3.0)], look: c.Sh(0.0, 6.0, 0.9), fov: 38 });
+  c.shot(T_PLUCK, T_PLUCK + 3.9, { pos: [c.Sh(-3.6, 6.9, 2.4), c.Sh(-4.4, 7.4, 3.0)], look: c.Sh(0.0, 6.0, 0.9), fov: 38 });
   // the colossus opens its eyes
-  const T_EYE = T_PLUCK + 4.2;
+  const T_EYE = T_PLUCK + 3.9;
   c.during(T_EYE + 0.4, T_EYE + 1.4, (k) => (turtle.sleep = 1 - k * 0.55));
   c.at(T_EYE + 0.2, () => (c.turtleLook = () => c.maestro.world(new THREE.Vector3()).add(tmpV.set(0, 3, 0))));
-  c.shot(T_EYE, T_EYE + 3.6, { pos: [c.T(-2.9, 4.0, -8.9), c.T(-2.6, 3.95, -8.6)], look: c.T(-0.66, 3.4, -7.3), fov: [24, 21] });
+  c.shot(T_EYE, T_EYE + 3.3, { pos: [c.T(-2.9, 4.0, -8.9), c.T(-2.6, 3.95, -8.6)], look: c.T(-0.66, 3.4, -7.3), fov: [24, 21] });
   // it rises and takes the first step
-  const T_STEP = T_EYE + 3.6;
+  const T_STEP = T_EYE + 3.3;
   c.during(T_STEP, T_STEP + 1.2, (k) => (turtle.sleep = 0.45 * (1 - k)));
   c.at(T_STEP + 0.2, () => {
     c.turtleLook = null;
@@ -1611,14 +1691,14 @@ function openingScript(app: App, c: Cine) {
       c.shake(0.5);
     }
   };
-  c.shot(T_STEP, T_STEP + 3.8, { pos: [c.T(-6.2, 0.9, -8.2), c.T(-6.6, 1.1, -7.6)], look: [c.T(-3.0, 1.2, -3.4), c.T(-2.6, 2.6, -2.6)], fov: 44 });
+  c.shot(T_STEP, T_STEP + 3.6, { pos: [c.T(-6.2, 0.9, -8.2), c.T(-6.6, 1.1, -7.6)], look: [c.T(-3.0, 1.2, -3.4), c.T(-2.6, 2.6, -2.6)], fov: 44 });
   // ── the title: the colossus walks on into the grey, a small circle of colour around it
-  const T_TITLE = T_STEP + 3.8;
+  const T_TITLE = T_STEP + 3.6;
   c.cue(T_TITLE + 0.6, 'intro:title');
   c.colour(T_STEP, 3, 0.35);
-  c.shot(T_TITLE, T_TITLE + 10, { pos: [c.T(-13, 6, 12), c.T(-25, 27, 36)], look: [c.T(0, 4, -18), c.T(0, 3, -44)], fov: [42, 46], ease: ease.inOut });
+  c.shot(T_TITLE, T_TITLE + 9, { pos: [c.T(-13, 6, 12), c.T(-25, 27, 36)], look: [c.T(0, 4, -18), c.T(0, 3, -44)], fov: [42, 46], ease: ease.inOut });
   c.at(T_TITLE + 1.6, () => c.card(logoHTML(app.screens.t('tagline')), 'cine-title'));
-  c.end(T_TITLE + 10.5);
+  c.end(T_TITLE + 9.5);
 }
 
 // ───────────────────────────── the ending ─────────────────────────────
@@ -1641,9 +1721,11 @@ function endingScript(app: App, c: Cine) {
   const heart = () => turtle.heartWorld(new THREE.Vector3());
   c.mpose('conduct');
   c.pose('all', 'idle');
-  // where it falls: straight ahead of the colossus
+  // it falls far ahead of the colossus (a giant), then — small — it kneels close in front of it
+  const far = c.roadPoint(c.s0 + 46, 0, 0);
   const spot = c.roadPoint(c.s0 + 17, 0, 0);
-  const sil = c.silence(30, spot.clone().setY(spot.y + 0));
+  const at = far.clone();
+  const sil = c.silence(30, far.clone());
   sil.pose = 'recoil';
   sil.emerge = 1;
   c.add({ update: () => sil.lookAt(turtle.group.position) }, null);
@@ -1651,7 +1733,7 @@ function endingScript(app: App, c: Cine) {
   let lift = 0;
   c.add({ update: () => {
     sil.group.scale.setScalar(Math.max(0.01, size));
-    sil.group.position.set(spot.x, spot.y + lift, spot.z);
+    sil.group.position.set(at.x, at.y + lift, at.z);
   } }, null);
   // the five Voices, far away on the horizon (dark until they ring)
   const vspots: { kind: LandmarkKind; ds: number; lat: number; scale: number }[] = [
@@ -1671,26 +1753,28 @@ function endingScript(app: App, c: Cine) {
   voices.forEach((lm) => lm.setAwake(0));
   // ── 1. it falls
   c.cue(0.2, 'ending:fall');
-  c.shot(0, 5.2, { pos: [c.T(-10, 3, 15), c.T(-11, 4, 17)], look: [c.T(0, 60, -20), c.T(0, 30, -18)], fov: [52, 48], ease: ease.inOut });
+  c.shot(0, 5.2, { pos: [c.T(-10, 3, 15), c.T(-11, 4, 17)], look: [c.T(0, 62, -46), c.T(0, 30, -46)], fov: [52, 48], ease: ease.inOut });
   c.during(1.6, 3.4, (k) => (lift = -ease.in(k) * 6));
   c.during(1.4, 3.4, (k) => (sil.group.rotation.x = ease.in(k) * 0.3));
   c.at(3.4, () => {
     c.shake(1.1);
-    fx.ring(spot.clone().setY(spot.y + 0.3), 40, '#b9b4cc', 1.4, 0.05);
-    fx.dust(spot.clone().setY(spot.y + 0.5), '#9a94b0', 80);
-    fx.burst(spot.clone().setY(spot.y + 6), '#1d1a2b', 120, 14, 1.2, 1.8, false, 3);
+    fx.ring(far.clone().setY(far.y + 0.3), 50, '#b9b4cc', 1.4, 0.05);
+    fx.dust(far.clone().setY(far.y + 0.5), '#9a94b0', 80);
+    fx.burst(far.clone().setY(far.y + 6), '#1d1a2b', 120, 14, 1.2, 1.8, false, 3);
     sil.pose = 'kneel';
     sil.group.rotation.x = 0;
     lift = 0;
   });
   // ── 2. it shrinks in a storm of ink
-  c.shot(5.2, 11, { pos: [c.T(-13, 7, -3), c.T(-9, 4, -7)], look: [c.T(0, 6, -17), c.T(0, 1.6, -17)], fov: [42, 36] });
+  c.shot(5.2, 11, { pos: [c.T(-14, 8, -6), c.T(-10, 3.4, -24)], look: [c.T(0, 14, -46), c.T(0, 1.4, -46)], fov: [44, 34] });
   c.during(5.4, 10, (k) => {
     size = 30 - ease.inOut(k) * 29.2;
-    if (Math.random() < 0.5) fx.burst(spot.clone().setY(spot.y + size * 1.4), '#1d1a2b', 8, 3 + size * 0.2, 0.4 + size * 0.05, 1.4, false, -0.6);
+    if (Math.random() < 0.5) fx.burst(far.clone().setY(far.y + size * 1.4), '#1d1a2b', 8, 3 + size * 0.2, 0.4 + size * 0.05, 1.4, false, -0.6);
   });
   c.cue(8, 'ending:alone');
   c.at(10, () => (sil.pose = 'small'));
+  // (cut) it kneels in the dust in front of the colossus
+  c.at(10.95, () => at.copy(spot));
   // ── 3. small and alone, in the dust, under the colossus
   c.shot(11, 17, { pos: [c.T(1.8, 0.9, -21.5), c.T(1.4, 0.95, -21)], look: [c.T(0, 1.4, -17), c.T(0, 2.4, -14)], fov: 30 });
   // ── 4. the band leans over the edge to look
@@ -1817,6 +1901,23 @@ function endingScript(app: App, c: Cine) {
   } }, null);
   // the 'add' above runs after the size/position updater: keep its world placement off once seated
   c.shot(T_SONG, T_SONG + 6.5, { pos: [c.T(11, 10, -9), c.T(13.5, 8.6, 3), c.T(4, 10.5, 12.5)], look: c.T(0, 5.6, 0), fov: 42 });
+  // the village pops out of its houses to dance, and petals rain over the colossus
+  const vcols = ['#ff9a8a', '#8ad0ff', '#ffd36b', '#b98cff', '#9be07a', '#ffb3d9', '#ffcf7a'];
+  const vspotsE: [number, number][] = [[-3.4, -1.9], [3.4, -1.9], [-3.6, 1.6], [3.6, 1.6], [-0.9, 3.4], [0.9, 3.4], [-2.2, 3.6]];
+  vspotsE.forEach(([x, z], i) => {
+    const vg = new Villager(vcols[i % vcols.length], vcols[(i + 3) % vcols.length], i);
+    vg.group.position.copy(seatPos(x, z, 0.02));
+    vg.group.rotation.y = Math.atan2(x, z);
+    vg.group.scale.setScalar(1.4);
+    vg.hide = 1;
+    c.add(vg, turtle.shell);
+    c.during(T_SONG + 0.4 + i * 0.25, T_SONG + 1 + i * 0.25, (k) => (vg.hide = 1 - ease.outBack(k)));
+  });
+  const petals = c.add(new Fall(['#ff9ec7', '#fff2f8'], 700, 30, 24, 32, 1.8), null);
+  v.scene.add(petals.points);
+  petals.alpha = 0;
+  c.add({ update: () => petals.points.position.copy(turtle.group.position) }, null);
+  c.during(T_SONG, T_SONG + 3, (k) => (petals.alpha = k * 0.85));
   // ── 11. concert montage on the beat (with a sour chick)
   const B2 = c.spb * 2;
   const T_MONT = T_SONG + 6.5;
@@ -1911,9 +2012,10 @@ function endingScript(app: App, c: Cine) {
   // the moth lands on the colossus' nose: it goes cross-eyed… and sneezes
   const T_SNEEZE = T_CLAP + 4.2;
   const nose = c.T(0, 3.55, -8.3);
+  let mothLand: THREE.Vector3 | null = null;
   c.during(T_SNEEZE, T_SNEEZE + 2.2, (k) => {
-    const from = moth.group.position.clone();
-    moth.group.position.lerpVectors(from, nose().add(tmpV.set(0, 0.6, 0)), ease.out(k));
+    mothLand ??= moth.group.position.clone();
+    moth.group.position.lerpVectors(mothLand, nose().add(tmpV.set(0, 0.6, 0)), ease.inOut(k));
     moth.flap = 1 - k * 0.7;
   });
   c.at(T_SNEEZE + 0.4, () => (c.turtleLook = () => nose().add(tmpV.set(0, 0.2, 0.5))));
@@ -2011,6 +2113,8 @@ function endingScript(app: App, c: Cine) {
     { name: 'Grave', role: pt ? 'contrabaixo' : 'double bass', at: c.R(c.band.get('bass')!, 0, 1.0, 0), from: c.R(c.band.get('bass')!, 1.2, 1.8, 3.2) },
     { name: pt ? 'O Silêncio' : 'The Silence', role: pt ? 'o respiro entre as notas' : 'the breath between the notes', at: () => sil.group.getWorldPosition(new THREE.Vector3()).add(tmpV.set(0, 0.8, 0)), from: () => sil.group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(1.4, 1.0, -2.2).applyQuaternion(turtle.group.quaternion)) },
   ];
+  // after the bow's last chord, the credits song (docs: 'ending:bow' … then the game plays 'credits')
+  c.at(T_CAST - 0.6, () => audio.playSong('credits', { fade: 1.5 }));
   c.at(T_CAST - 0.2, () => c.play('all'));
   c.at(T_CAST - 0.2, () => c.mpose('conduct'));
   const CAST_D = 2.7;
@@ -2077,8 +2181,13 @@ async function epilogue(app: App) {
   audio.stopMusic(1);
   audio.setAmbience('citadel', 0.3);
   // memory 5: in the depths, the first rest of the Great Song, forgotten, never played
-  await runScene(app, { world: 'citadel', look: ABYSS_LOOK, bpm: 72, bars: 60, seed: 41, s0: 30, life: 0.2, colorScale: 0, maestro: false, landmark: null, features: [{ kind: 'meadow', from: 0, to: 120 }] }, (c) => abyssScript(c), 1600);
+  const skipped = await runScene(app, { world: 'citadel', look: ABYSS_LOOK, bpm: 72, bars: 60, seed: 41, s0: 30, life: 0.2, colorScale: 0, maestro: false, landmark: null, features: [{ kind: 'meadow', from: 0, to: 120 }] }, (c) => abyssScript(c), 1600);
   // the next year's Grand Tour: a little masked one rides with the band, and marks the rests
+  if (skipped) return;
+  await nextTour(app);
+}
+
+async function nextTour(app: App) {
   audio.setAmbience('meadow', 0.6);
   await runScene(app, {
     world: 'meadow', look: SPRING_LOOK, bpm: 100, bars: 110, seed: 11, curviness: 0.45, s0: 30, life: 1.1, band: FULL_BAND, shards: 5, landmark: null,
@@ -2100,7 +2209,7 @@ function abyssScript(c: Cine) {
   const stave = new THREE.Group();
   stave.position.copy(centre);
   v.scene.add(stave);
-  const lineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#d9d3ff').multiplyScalar(1.6), transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false, fog: false });
+  const lineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#d9d3ff').multiplyScalar(1.6), transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false, fog: true });
   const R = 9, H = 70, turns = 2.2;
   const spiral = (r: number, y0: number, u: number) => new THREE.Vector3(Math.cos(u * turns * Math.PI * 2) * r, y0 - u * H, Math.sin(u * turns * Math.PI * 2) * r);
   for (let i = 0; i < 5; i++) {
@@ -2159,7 +2268,15 @@ function nextTourScript(app: App, c: Cine) {
   little.group.position.copy(seatPos(0.95, -3.55, 0.02));
   little.group.rotation.y = Math.PI * 0.9;
   const lit = () => turtle.shell.localToWorld(seatPos(0.95, -3.55, 0.6));
-  // threads of light link the five Voices again
+  // the five Voices on the horizon, linked to the whole Heart again (as on the first morning)
+  const heart = () => turtle.heartWorld(new THREE.Vector3());
+  VOICE_SPOTS.forEach((sp, i) => {
+    const lm = c.voice(sp.kind, c.roadPoint(c.s0 + sp.ds, sp.lat, -1), sp.scale, c.roadYaw(c.s0 + sp.ds) + Math.PI);
+    lm.setAwake(0.4);
+    const th = new LightThread(SHARD_COLORS[i], 0.08, 1.2, 0.22);
+    v.scene.add(th.mesh);
+    c.add({ update: (_dt: number, t: number) => { th.set(lm.top(new THREE.Vector3()), heart()); th.update(t); } }, null);
+  });
   const petals = c.add(new Fall(['#ffc2d9', '#ffffff'], 500, 30, 22, 30, 1.6), null);
   v.scene.add(petals.points);
   c.add({ update: () => petals.points.position.copy(turtle.group.position) }, null);

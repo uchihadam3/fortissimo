@@ -610,6 +610,7 @@ const SCENE_GLYPH: Record<string, string> = {
   epilogue: `<svg viewBox="0 0 24 24"><path d="M8 4.5l6 5-5 3 5 3-3 4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
+// INTEGRATION: styles of the story gallery and the results' "new scene" hint (could live in ui.css)
 const GALLERY_CSS = `
 .story-gallery { background: radial-gradient(ellipse at 50% 20%, rgba(34,24,61,.82), rgba(7,5,13,.94)); overflow: hidden; }
 .story-gallery .sg-panel { position: absolute; inset: calc(16px + var(--safe-t, 0px)) calc(16px + var(--safe-r, 0px)) calc(16px + var(--safe-b, 0px)) calc(16px + var(--safe-l, 0px)); display: flex; flex-direction: column; align-items: center; }

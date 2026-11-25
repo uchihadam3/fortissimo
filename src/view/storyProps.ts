@@ -777,7 +777,7 @@ export class NoteStream {
     ctrl.y += lift;
     this.notes.push({ m, from: from.clone(), ctrl, t0, dur, spin: 3 + Math.random() * 5, size });
   }
-  update(t: number) {
+  update(_dt: number, t: number) {
     const tg = this.target();
     const p = new THREE.Vector3();
     for (const n of this.notes) {
@@ -916,7 +916,7 @@ export class Fall {
   get alpha() {
     return this.mat.uniforms.uAlpha.value;
   }
-  update(t: number) {
+  update(_dt: number, t: number) {
     if (this.t0 < 0) this.t0 = t;
     this.mat.uniforms.uTime.value = t - this.t0;
   }
@@ -979,6 +979,50 @@ export class NoteFirework {
 }
 
 // ───────────────────────────── the Silence's marks ─────────────────────────────
+
+/**
+ * The Silence's storm front: a wall of ink-smoke rising on the horizon over an arc around a point, with
+ * a ragged, boiling top edge. Seen from inside (it surrounds the colossus on one side).
+ */
+export class InkStorm {
+  readonly mesh: THREE.Mesh;
+  readonly mat: THREE.ShaderMaterial;
+  constructor(radius = 200, height = 150, arc = Math.PI * 0.7, color = '#120d1e') {
+    const g = new THREE.CylinderGeometry(radius, radius, height, 96, 1, true, -arc / 2, arc);
+    g.translate(0, height / 2 - 8, 0);
+    this.mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uRise: { value: 0 }, uOpacity: { value: 1 }, uColor: { value: new THREE.Color(color) } },
+      vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */ `
+        uniform float uTime; uniform float uRise; uniform float uOpacity; uniform vec3 uColor; varying vec2 vUv;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+        float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ s += a * n2(p); p = p * 2.07 + 3.1; a *= 0.5; } return s; }
+        void main(){
+          float y = vUv.y;
+          vec2 q = vec2(vUv.x * 16.0, y * 4.0 - uTime * 0.22);
+          float n = fbm(q + fbm(q * 0.7 + uTime * 0.05) * 1.4);
+          float top = uRise * (0.62 + 0.5 * n);
+          float a = smoothstep(top, top - 0.22, y);
+          a *= smoothstep(0.0, 0.2, vUv.x) * smoothstep(1.0, 0.8, vUv.x);
+          vec3 c = uColor * (0.55 + 0.9 * n) + vec3(0.18, 0.1, 0.32) * pow(n, 3.0) * 0.6;
+          gl_FragColor = vec4(c, a * uOpacity);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    this.mesh = new THREE.Mesh(g, this.mat);
+    this.mesh.renderOrder = -50;
+    this.mesh.frustumCulled = false;
+  }
+  update(_dt: number, t: number) {
+    this.mat.uniforms.uTime.value = t;
+    this.mesh.visible = this.mat.uniforms.uRise.value > 0.001 && this.mat.uniforms.uOpacity.value > 0.001;
+  }
+}
 
 /** Ink tendrils coiled around a tall landmark (the Great Blot hugging the Bell). */
 export class InkCoil {
