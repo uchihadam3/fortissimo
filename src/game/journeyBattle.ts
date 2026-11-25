@@ -171,10 +171,21 @@ export class JourneyBattle {
     return this.paused;
   }
 
-  /** run something when the view reaches sim time t (what you see is what you hear) */
+  /**
+   * Run something when the view reaches sim time t (what you see is what you hear). It follows the
+   * view clock, so pauses and slow frames keep it in step with the picture.
+   */
   private later(t: number, fn: () => void, extraMs = 0) {
-    const lag = Math.max(0, (t - this.lastVt) * 1000) + extraMs;
-    setTimeout(() => !this.disposed && fn(), lag);
+    this.pending.push({ t: t + extraMs / 1000, fn });
+  }
+  private pending: { t: number; fn: () => void }[] = [];
+
+  private runPending(vt: number) {
+    if (!this.pending.length) return;
+    const due = this.pending.filter((p) => p.t <= vt + 1e-6);
+    if (!due.length) return;
+    this.pending = this.pending.filter((p) => p.t > vt + 1e-6);
+    for (const p of due) p.fn();
   }
 
   // ───────────────────────────── input ─────────────────────────────
@@ -500,6 +511,7 @@ export class JourneyBattle {
       const p = this.view.slotWorld(this.ghostSlot);
       this.ghost.position.set(p.x, this.view.land.heightAt(p.x, p.z) + 0.25, p.z);
     }
+    this.runPending(vt);
     this.updateHud(vt);
     this.tutorial?.update(dt);
     // (the simulation drops its dead creatures itself, deterministically)
