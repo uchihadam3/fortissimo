@@ -7,14 +7,35 @@
  * (`chordAt`) so tower notes can be chosen before the backing for that bar exists.
  */
 import type { SongId } from '../../sim/defs';
+import type { BandMix } from '../api';
 import type { Core, ReverbMode } from './core';
 import { BufferBank, Channel, type BufInst, type BufNoteOpts, type ChannelOpts, oscStack, playBuf, type StackOpts } from './synth';
 import type { Chord, Scale } from './theory';
 import { clamp, report } from './util';
 
-/** Internal cinematic tracks (not part of the public SongId list). */
-export type CineId = 'cine:dawn' | 'cine:festival' | 'cine:fall' | 'cine:alone' | 'cine:bloom';
+/** Internal cinematic tracks (not part of the public SongId list): `mood:<name>` or `mood:<name>@<world>`. */
+export type CineId = `mood:${string}` | `cine:${string}`;
 export type TrackId = SongId | CineId;
+
+/** The band before the game reports one: everything present (a song never sounds thinner than intended). */
+export const FULL_BAND: BandMix = {
+  sections: { strings: 1, percussion: 1, bells: 1, brass: 1, voices: 1, low: 1 },
+  harmony: 5,
+  duets: [],
+};
+
+/** sanitised copy of a band mix (garbage in -> a valid mix) */
+export function cleanBand(m: unknown): BandMix {
+  const o = (m && typeof m === 'object' ? m : {}) as Partial<BandMix>;
+  const sec = (o.sections && typeof o.sections === 'object' ? o.sections : {}) as Partial<Record<string, unknown>>;
+  const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(64, x)) : 0);
+  const sections = { strings: n(sec.strings), percussion: n(sec.percussion), bells: n(sec.bells), brass: n(sec.brass), voices: n(sec.voices), low: n(sec.low) };
+  const present = Object.values(sections).filter((v) => v > 0).length;
+  const h = typeof o.harmony === 'number' && Number.isFinite(o.harmony) ? Math.round(o.harmony) : present - 1;
+  const ids = ['march', 'groundwork', 'shimmer', 'fanfare', 'hymn', 'serenade', 'groove', 'thunder'];
+  const duets = Array.isArray(o.duets) ? [...new Set(o.duets.filter((d): d is BandMix['duets'][number] => typeof d === 'string' && ids.includes(d)))] : [];
+  return { sections, harmony: Math.max(0, Math.min(5, h)), duets };
+}
 
 export interface BarCtx {
   /** context time of the bar's downbeat */
@@ -31,6 +52,9 @@ export interface BarCtx {
   drop: number;
   /** this bar is the ff build-up (riser) bar */
   build: boolean;
+  /** the band on the shell for this bar and the previous one */
+  band: BandMix;
+  bandPrev: BandMix;
 }
 
 export abstract class Theme {
@@ -51,6 +75,16 @@ export abstract class Theme {
   tail(_b: BarCtx): void {}
   /** Harmony as a pure function of the bar index (and the player's intensity log). */
   abstract chordAt(bar: number, beat: number, p: Player): Chord;
+  /** The tower melody guide: the pitch of the song's tune at (bar, beat), or null (towers arpeggiate). */
+  guide(_bar: number, _beat: number, _p: Player): number | null {
+    return null;
+  }
+  /** The scale sounding at a bar (key lifts per movement); stingers and motifs follow it. */
+  keyAt(_bar: number, _p: Player): Scale {
+    return this.key;
+  }
+  /** The logs (intensity, movement, band) changed from `bar` on: drop cached decisions for bars >= bar. */
+  invalidate(_bar: number): void {}
   /** release any extra nodes created in setup */
   dispose(): void {}
 }
@@ -78,6 +112,10 @@ export class Player {
   private started = false;
   private finishedAt = Infinity;
   private ilog: { bar: number; level: number }[];
+  private blog: { bar: number; mix: BandMix }[];
+  private mlog: { bar: number; index: number; total: number }[] = [];
+  /** highest bar whose harmony has been handed out (to towers) before it was composed */
+  private observed = -1;
   private readonly ff: FFWindow[] = [];
   /** free-form state for cinematic themes (cue times etc.) */
   readonly state: Record<string, number> = {};
@@ -120,6 +158,7 @@ export class Player {
     this.barDur = this.spb * theme.beats;
     this.t0 = t0;
     this.ilog = [{ bar: -1e9, level: clamp(Math.round(intensity), 0, 3) }];
+    this.blog = [{ bar: -1e9, mix: director.band }];
   }
 
   /** channel-name namespace (a medley lends the player to several songs' arrangement code) */
@@ -175,10 +214,28 @@ export class Player {
     return clamp(r < 1e-6 ? 0 : r, 0, this.theme.beats - 1e-6);
   }
 
-  chordAtTime(t: number): Chord {
+  /** harmony at context time t; `lock` (a note is chosen from it) freezes that bar's harmony */
+  chordAtTime(t: number, lock = false): Chord {
     const bar = this.barAt(t);
     if (bar < 0) return this.theme.chordAt(0, 0, this);
+    if (lock && this.nextBar >= 0 && bar >= this.nextBar && bar > this.observed && bar - this.nextBar < 2) this.observed = bar;
     return this.theme.chordAt(bar, this.beatInBar(t), this);
+  }
+
+  /** the tower guide pitch at context time t (null = none) */
+  guideAtTime(t: number): number | null {
+    const bar = this.barAt(t);
+    if (bar < 0) return null;
+    return this.theme.guide(bar, this.beatInBar(t), this);
+  }
+
+  keyAtTime(t: number): Scale {
+    return this.theme.keyAt(Math.max(0, this.barAt(t)), this);
+  }
+
+  /** first bar a change requested now can still affect (not composed, not handed out, in the future) */
+  private firstFree(now: number): number {
+    return Math.max(this.nextBar < 0 ? 0 : this.nextBar, Math.ceil((now + 0.02 - this.t0) / this.barDur - 1e-7), this.observed + 1);
   }
 
   // ───────────────────────────── intensity & ff ─────────────────────────────
@@ -195,10 +252,75 @@ export class Player {
   /** The change applies from the first bar that is not composed yet and starts in the future. */
   setIntensity(level: number, now: number): number {
     const lv = clamp(Math.round(level), 0, 3);
-    const firstFree = Math.max(this.nextBar < 0 ? 0 : this.nextBar, Math.ceil((now + 0.02 - this.t0) / this.barDur - 1e-7));
+    const firstFree = this.firstFree(now);
+    const before = this.ilog.length;
     this.ilog = this.ilog.filter((e) => e.bar < firstFree);
-    if (this.intensityAt(firstFree - 1) !== lv) this.ilog.push({ bar: firstFree, level: lv });
+    const removed = before !== this.ilog.length;
+    let added = false;
+    if (this.intensityAt(firstFree - 1) !== lv) {
+      this.ilog.push({ bar: firstFree, level: lv });
+      added = true;
+    }
+    if (removed || added) this.theme.invalidate(firstFree);
     return firstFree;
+  }
+
+  // ───────────────────────────── the band & movements ─────────────────────────────
+
+  bandAt(bar: number): BandMix {
+    let m = this.blog[0].mix;
+    for (const e of this.blog) {
+      if (e.bar <= bar) m = e.mix;
+      else break;
+    }
+    return m;
+  }
+
+  /** the band changes from the next free bar line */
+  setBand(mix: BandMix, now: number): number {
+    const firstFree = this.firstFree(now);
+    this.blog = this.blog.filter((e) => e.bar < firstFree);
+    this.blog.push({ bar: firstFree, mix });
+    if (this.blog.length > 64) this.blog.splice(1, this.blog.length - 64);
+    this.theme.invalidate(firstFree);
+    return firstFree;
+  }
+
+  /**
+   * Movement `index` of `total` begins at the downbeat nearest to context time t - or, when that bar
+   * is already composed (the call came late), at the next free bar line.
+   */
+  setMovement(index: number, total: number, t: number, now: number): number {
+    const want = Math.round((t - this.t0) / this.barDur);
+    const bar = Math.max(want, this.firstFree(now));
+    this.mlog = this.mlog.filter((e) => e.bar < bar);
+    this.mlog.push({ bar, index, total });
+    this.theme.invalidate(bar);
+    return bar;
+  }
+
+  private spot: { fromBar: number; to: number } | null = null;
+
+  /** a soloist plays from t1 to t2 (joinMotif): moods hold their tonic under it (bars not composed yet) */
+  spotlight(t1: number, t2: number): void {
+    const fromBar = Math.max(this.firstFree(this.core.now), this.barAt(t1));
+    this.spot = { fromBar, to: t2 };
+    this.theme.invalidate(fromBar);
+  }
+
+  inSpotlight(bar: number): boolean {
+    const s = this.spot;
+    return !!s && bar >= s.fromBar && this.barStart(bar) < s.to - 0.05;
+  }
+
+  /** the latest movement that began at or before `bar` (null: none was announced) */
+  movementAt(bar: number): { bar: number; index: number; total: number } | null {
+    let m: { bar: number; index: number; total: number } | null = null;
+    for (const e of this.mlog) {
+      if (e.bar <= bar) m = e;
+      else break;
+    }
+    return m;
   }
 
   /** the bar from which the latest intensity applies (for themes that switch harmony) */
@@ -211,6 +333,7 @@ export class Player {
     if (this.ff.some((w) => w.drop === drop)) return;
     this.ff.push({ build: drop - 1, drop });
     if (this.ff.length > 8) this.ff.shift();
+    this.theme.invalidate(drop - 1);
   }
 
   dropIndex(bar: number): number {
@@ -236,6 +359,8 @@ export class Player {
       Iprev: this.intensityAt(bar - 1),
       drop: this.dropIndex(bar),
       build: this.isBuild(bar),
+      band: this.bandAt(bar),
+      bandPrev: this.bandAt(bar - 1),
     };
   }
 
@@ -415,6 +540,8 @@ export type ThemeFactory = (id: TrackId) => Theme | null;
 export class Director {
   private players: Player[] = [];
   current: Player | null = null;
+  /** the band last reported by the game (new players start with it) */
+  band: BandMix = FULL_BAND;
   /** the most recently started track (its harmony and grid stay the reference after it stops) */
   last: Player | null = null;
 
@@ -486,11 +613,34 @@ export class Director {
     return this.current ?? this.last;
   }
 
-  /** harmony sounding at context time t */
-  chordAt(t: number): Chord | null {
+  /** harmony sounding at context time t (`lock`: a note will be chosen from it) */
+  chordAt(t: number, lock = false): Chord | null {
     const p = this.ref;
     if (!p) return null;
-    return p.chordAtTime(t);
+    return p.chordAtTime(t, lock);
+  }
+
+  /** the tower melody guide at context time t */
+  guideAt(t: number): number | null {
+    const p = this.ref;
+    return p ? p.guideAtTime(t) : null;
+  }
+
+  /** the scale sounding at context time t */
+  keyAt(t: number): Scale | null {
+    const p = this.ref;
+    return p ? p.keyAtTime(t) : null;
+  }
+
+  setBand(mix: BandMix): void {
+    this.band = mix;
+    const p = this.current;
+    if (p && !p.stopped) p.setBand(mix, this.core.now);
+  }
+
+  movement(index: number, total: number, t: number): void {
+    const p = this.current;
+    if (p && !p.stopped) p.setMovement(index, total, t, this.core.now);
   }
 
   get activePlayers(): number {

@@ -1,6 +1,7 @@
 /** Theme registry: SongId (and internal cinematic tracks) → a fresh composition. */
 import type { Theme, TrackId } from '../music';
-import { BossTheme, CitadelTheme, DesertTheme, FinaleTheme, ForgeTheme, IceTheme, MeadowTheme } from './battle';
+import { BossTheme, CitadelTheme, DesertTheme, FinaleTheme, ForgeTheme, IceTheme } from './legacy';
+import { MeadowTheme } from './meadow';
 import { AloneTheme, BloomTheme, DawnTheme, FallTheme, FestivalTheme } from './cinema';
 import { CreditsTheme } from './credits';
 import { MapTheme, MenuTheme } from './menu';

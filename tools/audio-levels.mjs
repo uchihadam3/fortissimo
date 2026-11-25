@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 5174;
+const PORT = Number(process.env.AUDIO_PORT ?? 5174);
 const URL = `http://localhost:${PORT}/tools/audio-lab.html`;
 const argv = process.argv.slice(2);
 const flag = (f) => argv.includes(f);
@@ -79,7 +79,7 @@ const save = (name, b64) => {
 const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : String(x));
 const line = (name, s, extra = '') =>
   console.log(
-    `${name.padEnd(22)} LUFS ${f1(s.lufs).padStart(6)}  ST ${f1(s.stMin).padStart(6)}..${f1(s.stMax).padStart(6)}  peak ${f1(s.peakDb).padStart(5)} dBFS  silence ${s.silence.toFixed(1)}s  clicks ${s.clicks}  nan ${s.nan}  hot ${(s.hot * 100).toFixed(2)}%  hf ${(s.hf * 100).toFixed(1)}%  voices ${s.maxVoices}  load ${(s.load * 100).toFixed(0)}% ${extra}`,
+    `${name.padEnd(22)} LUFS ${f1(s.lufs).padStart(6)}  ST ${f1(s.stMin).padStart(6)}..${f1(s.stMax).padStart(6)}  peak ${f1(s.peakDb).padStart(5)} dBFS  silence ${s.silence.toFixed(1)}s  clicks ${s.clicks}  nan ${s.nan}  voices ${s.maxVoices}  load ${(s.load * 100).toFixed(0)}%  oct ${(s.bands ?? []).join(" ")} ${extra}`,
   );
 const problems = [];
 const check = (name, s, o = {}) => {

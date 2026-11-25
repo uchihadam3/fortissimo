@@ -10,7 +10,7 @@ import type { BarCtx, Player } from '../music';
 import { CHOIR, FLUTE, HORNLEAD, LOWBRASS, OBOE, ORGAN, STRINGS, SUB, VIOLIN, type BufInst } from '../synth';
 import { MODES, note, Scale } from '../theory';
 import { type Inst, Song } from './base';
-import { Battle, CitadelTheme, CITADEL_PHRASE, DesertTheme, DESERT_PHRASE, ForgeTheme, FORGE_PHRASE, IceTheme, ICE_PHRASE, MeadowTheme, MEADOW_PHRASE } from './battle';
+import { Battle, CitadelTheme, CITADEL_PHRASE, DesertTheme, DESERT_PHRASE, ForgeTheme, FORGE_PHRASE, IceTheme, ICE_PHRASE, MeadowTheme, MEADOW_PHRASE } from './legacy';
 
 interface Guest {
   song: Battle;

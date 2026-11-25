@@ -3,13 +3,14 @@
  * sequences and battle stress tests through an OfflineAudioContext, scheduling incrementally like
  * the real-time engine (suspend every 50 ms), and measures the result.
  */
-import { SONGS, TOWERS, type EnemyKind, type SongId, type TowerKind } from '../../sim/defs';
-import type { CinematicCue } from '../api';
+import { SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type SongId, type TowerKind } from '../../sim/defs';
+import type { BandMix, CinematicCue } from '../api';
 import { Ambience, type Place } from './ambience';
 import { Cinema } from './cinema';
 import { Core } from './core';
 import { LOOKAHEAD } from './engine';
-import { Director, type TrackId } from './music';
+import { Motifs } from './motifs';
+import { cleanBand, Director, type Player, type TrackId } from './music';
 import { Sfx } from './sfx';
 import { makeTheme } from './songs';
 import { BufferBank } from './synth';
@@ -37,6 +38,8 @@ export interface Stats {
   hf: number;
   /** render time / audio time */
   load: number;
+  /** octave-band levels (dB relative to the loudest band) at 63 125 250 500 1k 2k 4k 8k Hz */
+  bands: number[];
   /** short-term loudness every 4 s */
   windows: number[];
   maxVoices: number;
@@ -52,6 +55,7 @@ export interface Rig {
   sfx: Sfx;
   cine: Cinema;
   amb: Ambience;
+  motifs: Motifs;
   /** run fn once the render reaches context time `at` − lead */
   at(at: number, fn: () => void, lead?: number): void;
   render(): Promise<{ buf: AudioBuffer; ms: number; maxVoices: number }>;
@@ -67,6 +71,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
   const sfx = new Sfx(core, bank, director);
   const cine = new Cinema(core, bank, director);
   const amb = new Ambience(core, bank);
+  const motifs = new Motifs(core, bank, director);
   const actions: { at: number; fn: () => void }[] = [];
   let maxVoices = 0;
   const step = 0.05;
@@ -95,7 +100,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
     });
   }
   return {
-    ctx, core, bank, director, towers, sfx, cine, amb,
+    ctx, core, bank, director, towers, sfx, cine, amb, motifs,
     at(at: number, fn: () => void, lead = 0.15) {
       actions.push({ at: Math.max(0, at - lead), fn });
     },
@@ -136,6 +141,13 @@ class Biquad {
     const al = Math.sin(w) / (2 * q);
     const a0 = 1 + al;
     return new Biquad((1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, (-2 * c) / a0, (1 - al) / a0);
+  }
+  static bp(sr: number, f0: number, q: number): Biquad {
+    const w = (2 * Math.PI * f0) / sr;
+    const c = Math.cos(w);
+    const al = Math.sin(w) / (2 * q);
+    const a0 = 1 + al;
+    return new Biquad(al / a0, 0, -al / a0, (-2 * c) / a0, (1 - al) / a0);
   }
   run(x: number): number {
     const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2;
@@ -250,6 +262,7 @@ export function measure(buf: AudioBuffer, renderMs = 0, from = 0): Stats {
     hot: hot / Math.max(1, n),
     hf: hfE / Math.max(1e-12, sum),
     load: renderMs / 1000 / (n / sr),
+    bands: octaves(buf, from, buf.duration),
     windows,
     maxVoices: 0,
     started: 0,
@@ -546,4 +559,305 @@ export async function renderSfx(name: string, seconds: number, wav = false): Pro
   const stats = measure(r.buf, r.ms, 0);
   stats.maxVoices = r.maxVoices;
   return { stats, wav: wav ? wavBase64(r.buf) : undefined };
+}
+
+
+// ───────────────────────────── long-form journeys ─────────────────────────────
+
+/** One scripted moment of a journey (bars are bar indices of the song; fractions allowed). */
+export interface JourneyEvent {
+  bar: number;
+  intensity?: number;
+  /** movement [index, total]; `late` = announced only 0.1 s ahead (like the game's event stream) */
+  movement?: [number, number];
+  late?: boolean;
+  /** sections present (counts); harmony = distinct − 1 */
+  band?: Partial<Record<Section, number>>;
+  duets?: DuetId[];
+  /** the towers firing from this bar on (null: none) */
+  towers?: TowerSpec[] | null;
+  plate?: boolean;
+  duet?: DuetId;
+  join?: TowerKind;
+}
+
+export interface Segment {
+  name: string;
+  from: number;
+  to: number;
+}
+
+export interface SegmentStats {
+  name: string;
+  lufs: number;
+  peakDb: number;
+  /** share of pitched energy on chord tones of the song's harmony (0..1) */
+  inChord: number;
+  /** share of pitched energy on the notes of the movement's scale */
+  inScale: number;
+  /** energy share per band: sub <90 Hz · low 90–300 · lowmid 300–1k · mid 1–3k · high 3–8k · air >8k */
+  bands: number[];
+}
+
+export function bandOf(secs: Partial<Record<Section, number>>, duets: DuetId[] = []): BandMix {
+  const sections = { strings: 0, percussion: 0, bells: 0, brass: 0, voices: 0, low: 0, ...secs };
+  return cleanBand({ sections, duets, harmony: Object.values(sections).filter((v) => v > 0).length - 1 });
+}
+
+export const OCTAVES = [63, 125, 250, 500, 1000, 2000, 4000, 8000];
+
+/** octave-band levels of [a, b) seconds in dB relative to the loudest band (a 4th-order band-pass per octave) */
+export function octaves(buf: AudioBuffer, a: number, b: number): number[] {
+  const sr = buf.sampleRate;
+  const L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const i0 = Math.max(0, Math.floor(a * sr));
+  const i1 = Math.min(L.length, Math.floor(b * sr));
+  const flt = OCTAVES.map((f) => [Biquad.bp(sr, f, 1.41), Biquad.bp(sr, f, 1.41)]);
+  const e = new Array(OCTAVES.length).fill(0);
+  const stride = 2;
+  for (let i = i0; i < i1; i++) {
+    const x = (L[i] + R[i]) * 0.5;
+    for (let k = 0; k < OCTAVES.length; k++) {
+      const y = flt[k][1].run(flt[k][0].run(x));
+      if (i % stride === 0) e[k] += y * y;
+    }
+  }
+  const mx = Math.max(...e, 1e-20);
+  return e.map((v) => Math.round(10 * Math.log10((v + 1e-20) / mx)));
+}
+
+/** energy shares per frequency band of [a, b) seconds (cumulative high-passes, differenced) */
+export function bandShares(buf: AudioBuffer, a: number, b: number): number[] {
+  const sr = buf.sampleRate;
+  const L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const i0 = Math.max(0, Math.floor(a * sr));
+  const i1 = Math.min(L.length, Math.floor(b * sr));
+  const cuts = [90, 300, 1000, 3000, 8000];
+  const hps = cuts.map((f) => [Biquad.hp(sr, f, 0.7071), Biquad.hp(sr, f, 0.7071)]);
+  const e = new Array(cuts.length + 1).fill(0);
+  for (let i = i0; i < i1; i++) {
+    const x = (L[i] + R[i]) * 0.5;
+    e[0] += x * x;
+    for (let k = 0; k < cuts.length; k++) {
+      const y = hps[k][1].run(hps[k][0].run(x));
+      e[k + 1] += y * y;
+    }
+  }
+  const out: number[] = [];
+  for (let k = 0; k <= cuts.length; k++) out.push(Math.max(0, e[k] - (k < cuts.length ? e[k + 1] : 0)));
+  const tot = out.reduce((s2, v) => s2 + v, 0) || 1;
+  return out.map((v) => Math.round((v / tot) * 1000) / 1000);
+}
+
+/**
+ * Pitch-class energy of each beat of [fromBar, toBar) compared with the harmony the player reports
+ * for that beat: the share on chord tones and on the scale (a consonance check of the whole mix).
+ */
+export function harmonyCheck(buf: AudioBuffer, p: Player, fromBar: number, toBar: number): { inChord: number; inScale: number; worst: { bar: number; beat: number; share: number }[] } {
+  const sr0 = buf.sampleRate;
+  const dec = 4;
+  const sr = sr0 / dec;
+  const L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const mono = new Float32Array(Math.floor(L.length / dec));
+  for (let i = 0; i < mono.length; i++) {
+    let s2 = 0;
+    for (let k = 0; k < dec; k++) s2 += L[i * dec + k] + R[i * dec + k];
+    mono[i] = s2 / (2 * dec);
+  }
+  const midis: number[] = [];
+  for (let m = 40; m <= 96; m++) midis.push(m);
+  let wc = 0;
+  let ws = 0;
+  let wt = 0;
+  const per: { bar: number; beat: number; share: number }[] = [];
+  for (let bar = fromBar; bar < toBar; bar++) {
+    for (let beat = 0; beat < p.theme.beats; beat++) {
+      const t = p.barStart(bar) + beat * p.spb;
+      const a = Math.floor((t + 0.04) * sr);
+      const b2 = Math.floor((t + p.spb - 0.01) * sr);
+      if (b2 >= mono.length || a < 0) continue;
+      const pcE = new Array(12).fill(0);
+      for (const m of midis) {
+        const f = 440 * Math.pow(2, (m - 69) / 12);
+        const w = (2 * Math.PI * f) / sr;
+        const cw = 2 * Math.cos(w);
+        let s1 = 0;
+        let s0 = 0;
+        for (let i = a; i < b2; i++) {
+          const y = mono[i] + cw * s1 - s0;
+          s0 = s1;
+          s1 = y;
+        }
+        const pw = s1 * s1 + s0 * s0 - cw * s1 * s0;
+        pcE[m % 12] += pw;
+      }
+      const c = p.chordAtTime(t + p.spb * 0.5);
+      const k = p.keyAtTime(t + p.spb * 0.5);
+      const tot = pcE.reduce((s2, v) => s2 + v, 0);
+      if (tot <= 0) continue;
+      let inC = 0;
+      let inS = 0;
+      for (let pc = 0; pc < 12; pc++) {
+        if (c.pcs.includes(pc)) inC += pcE[pc];
+        if (k.has(pc + 60)) inS += pcE[pc];
+      }
+      wc += inC;
+      ws += inS;
+      wt += tot;
+      per.push({ bar, beat, share: Math.round((inC / tot) * 100) / 100 });
+    }
+  }
+  per.sort((x, y) => x.share - y.share);
+  return { inChord: wt ? Math.round((wc / wt) * 1000) / 1000 : 0, inScale: wt ? Math.round((ws / wt) * 1000) / 1000 : 0, worst: per.slice(0, 6) };
+}
+
+/** LUFS and peak of [a, b) seconds */
+export function measureRange(buf: AudioBuffer, a: number, b: number): { lufs: number; peakDb: number } {
+  const sr = buf.sampleRate;
+  const i0 = Math.max(0, Math.floor(a * sr));
+  const i1 = Math.min(buf.length, Math.floor(b * sr));
+  const n = Math.max(1, i1 - i0);
+  const ctxLike = { sampleRate: sr, length: n, numberOfChannels: buf.numberOfChannels, getChannelData: (c: number) => buf.getChannelData(c).subarray(i0, i1), duration: n / sr } as unknown as AudioBuffer;
+  const s2 = measure(ctxLike, 0, 0);
+  return { lufs: s2.lufs, peakDb: s2.peakDb };
+}
+
+export interface JourneyRender {
+  stats: Stats;
+  segments: SegmentStats[];
+  shots: number;
+  /** the plan / mode of every bar (state machine trace) */
+  trace: string[];
+  wav?: string;
+}
+
+/**
+ * A long-form journey: the song with a script of intensity changes, movements, band changes and
+ * towers firing on their patterns (like the game), measured per segment.
+ */
+export async function renderJourney(song: SongId, bars: number, events: JourneyEvent[], segments: Segment[] = [], o: { wav?: boolean; deaths?: boolean; harmony?: boolean; mute?: string[]; solo?: string[]; towers?: boolean } = {}): Promise<JourneyRender> {
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = spb * 4;
+  const t0 = 0.2;
+  const seconds = t0 + bars * barDur + 1.5;
+  const rig = makeRig(seconds);
+  const p = rig.director.play(song, t0, 0.05, 0);
+  if (!p) throw new Error('no song');
+  const sd = spb / 4;
+  for (const [name, ch] of p.channels) if ((o.mute && o.mute.includes(name)) || (o.solo && !o.solo.includes(name))) ch.input.gain.value = 0;
+  if (o.towers === false) rig.core.towerBus.gain.value = 0;
+  let shots = 0;
+  const sorted = [...events].sort((a, b) => a.bar - b.bar);
+  // the towers active per bar
+  const armyAt: (TowerSpec[] | null)[] = [];
+  let cur: TowerSpec[] | null = null;
+  let ei = 0;
+  for (let bar = 0; bar < bars; bar++) {
+    while (ei < sorted.length && sorted[ei].bar <= bar) {
+      if (sorted[ei].towers !== undefined) cur = sorted[ei].towers ?? null;
+      ei++;
+    }
+    armyAt.push(cur);
+  }
+  for (const e of sorted) {
+    const tb = p.barStart(e.bar);
+    if (e.intensity !== undefined) rig.at(tb - 0.3, () => p.setIntensity(e.intensity!, rig.ctx.currentTime), 0);
+    if (e.band || e.duets) {
+      const mix = bandOf(e.band ?? {}, e.duets ?? []);
+      rig.at(tb - 0.3, () => {
+        rig.director.setBand(mix);
+        rig.towers.setBand(mix);
+      }, 0);
+    }
+    if (e.movement) rig.at(tb - (e.late ? 0.09 : 2.5), () => rig.director.movement(e.movement![0], e.movement![1], tb), 0);
+    if (e.plate) rig.at(tb, () => rig.motifs.plateUnlock(tb, 0.3), 0.1);
+    if (e.duet) rig.at(tb, () => rig.motifs.duet(e.duet!, tb, -0.2), 0.1);
+    if (e.join) rig.at(tb, () => rig.motifs.join(e.join!), 0.15);
+  }
+  for (let bar = 0; bar < bars; bar++) {
+    const army = armyAt[bar];
+    if (!army) continue;
+    for (const tw of army) {
+      const lv = TOWERS[tw.kind].levels[tw.level];
+      const pat = lv.pattern;
+      for (let s = 0; s < 16; s++) {
+        const step = bar * 16 + s;
+        if (pat[step % pat.length] !== 'x') continue;
+        const t = t0 + step * sd;
+        shots++;
+        rig.at(t, () => rig.towers.shot(tw.kind, tw.level, t, tw.pan, tw.voice), 0.1);
+        if (lv.flight > 0) rig.at(t + lv.flight * sd, () => rig.towers.impact(tw.kind, t + lv.flight * sd, tw.pan, 0.7), 0.1);
+      }
+    }
+    if (o.deaths !== false && army.length) {
+      const kinds: EnemyKind[] = ['blot', 'scurry', 'scorpion', 'whirl', 'echo', 'wolf', 'ember', 'slug', 'mimic', 'knight', 'conductor', 'moth'];
+      for (const s of [3, 7, 11]) {
+        if ((bar * 7 + s) % 3 !== 0) continue;
+        const t = t0 + (bar * 16 + s) * sd;
+        const k = kinds[(bar + s) % kinds.length];
+        rig.at(t, () => rig.towers.enemyDeath(k, t, ((bar % 5) - 2) / 2, (tt) => rig.sfx.bossDeath(tt)), 0.1);
+        rig.at(t + 0.3, () => rig.towers.coin(t + 0.3, 0, 4), 0.05);
+      }
+    }
+  }
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  stats.started = rig.core.started;
+  const segs: SegmentStats[] = [];
+  for (const sg of segments) {
+    const a = p.barStart(sg.from);
+    const b = p.barStart(sg.to);
+    const m = measureRange(r.buf, a, b);
+    const h = o.harmony === false ? { inChord: 0, inScale: 0 } : harmonyCheck(r.buf, p, sg.from, sg.to);
+    segs.push({ name: sg.name, lufs: Math.round(m.lufs * 10) / 10, peakDb: Math.round(m.peakDb * 10) / 10, inChord: h.inChord, inScale: h.inScale, bands: octaves(r.buf, a, b) });
+  }
+  const theme = p.theme as unknown as { state?: (bar: number, pl: Player) => { plan: number; mode: string; pos: number; brk: number; brkN: number } ; info?: (s: unknown) => { sec: string; i: number } };
+  const trace: string[] = [];
+  if (theme.state && theme.info) {
+    for (let bar = 0; bar < bars; bar++) {
+      const st = theme.state(bar, p);
+      const f = theme.info(st);
+      trace.push(`${bar}:${st.mode === 'break' ? 'k' : 'b'}${st.plan}${f.sec}${f.i}`);
+    }
+  }
+  return { stats, segments: segs, shots, trace, wav: o.wav ? wavBase64(r.buf) : undefined };
+}
+
+/** the standard long-form test: a 5-movement journey whose band grows from the harp to the full band */
+export function standardJourney(full = false): { bars: number; events: JourneyEvent[]; segments: Segment[] } {
+  const harp: TowerSpec = { kind: 'harp', level: 0, pan: -0.3, voice: 1 };
+  const army = (n: number): TowerSpec[] => defaultArmy(n);
+  const events: JourneyEvent[] = [
+    { bar: 0, intensity: 0, band: full ? { strings: 1, percussion: 2, bells: 2, brass: 1, voices: 1, low: 1 } : { strings: 1 }, movement: [0, 5] },
+    { bar: 6, intensity: 1, towers: full ? army(16) : [harp] },
+    { bar: 14, intensity: 2, band: full ? undefined : { strings: 1, percussion: 1 }, towers: full ? army(16) : [harp, { kind: 'drum', level: 0, pan: 0.2, voice: 2 }] },
+    { bar: 22, intensity: 0, towers: null },
+    { bar: 30, movement: [1, 5], intensity: 1, band: full ? undefined : { strings: 1, percussion: 1, bells: 1 }, towers: full ? army(20) : [harp, { kind: 'drum', level: 1, pan: 0.2, voice: 2 }, { kind: 'bell', level: 0, pan: 0.5, voice: 3 }] },
+    { bar: 40, intensity: 0, towers: null },
+    { bar: 48, movement: [2, 5], late: true, intensity: 2, band: full ? undefined : { strings: 2, percussion: 1, bells: 1, brass: 1 }, towers: full ? army(24) : army(8) },
+    { bar: 58, intensity: 0, towers: null },
+    { bar: 64, movement: [3, 5], intensity: 1, band: full ? undefined : { strings: 2, percussion: 1, bells: 1, brass: 1, voices: 1 }, towers: army(full ? 24 : 12) },
+    { bar: 74, intensity: 0, towers: null },
+    { bar: 82, movement: [4, 5], intensity: 3, band: { strings: 2, percussion: 2, bells: 2, brass: 1, voices: 1, low: 1 }, towers: army(24) },
+    { bar: 96, intensity: 0, towers: null },
+  ];
+  const segments: Segment[] = [
+    { name: 'm0 calm', from: 0, to: 6 },
+    { name: 'm0 wave', from: 6, to: 14 },
+    { name: 'm0 heavy', from: 14, to: 22 },
+    { name: 'breath1', from: 23, to: 30 },
+    { name: 'm1 wave', from: 30, to: 40 },
+    { name: 'breath2', from: 41, to: 48 },
+    { name: 'm2 heavy', from: 49, to: 58 },
+    { name: 'breath3', from: 59, to: 64 },
+    { name: 'm3 wave', from: 64, to: 74 },
+    { name: 'breath4', from: 75, to: 82 },
+    { name: 'm4 climax', from: 82, to: 96 },
+    { name: 'end calm', from: 97, to: 104 },
+  ];
+  return { bars: 104, events, segments };
 }

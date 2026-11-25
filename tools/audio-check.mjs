@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 5174;
+const PORT = Number(process.env.AUDIO_PORT ?? 5174);
 const URL = `http://localhost:${PORT}/tools/audio-lab.html`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const up = async () => {

@@ -75,7 +75,7 @@ export abstract class Song extends Theme {
     for (const n of list) this.play(b, inst, ch, n.beat, n.midi, n.vel * velMul, n.dur * b.spb * legato, release);
   }
 
-  private playLines(b: BarCtx, f: BarInfo): void {
+  protected playLines(b: BarCtx, f: BarInfo): void {
     const from = f.i * b.beats;
     const to = from + b.beats;
     for (const list of Object.values(this.lines)) {

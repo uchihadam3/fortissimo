@@ -9,7 +9,8 @@ import { Ambience, type Place } from './ambience';
 import { Cinema } from './cinema';
 import { Clock } from './clock';
 import { Core } from './core';
-import { Director } from './music';
+import { cleanBand, Director, FULL_BAND } from './music';
+import { Motifs } from './motifs';
 import { Renderer } from './render';
 import { Sfx } from './sfx';
 import { makeTheme } from './songs';
@@ -39,6 +40,7 @@ class Engine {
   towers: Towers | null = null;
   amb: Ambience | null = null;
   cine: Cinema | null = null;
+  motifs: Motifs | null = null;
   private renderer: Renderer | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private unlocking: Promise<void> | null = null;
@@ -50,6 +52,8 @@ class Engine {
   pending: { id: SongId; t0: number; fade: number; intensity: number } | null = null;
   nextIntensity = 0;
   muffle = 0;
+  /** the band last reported (kept across unlock) */
+  band: BandMix = FULL_BAND;
   ambience: { place: Place; level: number } = { place: 'none', level: 1 };
 
   get ctx(): AudioContext | null {
@@ -103,9 +107,11 @@ class Engine {
         bank.warm('celesta', 72, 96, 1);
         bank.warm('pizz', 29, 62, 1);
         this.director = new Director(core, bank, makeTheme);
+        this.director.band = this.band;
         this.sfx = new Sfx(core, bank, this.director);
         this.towers = new Towers(core, bank, this.director);
         this.amb = new Ambience(core, bank);
+        this.motifs = new Motifs(core, bank, this.director);
         this.cine = new Cinema(core, bank, this.director);
         this.cine.onTrack = (id, t0, bpm) => {
           this.song = id ? { id, t0: this.clock.toApi(t0), spb: 60 / bpm, beatsPerBar: 4 } : null;
@@ -381,11 +387,29 @@ const api: AudioAPI = {
   }),
 
   // v2 band API: no-ops until the audio pass implements them
-  setBand: guard('setBand', (_mix: BandMix) => {}),
-  duet: guard('duet', (_id: DuetId, _t: number, _pan: number) => {}),
-  movement: guard('movement', (_index: number, _total: number, _t: number) => {}),
-  plateUnlock: guard('plateUnlock', (_t: number, _pan: number) => {}),
-  joinMotif: guard('joinMotif', (_kind: TowerKind) => {}),
+  setBand: guard('setBand', (mix: BandMix) => {
+    const m = cleanBand(mix);
+    E.band = m;
+    E.director?.setBand(m);
+    E.towers?.setBand(m);
+  }),
+  duet: guard('duet', (id: DuetId, t: number, pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.motifs?.duet(id, tc, num(pan, 0));
+  }),
+  movement: guard('movement', (index: number, total: number, t: number) => {
+    const tc = E.at(t);
+    if (tc === null) return;
+    const n = Math.max(1, Math.round(num(total, 1)));
+    E.director?.movement(clamp(Math.round(num(index, 0)), 0, 99), n, tc);
+  }),
+  plateUnlock: guard('plateUnlock', (t: number, pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.motifs?.plateUnlock(tc, num(pan, 0));
+  }),
+  joinMotif: guard('joinMotif', (kind: TowerKind) => {
+    if (E.live) E.motifs?.join(kind);
+  }),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();
