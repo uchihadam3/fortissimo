@@ -339,6 +339,7 @@ export class Screens {
       [pt ? 'Música e sons' : 'Music & sound', pt ? '100% sintetizados ao vivo — a sua defesa toca a trilha' : '100% synthesised live — your defense plays the score'],
       [pt ? 'O colosso' : 'The colossus', pt ? 'uma tartaruga gentil e muito paciente' : 'a gentle, very patient turtle'],
       [pt ? 'O Maestro' : 'The Maestro', pt ? 'a última nota do mundo' : "the world's last note"],
+      [pt ? 'A banda' : 'The band', pt ? 'Lira · Bumbo · Dona Badalo · Chocalho · Cristalina · Trompa · os Coralitos · Grave' : 'Lira · Bumbo · Granny Clang · Rattle · Cristalina · Trompa · the Chorlets · Grave'],
       [pt ? 'O Silêncio' : 'The Silence', pt ? 'que também faz parte da música' : 'who is part of the music too'],
       [pt ? 'Feito com' : 'Made with', 'three.js · Web Audio · TypeScript'],
     ];
@@ -623,7 +624,7 @@ const GALLERY_CSS = `
 .story-gallery .sg-card:hover { transform: translateY(-2px) scale(1.03); box-shadow: inset 0 0 0 2px var(--c1), 0 10px 22px rgba(0,0,0,.5); }
 .story-gallery .sg-card .g { width: 28px; height: 28px; color: var(--c1); filter: drop-shadow(0 0 8px rgba(255,255,255,.25)); display: flex; align-items: center; justify-content: center; }
 .story-gallery .sg-card .g svg { width: 100%; height: 100%; }
-.story-gallery .sg-card .g em { font-style: normal; font-family: var(--deco, Georgia, serif); font-weight: 900; font-size: 22px; }
+.story-gallery .sg-card .g em { font-style: normal; font-family: var(--serif, Georgia, serif); font-weight: 700; font-size: 24px; letter-spacing: .04em; }
 .story-gallery .sg-card b { font-size: 13px; font-weight: 800; line-height: 1.15; text-align: center; }
 .story-gallery .sg-card.chapter { background: linear-gradient(160deg, var(--c1), var(--c2) 70%); color: #2a1d14; }
 .story-gallery .sg-card.chapter .g { color: #2a1d14; }

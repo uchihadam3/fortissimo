@@ -392,7 +392,13 @@ export class Cine {
         skipBtn.style.setProperty('--hold', String(Math.min(1, holdT / 1.2)));
         if (holdT > 1.2) this.skip();
       } else skipBtn.style.setProperty('--hold', '0');
-      this.update();
+      try {
+        this.update();
+      } catch (e) {
+        // never hang on a broken frame: report it once and end the scene
+        if (!this.finishing) console.error('[cine] frame failed', e);
+        this.finish(300);
+      }
     });
   }
 
@@ -1163,7 +1169,14 @@ function evalPath(pts: Anchor[], k: number): THREE.Vector3 {
 /** run a whole scene: build the set, let the script stage it, play it (resolves true if it was skipped) */
 export async function runScene(app: App, set: SetSpec, script: (c: Cine) => void | Promise<void>, fadeIn = 1400): Promise<boolean> {
   const c = new Cine(app, set);
-  await script(c);
+  try {
+    await script(c);
+  } catch (e) {
+    // a broken scene must never strand the player on a black screen: end it and move on
+    console.error('[cine] scene script failed', e);
+    await c.finish(0);
+    return true;
+  }
   await c.run(fadeIn);
   return c.skipped;
 }
@@ -1494,6 +1507,11 @@ function openingScript(app: App, c: Cine) {
     c.during(T_SHATTER, T_SHATTER + 0.4, () => {});
   });
   c.grade(T_SHATTER, 0.5, { aberration: 0, saturation: 0.75 });
+  // its work done, the giant draws its hand back and looms over the grey
+  c.at(T_SHATTER + 1.5, () => {
+    giant.reach(null);
+    giant.pose = 'loom';
+  });
   // ── 15. five shards fly to the five lands; the camera chases the meadow's
   const shardTargets = voices.map((lm, i) => () => lm.group.position.clone().add(tmpV.set(0, i === 0 ? 1 : 30, 0)));
   const flights = voices.map((_lm, i) => c.shardFlight(T_SHATTER + 0.05, i === 0 ? 6.0 : 3.6, SHARD_COLORS[i], () => heart(), shardTargets[i], i === 0 ? 34 : 26, 1.6));
@@ -1659,12 +1677,15 @@ function openingScript(app: App, c: Cine) {
   c.at(T_PLUCK + 1.3, () => fx.ring(turtle.group.position.clone().setY(turtle.group.position.y - 0.8), 24, '#ffd36b', 2.4, 0.05));
   c.grade(T_PLUCK + 0.8, 4, { saturation: 1, vignette: 0.3 });
   c.during(T_PLUCK + 1, T_PLUCK + 5, (k) => (ash.alpha = 0.7 * (1 - k)));
-  c.shot(T_PLUCK, T_PLUCK + 3.9, { pos: [c.Sh(-3.6, 6.9, 2.4), c.Sh(-4.4, 7.4, 3.0)], look: c.Sh(0.0, 6.0, 0.9), fov: 38 });
+  // in profile, face to face, the empty Heart between them; pulling back as the colour spreads
+  c.shot(T_PLUCK, T_PLUCK + 3.9, { pos: [c.Sh(-0.35, 6.8, 5.3), c.Sh(-0.3, 7.9, 7.2)], look: [c.Sh(-0.2, 6.3, 1.0), c.Sh(-0.2, 6.2, 0.4)], fov: [36, 44] });
   // the colossus opens its eyes
   const T_EYE = T_PLUCK + 3.9;
   c.during(T_EYE + 0.4, T_EYE + 1.4, (k) => (turtle.sleep = 1 - k * 0.55));
-  c.at(T_EYE + 0.2, () => (c.turtleLook = () => c.maestro.world(new THREE.Vector3()).add(tmpV.set(0, 3, 0))));
-  c.shot(T_EYE, T_EYE + 3.3, { pos: [c.T(-2.9, 4.0, -8.9), c.T(-2.6, 3.95, -8.6)], look: c.T(-0.66, 3.4, -7.3), fov: [24, 21] });
+  // (the head and its eye ride the body as it lies down, like the shell: anchors in the shell's frame)
+  c.at(T_EYE + 0.1, () => (c.turtleLook = c.T(0, 3.3, -30)));
+  c.at(T_EYE + 2.3, () => (c.turtleLook = c.T(0, 9, -24)));
+  c.shot(T_EYE, T_EYE + 3.3, { pos: [c.Sh(-2.5, 3.8, -9.5), c.Sh(-2.2, 3.75, -9.2)], look: c.Sh(-0.65, 3.46, -7.24), fov: [26, 22] });
   // it rises and takes the first step
   const T_STEP = T_EYE + 3.3;
   c.during(T_STEP, T_STEP + 1.2, (k) => (turtle.sleep = 0.45 * (1 - k)));
@@ -1691,12 +1712,12 @@ function openingScript(app: App, c: Cine) {
       c.shake(0.5);
     }
   };
-  c.shot(T_STEP, T_STEP + 3.6, { pos: [c.T(-6.2, 0.9, -8.2), c.T(-6.6, 1.1, -7.6)], look: [c.T(-3.0, 1.2, -3.4), c.T(-2.6, 2.6, -2.6)], fov: 44 });
+  c.shot(T_STEP, T_STEP + 3.6, { pos: [c.T(-7.6, 1.6, -9.8), c.T(-8.0, 1.9, -9.0)], look: [c.T(-3.0, 1.1, -3.6), c.T(-2.4, 2.8, -3.2)], fov: 46 });
   // ── the title: the colossus walks on into the grey, a small circle of colour around it
   const T_TITLE = T_STEP + 3.6;
   c.cue(T_TITLE + 0.6, 'intro:title');
   c.colour(T_STEP, 3, 0.35);
-  c.shot(T_TITLE, T_TITLE + 9, { pos: [c.T(-13, 6, 12), c.T(-25, 27, 36)], look: [c.T(0, 4, -18), c.T(0, 3, -44)], fov: [42, 46], ease: ease.inOut });
+  c.shot(T_TITLE, T_TITLE + 9, { pos: [c.T(-6, 5.5, 14), c.T(-12, 26, 38)], look: [c.T(0, 3.5, -16), c.T(0, 2, -40)], fov: [42, 46], ease: ease.inOut });
   c.at(T_TITLE + 1.6, () => c.card(logoHTML(app.screens.t('tagline')), 'cine-title'));
   c.end(T_TITLE + 9.5);
 }
@@ -1768,7 +1789,7 @@ function endingScript(app: App, c: Cine) {
   // ── 2. it shrinks in a storm of ink
   c.shot(5.2, 11, { pos: [c.T(-14, 8, -6), c.T(-10, 3.4, -24)], look: [c.T(0, 14, -46), c.T(0, 1.4, -46)], fov: [44, 34] });
   c.during(5.4, 10, (k) => {
-    size = 30 - ease.inOut(k) * 29.2;
+    size = 30 - ease.inOut(k) * 29.4;
     if (Math.random() < 0.5) fx.burst(far.clone().setY(far.y + size * 1.4), '#1d1a2b', 8, 3 + size * 0.2, 0.4 + size * 0.05, 1.4, false, -0.6);
   });
   c.cue(8, 'ending:alone');
@@ -1842,7 +1863,7 @@ function endingScript(app: App, c: Cine) {
   c.shot(T_GIFT + 2.4, T_GIFT + 5.6, { pos: [c.T(-5, 4, -10), c.T(-6, 8.5, -6)], look: [c.T(0, 4, -12), c.Sh(0, 7.4, 0)], fov: 42 });
   // ── 9. the Heart is whole: a pillar of light, a wave of colour
   const T_WHOLE = 47.8;
-  c.shot(T_WHOLE - 2.2, T_WHOLE + 2.4, { pos: [c.Sh(2.2, 7.6, -2.6), c.Sh(1.6, 7.9, -2.2)], look: c.Sh(0, 7.45, 0), fov: [30, 26] });
+  c.shot(T_WHOLE - 2.2, T_WHOLE + 2.4, { pos: [c.Sh(2.9, 7.5, -3.9), c.Sh(2.3, 7.7, -3.2)], look: c.Sh(0, 7.3, 0), fov: [32, 28] });
   c.at(T_WHOLE - 1.6, () => [0, 1, 2, 3].forEach((i) => turtle.flashFacet(i)));
   c.cue(T_WHOLE, 'ending:bloom');
   c.flash(T_WHOLE, '#fff4d8', 0.9, 1.4);
@@ -1869,7 +1890,7 @@ function endingScript(app: App, c: Cine) {
   });
   c.life(T_WHOLE, 7, 1.1);
   c.colour(T_WHOLE, 4, 1.6);
-  c.bloom(T_WHOLE, 1, 0.75);
+  c.bloom(T_WHOLE, 1, 0.6);
   c.bloom(T_WHOLE + 3, 3, 0.45);
   // ── 10. the Great Song: the whole band, in concert
   const T_SONG = T_WHOLE + 2.4;

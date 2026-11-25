@@ -110,7 +110,12 @@ export async function playStory(app: App, id: string): Promise<void> {
   const s = SCENE_BY_ID.get(id);
   if (!s) return;
   audio.setIntensity(0);
-  await s.play(app);
+  try {
+    await s.play(app);
+  } catch (e) {
+    console.error('[story] scene failed', id, e);
+    await app.screens.fadeTo(1, 300);
+  }
 }
 
 /**
@@ -612,7 +617,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       // 3. Lira plucks; golden notes fly to the statue
       c.cue(7.4, 'story:wake');
       const lira = c.band.get('harp')!;
-      c.shot(7.4, 10.2, { pos: [c.R(lira, 1.2, 1.2, 2.0), c.R(lira, 1.0, 1.3, 1.6)], look: c.mix(c.R(lira, 0, 0.8, 0), () => top.clone().setY(top.y + 0.8), 0.35), fov: 36 });
+      c.shot(7.4, 10.2, { pos: [c.R(lira, -1.5, 1.5, 1.6), c.R(lira, -1.3, 1.6, 1.3)], look: c.mix(c.R(lira, 0, 0.8, 0), () => top.clone().setY(top.y + 0.8), 0.35), fov: 38 });
       c.at(7.6, () => c.mpose('conduct'));
       serenade(c, 7.8, 2.2, ['harp'], () => top.clone().setY(top.y + 0.8), 18);
       // 4. colour runs down into the stone
@@ -746,9 +751,9 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     kid.pose = 'small';
     kid.lookAt(valley);
     c.cue(0.3, 'story:memory');
-    c.shot(0, 5, { pos: [c.R(() => hill, -1.6, 2.2, -3.4), c.R(() => hill, -1.2, 1.9, -2.8)], look: () => valley.clone().setY(valley.y + 1.5), fov: 40 });
+    c.shot(0, 5, { pos: [c.R(() => hill, -2.6, 1.9, 2.8), c.R(() => hill, -2.2, 1.7, 2.3)], look: () => valley.clone().setY(valley.y + 1.5), fov: 40 });
     c.shot(5, 9.4, { pos: [c.R(() => valley, 5, 1.6, 7), c.R(() => valley, 3.4, 1.4, 6)], look: () => valley.clone().setY(valley.y + 0.8), fov: 38 });
-    c.shot(9.4, 13, { pos: [c.R(() => hill, 2.2, 1.4, 2.2), c.R(() => hill, 1.8, 1.3, 1.8)], look: () => hill.clone().setY(hill.y + 0.9), fov: 30 });
+    c.shot(9.4, 13, { pos: [c.R(() => hill, 2.2, 1.2, -1.8), c.R(() => hill, 1.9, 1.1, -1.5)], look: () => hill.clone().setY(hill.y + 0.9), fov: 30 });
     c.during(9.4, 13, () => (kid.group.rotation.z = Math.sin(c.wt * 2.2) * 0.06));
     // a dancer glances toward the hill… and turns away: nobody sees it
     const glancer = fest.dancers[0];
@@ -952,7 +957,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
         c.view.fx.burst(kid.group.position.clone().setY(kid.group.position.y + 0.9), '#6a6478', 6, 0.8, 0.2, 0.6, false, 0.5);
       });
     }
-    c.shot(8, 11.4, { pos: [c.R(() => near, 1.6, 0.9, 1.4), c.R(() => near, 1.4, 0.8, 1.2)], look: () => near.clone().setY(near.y + 0.8), fov: 30 });
+    c.shot(8, 11.4, { pos: [c.R(() => near, 1.9, 0.9, -1.3), c.R(() => near, 1.6, 0.85, -1.1)], look: () => near.clone().setY(near.y + 0.8), fov: 30 });
     // the festival goes on; it lowers its hands and walks away into the dunes
     const away = c.roadPoint(c.s0 - 30, -30, 0);
     c.at(11.6, () => (kid.pose = 'small'));
@@ -1210,7 +1215,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       crack.position.copy(head()).add(tmp.set(0.05, 0.05, 0.12));
       (crack.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.9;
     });
-    c.shot(11, 16, { pos: [c.R(() => head(), 0.9, 0.1, 1.2), c.R(() => head(), 0.75, 0.05, 1.0)], look: () => head(), fov: 28 });
+    c.shot(11, 16, { pos: [c.R(() => head(), 0.9, 0.1, -1.2), c.R(() => head(), 0.75, 0.05, -1.0)], look: () => head(), fov: 28 });
     c.end(16);
   }),
 
@@ -1219,7 +1224,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
   f1: (app) => {
     audio.setAmbience('forge', 0.6);
     const lang = app.screens.lang;
-    return runScene(app, setFor('f1', 'forge', { bars: 70, s0: 10, seed: 57, curviness: 0.2, features: [{ kind: 'river', from: 26, to: 34 }, { kind: 'hills', from: 0, to: 140 }] }), (c) => {
+    return runScene(app, setFor('f1', 'forge', { bars: 70, s0: 21, seed: 57, curviness: 0.2, features: [{ kind: 'river', from: 26, to: 34 }, { kind: 'hills', from: 0, to: 140 }] }), (c) => {
       const v = c.view;
       corruptVoice(c);
       const sB = 30;
@@ -1376,6 +1381,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     const at = c.roadPoint(c.s0 + 10, 0, 0);
     const kid = c.silence(0.6, at);
     kid.pose = 'small';
+    kid.lookAt(c.roadPoint(c.s0 - 20, 0, 0));
     let size = 0.6;
     c.add({ update: () => kid.group.scale.setScalar(size) }, null);
     c.cue(0.3, 'story:memory');
@@ -1401,9 +1407,9 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.shake(0.8);
     });
     c.during(11, 13, (k) => (crown.snap = ease.out(k)));
-    c.shot(0, 4, { pos: [c.R(() => at, -4, 1.4, -5), c.R(() => at, -3.4, 1.2, -4.4)], look: () => at.clone().setY(at.y + 1), fov: 36 });
-    c.shot(4, 10, { pos: [c.R(() => at, -14, 3, -16), c.R(() => at, -30, 6, -34)], look: () => kid.group.position.clone().setY(at.y + size * 1.8), fov: 44 });
-    c.shot(10, 16, { pos: [c.R(() => at, -30, 4, -38), c.R(() => at, -34, 3, -42)], look: () => kid.group.position.clone().setY(at.y + size * 2.6), fov: [44, 48] });
+    c.shot(0, 4, { pos: [c.R(() => at, -3, 1.4, 5), c.R(() => at, -2.6, 1.2, 4.4)], look: () => at.clone().setY(at.y + 1), fov: 36 });
+    c.shot(4, 10, { pos: [c.R(() => at, -10, 3, 16), c.R(() => at, -24, 6, 36)], look: () => kid.group.position.clone().setY(at.y + size * 1.8), fov: 44 });
+    c.shot(10, 16, { pos: [c.R(() => at, -24, 4, 40), c.R(() => at, -28, 3, 46)], look: () => kid.group.position.clone().setY(at.y + size * 2.6), fov: [44, 48] });
     c.end(16);
   }),
 
@@ -1503,7 +1509,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       const v = c.view;
       const lm = v.landmark.group;
       const from = lm.localToWorld(new THREE.Vector3(0, 33.4, 0));
-      const land = c.roadPoint(c.s0 + 24, 0, 0);
+      const land = c.roadPoint(c.s0 + 40, 0, 0);
       const sil = c.silence(4, from);
       sil.pose = 'loom';
       let scale = 4;
@@ -1518,7 +1524,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.during(3.6, 9, (k) => {
         const e = ease.inOut(k);
         sil.group.position.lerpVectors(from, land, e);
-        scale = 4 + e * 20;
+        scale = 4 + e * 14;
         if (Math.random() < 0.5) v.fx.burst(sil.group.position.clone().add(tmp.set(0, scale * 1.2, 0)), '#1d1a2b', 8, 4, 1, 1.6, false, -0.4);
       });
       c.shot(3.6, 9, { pos: [c.T(-10, 3, 6), c.T(-14, 4, 10)], look: () => sil.group.position.clone().add(tmp.set(0, scale * 1.4, 0)), fov: [40, 50] });
@@ -1563,14 +1569,16 @@ function guardianScene(app: App, world: WorldId, id: string, o: { time?: Time; g
     c.cue(0.2, 'story:wake');
     const lm = v.landmark.group.position;
     // 1. the guardian, defeated, is freed
-    c.shot(0, 3.4, { pos: [c.T(-9, 4, -6), c.T(-8, 4.6, -7)], look: () => spot.clone().setY(spot.y + 3), fov: 42 });
+    // each land's ritual is filmed from its own side (they mirror one another)
+    const X = WORLD_INDEX[world] % 2 ? -1 : 1;
+    c.shot(0, 3.4, { pos: [c.T(-9 * X, 4, -6), c.T(-8 * X, 4.6, -7)], look: () => spot.clone().setY(spot.y + 3), fov: 42 });
     c.placeName(0.6, 3.2, VOICE_NAMES[world][app.screens.lang]);
     // 2. its shard rises and flies home to the Heart
     const home = shardHome(c, world, 3.4, () => spot.clone().setY(spot.y + 2), 2.2, 3.0);
     const tHome = home.end;
-    c.shot(3.4, 5.6, { pos: [c.T(-5, 3, -9), c.T(-4.6, 3.6, -9.6)], look: () => spot.clone().setY(spot.y + 5), fov: 38 });
+    c.shot(3.4, 5.6, { pos: [c.T(-5 * X, 3, -9), c.T(-4.6 * X, 3.6, -9.6)], look: () => spot.clone().setY(spot.y + 5), fov: 38 });
     // follow the shard over the colossus' head down into the Heart
-    c.shot(5.6, tHome + 0.6, { pos: [c.T(-7, 7.5, -11), c.Sh(-3.2, 8.6, -3.4)], look: () => home.at().clone(), fov: [44, 32], ease: ease.inOut, lookEase: ease.linear });
+    c.shot(5.6, tHome + 0.6, { pos: [c.T(-7 * X, 7.5, -11), c.Sh(-3.2 * X, 8.6, -3.4)], look: () => home.at().clone(), fov: [44, 32], ease: ease.inOut, lookEase: ease.linear });
     // 3. the Voice rings
     const tVoice = tHome + 0.8;
     voiceSings(c, world, tVoice);
@@ -1579,9 +1587,9 @@ function guardianScene(app: App, world: WorldId, id: string, o: { time?: Time; g
       c.mpose('cheer');
       v.turtle.cheer();
     });
-    c.shot(tVoice, tVoice + 4, { pos: [c.T(-8, 3, 4), c.T(-10, 6, 6)], look: [() => lm.clone().setY(lm.y + 10), () => lm.clone().setY(lm.y + 16)], fov: [44, 50] });
+    c.shot(tVoice, tVoice + 4, { pos: [c.T(-8 * X, 3, 4), c.T(-10 * X, 6, 6)], look: [() => lm.clone().setY(lm.y + 10), () => lm.clone().setY(lm.y + 16)], fov: [44, 50] });
     // 4. colour floods the land
-    c.shot(tVoice + 4, tVoice + 8.4, { pos: [c.T(-20, 18, 22), c.T(-34, 32, 40)], look: [c.T(0, 4, -10), c.T(0, 2, -24)], fov: 46, ease: ease.inOut });
+    c.shot(tVoice + 4, tVoice + 8.4, { pos: [c.T(-20 * X, 18, 22), c.T(-34 * X, 32, 40)], look: [c.T(0, 4, -10), c.T(0, 2, -24)], fov: 46, ease: ease.inOut });
     c.at(tVoice + 4.2, () => {
       c.play('all');
       c.mpose('conduct');

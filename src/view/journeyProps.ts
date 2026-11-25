@@ -325,24 +325,23 @@ export class Landmark {
       rib.push(new THREE.Vector3(Math.cos(a) * r, 4 + u * 42, Math.sin(a) * r));
     }
     this.group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rib), 200, 0.22, 6, false), marble));
-    // the conductor's balcony near the top, and the porcelain mask that watches the road
+    // the conductor's balcony near the top, with its podium and a great music stand facing the road
     const balcony = new THREE.Mesh(cyl(2.6, 2.2, 0.6, 12), marble);
     balcony.position.y = 33;
     this.group.add(balcony);
-    const mask = new THREE.Mesh(sph(2.0, 24, 16), stdMat('#f2f0f7', 0.25));
-    mask.scale.set(0.9, 1.15, 0.45);
-    mask.position.set(0, 37.5, 2.2);
-    this.group.add(mask);
-    for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(sph(0.36, 10, 8), stdMat('#120f1c', 0.3));
-      eye.scale.set(1, 0.6, 0.4);
-      eye.position.set(s * 0.62, 38.0, 3.05);
-      this.group.add(eye);
-      const st = new THREE.Mesh(box(0.9, 0.12, 0.08), stdMat('#3a3046', 0.5));
-      st.rotation.z = s * 0.6;
-      st.position.set(0, 36.6, 3.1);
-      this.group.add(st);
-    }
+    const rail = new THREE.Mesh(torus(2.5, 0.08, 6, 32), gold);
+    rail.rotation.x = Math.PI / 2;
+    rail.position.y = 33.9;
+    this.group.add(rail);
+    const podium = new THREE.Mesh(cyl(0.9, 1.0, 0.4, 10), marble);
+    podium.position.set(0, 33.5, 0.9);
+    this.group.add(podium);
+    const stem = new THREE.Mesh(cyl(0.08, 0.1, 1.6, 6), gold);
+    stem.position.set(0, 34.3, 2.0);
+    const stand = new THREE.Mesh(box(1.6, 1.1, 0.08), stdMat('#3a3046', 0.5));
+    stand.position.set(0, 35.2, 2.1);
+    stand.rotation.x = -0.5;
+    this.group.add(stem, stand);
     const tip = new THREE.Mesh(sph(0.7, 12, 8), gold);
     tip.position.y = 48.3;
     this.group.add(tip);
