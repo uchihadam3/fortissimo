@@ -14,7 +14,7 @@ import { Sky } from './sky';
 import { Grass } from './grass';
 import { Turtle } from './turtle';
 import { TowerView } from './towers';
-import { EnemyView } from './enemies';
+import { CREATURE_INK, EnemyView } from './enemies';
 import { Fx } from './fx';
 import { Landmark, MistView, PickupView } from './journeyProps';
 import { damp, glowMat, torus } from './kit';
@@ -23,11 +23,8 @@ import { Rng } from '../core/rng';
 
 export type Pick = { type: 'slot'; id: number } | { type: 'pickup'; id: number } | { type: 'turtle' };
 
-const INK: Partial<Record<string, string>> = {
-  blot: '#463d63', blotling: '#6a5f8c', scurry: '#4f6185', shell: '#4a4660', moth: '#9a90b8', shield: '#3d4a6b',
-  bubble: '#9f96d6', phantom: '#d9d3ff', muffler: '#8a8598', mender: '#3f5a52', obelisk: '#4a465c', bossBlot: '#3a3158',
-  bossScarab: '#a8742e', bossMoth: '#9fc4ea', bossGolem: '#ff6a1f', silence: '#1d1a2b',
-};
+/** the ink each creature bursts into when it turns back into golden notes */
+const INK: Partial<Record<string, string>> = CREATURE_INK;
 
 class SlotPad {
   readonly group = new THREE.Group();
@@ -124,6 +121,8 @@ export class JourneyView {
 
   constructor(readonly engine: Engine, readonly def: JourneyDef, readonly sim: Journey, lookOverride?: WorldLook) {
     this.look = lookOverride ?? LOOKS[def.world];
+    // the musicians on the shell turn to play for whoever is watching
+    TowerView.audience = engine.camera.position;
     const look = this.look;
     this.speedPerBeat = sim.speed;
     const seed = def.seed ?? 7;
@@ -839,6 +838,9 @@ export class JourneyView {
         if (v) {
           v.push(sim.time, e.x, e.z);
           v.revealed = !e.def.camo || e.revealedUntil > sim.time;
+          // creatures that dig in (the dune scorpions) sink while they are underground
+          const bur = (e as { burrowed?: boolean }).burrowed;
+          if (bur !== undefined && !e.def.boss) v.burrowed = bur;
         }
       }
     }
