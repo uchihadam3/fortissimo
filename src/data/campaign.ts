@@ -182,9 +182,11 @@ interface JourneySpec {
 }
 
 /**
- * Difficulty of every generated movement: its threat budgets are multiplied by these factors.
- * Found with `npx tsx tools/balance.ts --tune` (the good bot plays each movement at the edge of its
- * skill), then rounded by hand.
+ * Difficulty of every generated movement: its creatures grow in number (factor^0.4) and health
+ * (factor^0.6), and so does a guardian in its movement. Found with `npx tsx tools/balance.ts --tune`
+ * (the good bot plays each movement at the edge of its skill, at most 2.5× the movement before),
+ * then adjusted by hand: the first land kept welcoming for a novice, and the late movements of the
+ * other lands raised until the good bot loses a few lives (2–3★ main, 1–2★ extras).
  */
 export const TUNE: Record<string, number[]> = {
   // the first land stays welcoming (set by hand below the good bot's edge, so a novice gets through)

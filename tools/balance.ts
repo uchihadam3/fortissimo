@@ -1,6 +1,7 @@
 /**
  * Plays every journey headless with three bots and reports the outcome.
  *   npx tsx tools/balance.ts [levelId…] [--mode virtuoso] [--bots good,novice,spam] [--detail]
+ *   npx tsx tools/balance.ts --tune [levelId…]   (prints difficulty factors per movement for TUNE)
  *
  * good:   varied band, duets, golden notes, upgrades, placement by threat direction
  * novice: slow decisions, obvious moves (the next instrument on the first free plate)
