@@ -64,10 +64,97 @@ export interface Landscape {
   dispose(): void;
   /** grass density 0..1 at a point */
   grassAt(x: number, z: number): number;
+  /**
+   * Draw only the stretch of land around route distance `s` (long journeys stay light): terrain chunks
+   * and props outside the window are skipped, and only props close to the colossus cast shadows.
+   */
+  setFocus(s: number): void;
+}
+
+/** what is drawn around the colossus, in route distance */
+const VIEW_BACK = 160, VIEW_AHEAD = 340;
+const SHADOW_BACK = 60, SHADOW_AHEAD = 62;
+
+/**
+ * Fast "nearest point of the route" for building the land: a coarse field stores, for every 8-unit
+ * cell around the route, the index of the nearest route sample; a query refines around that index.
+ * (The terrain asks this for every grid vertex and every prop; scanning the route each time made long
+ * journeys take seconds to build.)
+ */
+class NearestField {
+  private readonly cell = 8;
+  private readonly minX: number;
+  private readonly minZ: number;
+  private readonly w: number;
+  private readonly h: number;
+  private readonly field: Int32Array;
+
+  constructor(private path: JourneyPath, margin = 240) {
+    const pts = path.pts;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of pts) {
+      if (p.x < x0) x0 = p.x;
+      if (p.x > x1) x1 = p.x;
+      if (p.z < z0) z0 = p.z;
+      if (p.z > z1) z1 = p.z;
+    }
+    this.minX = x0 - margin;
+    this.minZ = z0 - margin;
+    this.w = Math.ceil((x1 - x0 + margin * 2) / this.cell) + 1;
+    this.h = Math.ceil((z1 - z0 + margin * 2) / this.cell) + 1;
+    this.field = new Int32Array(this.w * this.h);
+    const n = pts.length;
+    const stride = 3;
+    for (let j = 0; j < this.h; j++) {
+      const cz = this.minZ + (j + 0.5) * this.cell;
+      for (let i = 0; i < this.w; i++) {
+        const cx = this.minX + (i + 0.5) * this.cell;
+        let best = Infinity, bi = 0;
+        for (let k = 0; k < n; k += stride) {
+          const p = pts[k];
+          const d2 = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz);
+          if (d2 < best) {
+            best = d2;
+            bi = k;
+          }
+        }
+        this.field[j * this.w + i] = bi;
+      }
+    }
+  }
+
+  /** same contract as JourneyPath.nearest: path distance s and signed lateral offset d (+ = right) */
+  nearest(x: number, z: number, out = { s: 0, d: 0 }) {
+    const pts = this.path.pts;
+    const i = Math.max(0, Math.min(this.w - 1, Math.floor((x - this.minX) / this.cell)));
+    const j = Math.max(0, Math.min(this.h - 1, Math.floor((z - this.minZ) / this.cell)));
+    const guess = this.field[j * this.w + i];
+    const lo = Math.max(0, guess - 24), hi = Math.min(pts.length - 1, guess + 24);
+    let best = Infinity, bi = guess;
+    for (let k = lo; k <= hi; k++) {
+      const p = pts[k];
+      const d2 = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+      if (d2 < best) {
+        best = d2;
+        bi = k;
+      }
+    }
+    const p = pts[bi], dir = this.path.dirs[bi];
+    const rx = -dir.z, rz = dir.x;
+    out.s = bi * this.path.step + ((x - p.x) * dir.x + (z - p.z) * dir.z);
+    out.d = (x - p.x) * rx + (z - p.z) * rz;
+    // far from the route (as before): treated as "nowhere near", so nothing is built out there
+    if (best > 125 * 125) {
+      out.s = 0;
+      out.d = 999;
+    }
+    return out;
+  }
 }
 
 export function buildLandscape(world: WorldId, style: LandStyle, length: number, features: Feature[], seed: number, sunDir: THREE.Vector3, pathIn?: JourneyPath): Landscape {
   const path = pathIn ?? new JourneyPath(length, seed, world === 'citadel' ? 0.6 : 1);
+  const near = new NearestField(path);
   const so = (seed % 997) * 0.731;
   const tmpN = { s: 0, d: 0 };
   const featureAt = (s: number, kind: FeatureKind) => {
@@ -93,7 +180,7 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
   }
 
   const heightRaw = (x: number, z: number): number => {
-    const n = path.nearest(x, z, tmpN);
+    const n = near.nearest(x, z, tmpN);
     const s = Math.max(0, Math.min(path.length + 60, n.s));
     const d = n.d;
     const ad = Math.abs(d);
@@ -169,7 +256,7 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
   const heightAt = (x: number, z: number) => sampleGrid(H, x, z);
   const latAt = (x: number, z: number) => sampleGrid(D, x, z);
   const waterAt = (x: number, z: number): number | null => {
-    const n = path.nearest(x, z, tmpN);
+    const n = near.nearest(x, z, tmpN);
     for (const w of waters) {
       if (w.kind === 'river' && Math.abs(n.s - w.s) < 5.5) return w.level;
       if (w.kind === 'lake') {
@@ -194,6 +281,7 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
   const CH = 48; // chunk size in grid cells
   const mat = applyWorldColor(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }), 'land');
   const grassDensity = new Float32Array(gw * gh);
+  const chunks: { mesh: THREE.Mesh; s0: number; s1: number }[] = [];
   for (let cj = 0; cj < gh - 1; cj += CH) {
     for (let ci = 0; ci < gw - 1; ci += CH) {
       const nx = Math.min(CH, gw - 1 - ci) + 1, nz = Math.min(CH, gh - 1 - cj) + 1;
@@ -272,6 +360,16 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
       const m = new THREE.Mesh(geo, mat);
       m.receiveShadow = true;
       group.add(m);
+      // the chunk's extent along the route (its corners and centre), for drawing only what is near
+      let s0 = Infinity, s1 = -Infinity;
+      for (const [px, pz] of [[cx, cz], [minX + ci * R, minZ + cj * R], [minX + (ci + nx) * R, minZ + cj * R], [minX + ci * R, minZ + (cj + nz) * R], [minX + (ci + nx) * R, minZ + (cj + nz) * R]]) {
+        const q = near.nearest(px, pz, tmpN);
+        if (q.d === 999) continue;
+        s0 = Math.min(s0, q.s);
+        s1 = Math.max(s1, q.s);
+      }
+      if (s0 > s1) s0 = s1 = 0;
+      chunks.push({ mesh: m, s0, s1 });
     }
   }
   // a wide hazy ground far away so the world never ends abruptly
@@ -306,12 +404,15 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
   // ── trees, rocks, ruins ──
   const rng = new Rng(seed * 101 + 7);
   const placements = new Map<string, THREE.Matrix4[]>();
+  const placeS = new Map<THREE.Matrix4, number>();
   const add = (kind: PropKind, variant: number, x: number, z: number, scale: number, yOff = 0) => {
     const key = `${kind}:${variant}`;
     let l = placements.get(key);
     if (!l) placements.set(key, (l = []));
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rng.range(0, Math.PI * 2));
-    l.push(new THREE.Matrix4().compose(new THREE.Vector3(x, heightAt(x, z) + yOff, z), q, new THREE.Vector3(scale, scale * rng.range(0.9, 1.15), scale)));
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(x, heightAt(x, z) + yOff, z), q, new THREE.Vector3(scale, scale * rng.range(0.9, 1.15), scale));
+    l.push(m);
+    placeS.set(m, near.nearest(x, z, tmpN).s);
   };
   const areaW = maxX - minX, areaH = maxZ - minZ;
   const tries = Math.floor(areaW * areaH * 0.03 * style.treeDensity);
@@ -319,7 +420,7 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
     const x = minX + rng.next() * areaW, z = minZ + rng.next() * areaH;
     const lat = latAt(x, z);
     if (lat < 12 || lat > 150) continue;
-    const n = path.nearest(x, z, tmpN);
+    const n = near.nearest(x, z, tmpN);
     const forest = featureAt(n.s, 'forest');
     const dens = smooth(-0.1, 0.4, fbm2(x * 0.03 + seed, z * 0.03, 3)) * 0.6 + forest * 0.9;
     if (rng.next() > dens) continue;
@@ -352,17 +453,68 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
     }
   }
   const propMat = applyWorldColor(treeMaterial(), 'tree');
+  // each kind of prop: all its instances sorted by route distance, drawn by two instanced meshes that
+  // share the geometry: the ones near the colossus (casting shadows) and the rest of the visible stretch
+  const propSets: { all: Float32Array; s: Float32Array; nearMesh: THREE.InstancedMesh; farMesh: THREE.InstancedMesh }[] = [];
   for (const [key, mats] of placements) {
     const [kind, variant] = key.split(':') as [PropKind, string];
-    const geo = buildProp(kind, { leaves: style.leaves, trunk: style.trunk, flowers: style.flowers, rock: style.rock, accent: style.accent }, seed * 13 + Number(variant) * 97 + kind.length);
-    const mesh = new THREE.InstancedMesh(geo, propMat, mats.length);
-    mats.forEach((m, i) => mesh.setMatrixAt(i, m));
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.computeBoundingSphere();
-    group.add(mesh);
+    const pal = { leaves: style.leaves, trunk: style.trunk, flowers: style.flowers, rock: style.rock, accent: style.accent };
+    const pseed = seed * 13 + Number(variant) * 97 + kind.length;
+    const geo = buildProp(kind, pal, pseed);
+    // the same prop, lighter, for the far part of the view (fog softens it anyway)
+    const geoFar = buildProp(kind, pal, pseed, 1);
+    mats.sort((a, b) => placeS.get(a)! - placeS.get(b)!);
+    const all = new Float32Array(mats.length * 16);
+    const sArr = new Float32Array(mats.length);
+    mats.forEach((m, i) => {
+      m.toArray(all, i * 16);
+      sArr[i] = placeS.get(m)!;
+    });
+    const nearMesh = new THREE.InstancedMesh(geo, propMat, mats.length);
+    nearMesh.castShadow = true;
+    nearMesh.receiveShadow = true;
+    const farMesh = new THREE.InstancedMesh(geoFar, propMat, mats.length);
+    farMesh.castShadow = false;
+    farMesh.receiveShadow = true;
+    // until the first focus, draw everything (cinematics and menus focus right away anyway)
+    nearMesh.instanceMatrix.array.set(all);
+    nearMesh.count = mats.length;
+    farMesh.count = 0;
+    nearMesh.computeBoundingSphere();
+    group.add(nearMesh, farMesh);
+    propSets.push({ all, s: sArr, nearMesh, farMesh });
   }
+  const lowerBound = (a: Float32Array, v: number) => {
+    let lo = 0, hi = a.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (a[mid] < v) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  let focusS = -1e9;
+  const setFocus = (s: number) => {
+    if (Math.abs(s - focusS) < 12) return;
+    focusS = s;
+    for (const c of chunks) c.mesh.visible = c.s1 >= s - VIEW_BACK && c.s0 <= s + VIEW_AHEAD;
+    for (const p of propSets) {
+      const v0 = lowerBound(p.s, s - VIEW_BACK), v1 = lowerBound(p.s, s + VIEW_AHEAD);
+      const n0 = Math.max(v0, lowerBound(p.s, s - SHADOW_BACK)), n1 = Math.min(v1, lowerBound(p.s, s + SHADOW_AHEAD));
+      const na = p.nearMesh.instanceMatrix.array as Float32Array;
+      const fa = p.farMesh.instanceMatrix.array as Float32Array;
+      na.set(p.all.subarray(n0 * 16, n1 * 16));
+      p.nearMesh.count = Math.max(0, n1 - n0);
+      fa.set(p.all.subarray(v0 * 16, n0 * 16), 0);
+      fa.set(p.all.subarray(n1 * 16, v1 * 16), Math.max(0, n0 - v0) * 16);
+      p.farMesh.count = Math.max(0, n0 - v0) + Math.max(0, v1 - n1);
+      for (const m of [p.nearMesh, p.farMesh]) {
+        m.instanceMatrix.needsUpdate = true;
+        m.visible = m.count > 0;
+        if (m.count > 0) m.computeBoundingSphere();
+      }
+    }
+  };
 
   return {
     group, path, heightAt, waterAt,
@@ -373,6 +525,7 @@ export function buildLandscape(world: WorldId, style: LandStyle, length: number,
       for (const w of waterMats) w.uniforms.uTime.value = t;
       treeUniforms.uTime.value = t;
     },
+    setFocus,
     dispose() {
       group.traverse((o) => {
         const m = o as THREE.Mesh;
