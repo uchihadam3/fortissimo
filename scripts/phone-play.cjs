@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   const [out, level = 'm1', towers = 'harp,harp,harp', secs = '30', w = '844', h = '390', scale = '2'] = process.argv.slice(2);
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const page = await browser.newPage({ viewport: { width: +w, height: +h }, deviceScaleFactor: +scale, isMobile: true, hasTouch: true });
-  await page.goto(`http://localhost:5173/?play=${level}&done=${process.env.DONE ?? ''}`, { waitUntil: 'load' });
+  await page.goto(`http://localhost:${process.env.PORT || 5173}/?play=${level}&done=${process.env.DONE ?? ''}`, { waitUntil: 'load' });
   await page.waitForFunction(() => !!window.__battle, null, { timeout: 240000 });
   // play like a good player: fill the plates in order with what can be afforded, then level towers up
   const play = (list) => {

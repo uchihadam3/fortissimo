@@ -11,6 +11,8 @@ export const TOWER_KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crys
 
 export type EnemyKind =
   | 'blot' | 'blotling' | 'scurry' | 'shell' | 'moth' | 'shield' | 'bubble' | 'phantom' | 'muffler' | 'mender' | 'obelisk'
+  // v2 bestiary (see docs/DESIGN-v2.md §3): dunes, peaks, forge, citadel families
+  | 'scorpion' | 'whirl' | 'echo' | 'wolf' | 'ember' | 'slug' | 'mimic' | 'knight' | 'conductor'
   | 'bossBlot' | 'bossScarab' | 'bossMoth' | 'bossGolem' | 'silence';
 
 /** Battle songs and other music. Every battle song is in 4/4. */
@@ -40,6 +42,57 @@ export const SONGS: Record<SongId, SongInfo> = {
 };
 
 export const STEPS_PER_BEAT = 4; // towers think in 16th notes
+
+// ───────────────────────────── the band (v2) ─────────────────────────────
+// Every instrument belongs to a section of the orchestra. More distinct sections on the shell =
+// more harmony (richer music, stronger band); some neighbours form duets. See docs/DESIGN-v2.md §1.
+
+export type Section = 'strings' | 'percussion' | 'bells' | 'brass' | 'voices' | 'low';
+
+export const SECTIONS: Section[] = ['strings', 'percussion', 'bells', 'brass', 'voices', 'low'];
+
+export const SECTION_OF: Record<TowerKind, Section> = {
+  harp: 'strings',
+  drum: 'percussion',
+  shaker: 'percussion',
+  bell: 'bells',
+  crystal: 'bells',
+  horn: 'brass',
+  choir: 'voices',
+  bass: 'low',
+};
+
+export type DuetId = 'march' | 'groundwork' | 'shimmer' | 'fanfare' | 'hymn' | 'serenade' | 'groove' | 'thunder';
+
+export interface DuetDef {
+  id: DuetId;
+  /** the two instruments (order does not matter) that form it on adjacent plates */
+  a: TowerKind;
+  b: TowerKind;
+  /** ribbon / flourish colour */
+  color: string;
+}
+
+export const DUETS: DuetDef[] = [
+  { id: 'march', a: 'harp', b: 'drum', color: '#ffd36b' },
+  { id: 'groundwork', a: 'drum', b: 'bass', color: '#ff8a5a' },
+  { id: 'shimmer', a: 'bell', b: 'crystal', color: '#9fe8ff' },
+  { id: 'fanfare', a: 'horn', b: 'drum', color: '#ffb84a' },
+  { id: 'hymn', a: 'choir', b: 'bell', color: '#ffd9f0' },
+  { id: 'serenade', a: 'harp', b: 'choir', color: '#ff9ec7' },
+  { id: 'groove', a: 'shaker', b: 'drum', color: '#c8f07a' },
+  { id: 'thunder', a: 'crystal', b: 'bass', color: '#c9a0ff' },
+];
+
+/** What the band on the shell sounds like right now (shared by the sim, the HUD, the view and audio). */
+export interface BandState {
+  /** how many towers of each section are playing (muted/disabled towers do not count) */
+  sections: Record<Section, number>;
+  /** distinct sections − 1 (0…5) */
+  harmony: number;
+  /** active duets between two towers (tower ids) */
+  duets: { id: DuetId; a: number; b: number }[];
+}
 export const STEPS_PER_BAR = 16;
 
 // ───────────────────────────── towers ─────────────────────────────
@@ -178,6 +231,23 @@ export interface EnemyDef {
   boss?: boolean;
   /** relative difficulty for the wave generator / balance tool */
   threat: number;
+  // ── v2 abilities (optional; implemented by the simulation) ──
+  /** single-target shots (harp plucks, horn waves) pass through it: only area, chains, bells and drops hurt */
+  deflect?: boolean;
+  /** comes back once, this fraction of its hp, one bar after dying */
+  echo?: number;
+  /** hides underground (untargetable) for `for` bars out of every `every` bars */
+  burrow?: { every: number; for: number };
+  /** travels in packs (the wave generator spawns it in groups) */
+  pack?: boolean;
+  /** when it reaches the colossus it also silences the nearest tower for this many bars */
+  disable?: number;
+  /** copies the most common instrument on the shell and mutes every tower of that kind while alive */
+  mimic?: boolean;
+  /** bells cannot slow it */
+  steady?: boolean;
+  /** creatures within `radius` move `speed`× faster (on the downbeat for a conductor) */
+  aura?: { radius: number; speed: number };
 }
 
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
@@ -192,6 +262,16 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   muffler: { kind: 'muffler', hp: 110, speed: 1.6, armor: 0.2, flying: false, bounty: 15, lives: 2, radius: 0.9, mute: 7.5, threat: 4 },
   mender: { kind: 'mender', hp: 80, speed: 1.8, armor: 0, flying: false, bounty: 12, lives: 1, radius: 0.8, heal: 14, threat: 3 },
   obelisk: { kind: 'obelisk', hp: 320, speed: 0, armor: 0.2, flying: false, bounty: 30, lives: 0, radius: 1.2, mute: 11, threat: 0 },
+  // v2 bestiary: placeholder numbers, tuned by the gameplay pass
+  scorpion: { kind: 'scorpion', hp: 130, speed: 1.9, armor: 0.45, flying: false, bounty: 12, lives: 1, radius: 0.9, burrow: { every: 4, for: 1 }, threat: 3 },
+  whirl: { kind: 'whirl', hp: 90, speed: 2.4, armor: 0, flying: false, bounty: 10, lives: 1, radius: 0.85, deflect: true, aura: { radius: 3, speed: 1.25 }, threat: 3 },
+  echo: { kind: 'echo', hp: 70, speed: 2.2, armor: 0, flying: false, bounty: 8, lives: 1, radius: 0.75, echo: 0.5, threat: 2.4 },
+  wolf: { kind: 'wolf', hp: 40, speed: 4.4, armor: 0, flying: false, bounty: 4, lives: 1, radius: 0.7, pack: true, threat: 1.3 },
+  ember: { kind: 'ember', hp: 36, speed: 3.4, armor: 0, flying: true, bounty: 4, lives: 1, radius: 0.6, pack: true, threat: 1.3 },
+  slug: { kind: 'slug', hp: 420, speed: 1.0, armor: 0.25, flying: false, bounty: 28, lives: 3, radius: 1.3, disable: 4, threat: 7 },
+  mimic: { kind: 'mimic', hp: 160, speed: 1.9, armor: 0.1, flying: false, bounty: 18, lives: 2, radius: 0.85, mimic: true, threat: 6 },
+  knight: { kind: 'knight', hp: 260, speed: 1.4, armor: 0.6, flying: false, bounty: 24, lives: 2, radius: 1.0, shield: 80, steady: true, threat: 7 },
+  conductor: { kind: 'conductor', hp: 380, speed: 1.5, armor: 0.2, flying: false, bounty: 40, lives: 3, radius: 1.0, aura: { radius: 6, speed: 1.35 }, threat: 10 },
   bossBlot: { kind: 'bossBlot', hp: 2400, speed: 0.95, armor: 0.1, flying: false, bounty: 150, lives: 10, radius: 2.1, boss: true, threat: 40 },
   bossScarab: { kind: 'bossScarab', hp: 4200, speed: 1.05, armor: 0.45, flying: false, bounty: 200, lives: 10, radius: 2.2, boss: true, threat: 60 },
   bossMoth: { kind: 'bossMoth', hp: 4600, speed: 1.2, armor: 0.1, flying: true, bounty: 220, lives: 10, radius: 2.3, boss: true, threat: 70 },

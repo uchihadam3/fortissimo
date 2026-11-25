@@ -3,8 +3,8 @@
  * ambience) is remembered and applied once the AudioContext runs. Without an audio device the
  * clock keeps running on performance.now() and every sound is a silent no-op.
  */
-import { SONGS, type EnemyKind, type SongId, type TowerKind, type WorldId } from '../../sim/defs';
-import type { AudioAPI, CinematicCue, SongClock, Volumes } from '../api';
+import { SONGS, type DuetId, type EnemyKind, type SongId, type TowerKind, type WorldId } from '../../sim/defs';
+import type { AudioAPI, BandMix, CinematicCue, SongClock, Volumes } from '../api';
 import { Ambience, type Place } from './ambience';
 import { Cinema } from './cinema';
 import { Clock } from './clock';
@@ -379,6 +379,13 @@ const api: AudioAPI = {
   newTower: guard('newTower', () => {
     if (E.live) E.sfx?.newTower();
   }),
+
+  // v2 band API: no-ops until the audio pass implements them
+  setBand: guard('setBand', (_mix: BandMix) => {}),
+  duet: guard('duet', (_id: DuetId, _t: number, _pan: number) => {}),
+  movement: guard('movement', (_index: number, _total: number, _t: number) => {}),
+  plateUnlock: guard('plateUnlock', (_t: number, _pan: number) => {}),
+  joinMotif: guard('joinMotif', (_kind: TowerKind) => {}),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();

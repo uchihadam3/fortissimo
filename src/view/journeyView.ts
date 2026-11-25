@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import type { Engine } from '../core/engine';
 import type { Journey, JourneyDef, SimEvent, Enemy } from '../sim/journey';
-import { ENEMIES, ENEMY_SCALE, TOWERS, type TowerKind } from '../sim/defs';
+import { ENEMIES, ENEMY_SCALE, TOWERS, type DuetId, type TowerKind } from '../sim/defs';
 import { SLOTS } from '../sim/shell';
 import { LOOKS, type WorldLook } from './styles';
 import { buildLandscape, type Landscape, treeUniforms } from './landscape';
@@ -341,6 +341,9 @@ export class JourneyView {
       this.firstCam = true;
     }
   }
+
+  /** v2: glowing ribbons between duet partners on the shell (tower ids); implemented by the integrator */
+  setDuets(_list: { id: DuetId; a: number; b: number }[]): void {}
 
   /** jump straight to the camera goal (no easing) */
   snapCamera() {

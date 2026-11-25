@@ -14,7 +14,7 @@
  * When there is no audio device, `now()` and `songClock()` fall back to performance.now() so the
  * game keeps a steady clock (and every sound call is a silent no-op).
  */
-import type { EnemyKind, SongId, TowerKind, WorldId } from '../sim/defs';
+import type { DuetId, EnemyKind, Section, SongId, TowerKind, WorldId } from '../sim/defs';
 
 export type { SongId };
 
@@ -53,7 +53,38 @@ export type CinematicCue =
   | 'ending:bow'      // 74 s  final cadence and big last chord, shimmering tail (then the game plays 'credits')
   // map
   | 'map:unlock'      // a new level node lights up
-  | 'map:world';      // a new world is revealed
+  | 'map:world'       // a new world is revealed
+  // ── v2 story moods (docs/STORY.md). A mood starts on the next beat and SUSTAINS (loops/evolves)
+  //    until the next cue, stopMusic() or playSong(), so cinematics can be re-timed freely. ──
+  | 'story:wonder'    // gentle, magical: establishing shots, discoveries
+  | 'story:frozen'    // eerie stillness: a musician turned to grey stone / trapped
+  | 'story:wake'      // warm release: colour flows back, the musician wakes (then usually joinMotif)
+  | 'story:join'      // happy little march: the band welcomes a new member
+  | 'story:threat'    // dark: a guardian or the Silence is glimpsed
+  | 'story:shard'     // magic rising: a shard of the Heart flies home
+  | 'story:voice'     // a land's great Voice rings: the land's theme in full glory
+  | 'story:camp'      // night camp: cosy, the band playing softly around the Heart
+  | 'story:memory'    // a memory of the Silence: a broken music box, sad and strange
+  | 'story:journey'   // moving on: light travelling theme
+  | 'story:dread'     // the Citadel: ominous, cold
+  | 'story:hush'      // near silence: wind only
+  | 'story:comic'     // a funny beat (a stumble, a surprise): pizzicato, a little slide whistle
+  // a land's chapter opening: the land's leitmotif, establishing
+  | 'land:meadow'
+  | 'land:desert'
+  | 'land:ice'
+  | 'land:forge'
+  | 'land:citadel';
+
+/** What the band on the shell sounds like (see BandState in sim/defs.ts). */
+export interface BandMix {
+  /** towers playing per section (0 = the section is absent) */
+  sections: Record<Section, number>;
+  /** 0…5: distinct sections − 1 */
+  harmony: number;
+  /** duets currently formed */
+  duets: DuetId[];
+}
 
 export interface AudioAPI {
   /** Must be called from a user gesture (click/keydown). Safe to call more than once. */
@@ -134,6 +165,22 @@ export interface AudioAPI {
   star(i: number): void;
   /** A new tower is unlocked (reward fanfare). */
   newTower(): void;
+
+  // ── the band (v2) ─────────────────────────────────────
+  /**
+   * The band on the shell changed. Each section present adds its layer to the battle arrangement
+   * (percussion → groove, strings → ostinato, bells → shimmer, brass → swells, voices → choir,
+   * low → bass line) and harmony makes it fuller. Changes land on the next bar line, smoothly.
+   */
+  setBand(mix: BandMix): void;
+  /** A duet just formed between two towers: a short flourish of the pair at time t. */
+  duet(id: DuetId, t: number, pan: number): void;
+  /** Movement `index` (0-based) of `total` of a long journey begins at t (downbeat). */
+  movement(index: number, total: number, t: number): void;
+  /** A new plate of the shell lights up. */
+  plateUnlock(t: number, pan: number): void;
+  /** Cinematics: a rescued musician plays its signature motif (≈2 bars), on top of any mood. */
+  joinMotif(kind: TowerKind): void;
 
   // ── title & cinema ────────────────────────────────────
   /** Deep warm swell + ember crackle for the Uchihadam Production logo (~6 s). Same as TESSELLA. */

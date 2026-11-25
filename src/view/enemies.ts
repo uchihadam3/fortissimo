@@ -3,7 +3,7 @@
  * They hop on the beat, squash when they land, flash when hit, turn icy when slowed.
  */
 import * as THREE from 'three';
-import type { EnemyKind } from '../sim/defs';
+import type { EnemyKind, TowerKind } from '../sim/defs';
 import { ENEMIES } from '../sim/defs';
 import { box, capsule, clamp01, cone, cyl, damp, eye, glowMat, sph, stdMat, torus } from './kit';
 
@@ -55,6 +55,8 @@ function feet(root: THREE.Object3D, r: number, color: string) {
   }
 }
 
+const RIGGED = new Set<EnemyKind>(['blot', 'blotling', 'scurry', 'shell', 'moth', 'shield', 'bubble', 'phantom', 'muffler', 'mender', 'obelisk', 'bossBlot', 'bossScarab', 'bossMoth', 'bossGolem', 'silence']);
+
 function buildRig(kind: EnemyKind): Rig {
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -77,7 +79,8 @@ function buildRig(kind: EnemyKind): Rig {
     body.add(belly);
     return b;
   };
-  switch (kind) {
+  // v2 creatures without a look of their own yet borrow the droplet (the art pass replaces this)
+  switch (RIGGED.has(kind) ? kind : 'blot') {
     case 'blot':
     case 'blotling': {
       const r = kind === 'blot' ? 0.3 : 0.2;
@@ -581,6 +584,9 @@ export class EnemyView {
     this.group.add(this.hpBar);
     this.group.visible = false;
   }
+
+  /** a Mimic shows which of the player's instruments it copies (the art pass draws it) */
+  setMimicKind(_kind: TowerKind | null): void {}
 
   /** show or hide the ground ring of a muting creature (cinematics hide it) */
   setAura(on: boolean) {

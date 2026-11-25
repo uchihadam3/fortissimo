@@ -129,4 +129,13 @@ export const ICON = {
   range: svg(`<circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" stroke-width="4" stroke-dasharray="6 6"/><circle cx="32" cy="32" r="6" fill="currentColor"/>`),
   boost: svg(`<path d="M32 4 L38 24 L58 24 L42 36 L48 56 L32 44 L16 56 L22 36 L6 24 L26 24 Z" fill="#ffd36b" stroke="#6a4310" stroke-width="2.6" stroke-linejoin="round"/>`),
   income: svg(`<circle cx="32" cy="36" r="20" fill="#ffd36b" stroke="#6a4310" stroke-width="3"/><path d="M32 4 V20 M24 12 L32 4 L40 12" fill="none" stroke="#3fb06a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`),
+  // v2 creature traits (placeholders; the art pass refines them)
+  deflect: svg(`<path d="M10 52 L32 12 L54 52" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 30 H24 M40 30 H58" stroke="#ff5a6a" stroke-width="4" stroke-linecap="round"/>`),
+  echo: svg(`<circle cx="26" cy="32" r="14" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="40" cy="32" r="14" fill="none" stroke="currentColor" stroke-width="4" opacity=".55"/>`),
+  burrow: svg(`<path d="M6 44 H58" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M20 44 C20 26 44 26 44 44" fill="#b9a27a" stroke="#2a1d14" stroke-width="3"/><path d="M32 8 V24 M24 16 L32 24 L40 16" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>`),
+  pack: svg(`<circle cx="18" cy="38" r="9" fill="#9fb6d8" stroke="#2a1d14" stroke-width="3"/><circle cx="32" cy="26" r="9" fill="#9fb6d8" stroke="#2a1d14" stroke-width="3"/><circle cx="46" cy="38" r="9" fill="#9fb6d8" stroke="#2a1d14" stroke-width="3"/>`),
+  disable: svg(`<path d="M20 14 H44 L40 50 H24 Z" fill="#cfd3e6" stroke="#2a1d14" stroke-width="3"/><path d="M10 54 L54 10" stroke="#ff5a6a" stroke-width="6" stroke-linecap="round"/>`),
+  mimic: svg(`<circle cx="22" cy="34" r="14" fill="#cfd3e6" stroke="#2a1d14" stroke-width="3"/><circle cx="42" cy="34" r="14" fill="#2a2440" stroke="#2a1d14" stroke-width="3"/><path d="M36 30 L48 40 M48 30 L36 40" stroke="#cfd3e6" stroke-width="3"/>`),
+  steady: svg(`<path d="M14 50 H50 L44 30 H20 Z" fill="#8f8ca3" stroke="#2a1d14" stroke-width="3"/><path d="M26 30 V14 H38 V30" fill="#8f8ca3" stroke="#2a1d14" stroke-width="3"/>`),
+  aura: svg(`<circle cx="32" cy="32" r="8" fill="currentColor"/><circle cx="32" cy="32" r="18" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="6 5"/><circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6" opacity=".6"/>`),
 };

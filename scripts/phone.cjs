@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') logs.push(`[error] ${m.text()}`); });
   const frames = (n = 2) => page.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
-  await page.goto(`http://localhost:5173/?play=${level}`, { waitUntil: 'load' });
+  await page.goto(`http://localhost:${process.env.PORT || 5173}/?play=${level}`, { waitUntil: 'load' });
   await page.waitForSelector('#go', { state: 'attached', timeout: 240000 });
   await frames(3);
   await page.waitForSelector('#hand.on', { timeout: 120000 }).catch(() => logs.push('no hand'));

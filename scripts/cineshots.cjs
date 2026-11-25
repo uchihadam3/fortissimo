@@ -12,7 +12,7 @@ const { chromium } = require('playwright');
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') logs.push(`[error] ${m.text()}`); });
   await page.addInitScript(() => { window.__cineManual = 0; });
-  await page.goto(`http://localhost:5173/?cine=${name}`, { waitUntil: 'load' });
+  await page.goto(`http://localhost:${process.env.PORT || 5173}/?cine=${name}`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
   const frame = (tt) => page.evaluate((v) => { window.__cineManual = v; return new Promise((r) => requestAnimationFrame(() => r())); }, tt);
   let cur = 0;
