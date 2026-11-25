@@ -60,7 +60,7 @@ export class Screens {
 
   constructor(parent: HTMLElement) {
     const style = document.createElement('style');
-    style.textContent = LOGO_CSS;
+    style.textContent = LOGO_CSS + GALLERY_CSS;
     document.head.appendChild(style);
     this.root = h(`<div id="screens"></div>`);
     parent.appendChild(this.root);
@@ -198,13 +198,14 @@ export class Screens {
 
   // ───────────────────────────── main menu ─────────────────────────────
 
-  menu(o: { canContinue: boolean; installable: boolean; onContinue: () => void; onNew: () => void; onLoad: () => void; onOptions: () => void; onCredits: () => void; onInstall: () => void; version: string }) {
+  menu(o: { canContinue: boolean; installable: boolean; onContinue: () => void; onNew: () => void; onLoad: () => void; onOptions: () => void; onStory?: () => void; onCredits: () => void; onInstall: () => void; version: string }) {
     this.clear();
     const el = this.screen('menu', `<div class="menu-left">${logoHTML(this.t('tagline'), 'small')}<div class="menu-items"></div></div><div class="foot"><b>Uchihadam Production</b> · FORTÍSSIMO · v${o.version}</div>`);
     const box = el.querySelector('.menu-items')!;
     if (o.canContinue) box.append(this.btn(this.t('continue'), o.onContinue, 'primary', ICON.play));
     box.append(this.btn(this.t('newGame'), o.onNew, o.canContinue ? '' : 'primary'));
     box.append(this.btn(this.t('load'), o.onLoad));
+    if (o.onStory) box.append(this.btn(this.t('story'), o.onStory));
     box.append(this.btn(this.t('options'), o.onOptions));
     box.append(this.btn(this.t('credits'), o.onCredits));
     if (o.installable) box.append(this.btn(this.t('install'), o.onInstall, 'ghost'));
@@ -352,6 +353,43 @@ export class Screens {
       roll.addEventListener('animationend', () => res(), { once: true });
       back.addEventListener('click', () => res());
     });
+  }
+
+  // ───────────────────────────── the story gallery ─────────────────────────────
+
+  /** Every scene of the story in order, by chapter; the ones not reached yet are veiled. */
+  storyGallery(entries: { id: string; kind: string; world: WorldId; title: string; open: boolean }[], play: (id: string) => void, back: () => void) {
+    this.clear();
+    const el = this.screen('story-gallery', `<div class="sg-panel"><h2>${this.t('story')}</h2><div class="sg-list"></div><div class="row"></div></div>`);
+    const list = el.querySelector('.sg-list')!;
+    const numerals = ['I', 'II', 'III', 'IV', 'V'];
+    const sections: { label: string; world: WorldId; items: typeof entries }[] = [
+      { label: this.t('prologue'), world: 'meadow', items: entries.filter((e) => e.kind === 'opening') },
+      ...WORLDS.map((w, i) => ({ label: `${this.t('chapter')} ${numerals[i]} · ${WORLD_NAMES[w][this.lang]}`, world: w, items: entries.filter((e) => e.world === w && e.kind !== 'opening' && e.kind !== 'ending' && e.kind !== 'epilogue') })),
+      { label: this.t('epilogue'), world: 'citadel', items: entries.filter((e) => e.kind === 'ending' || e.kind === 'epilogue') },
+    ];
+    for (const sec of sections) {
+      const [c1, c2] = WORLD_COL[sec.world];
+      const row = h(`<section class="sg-sec" style="--c1:${c1};--c2:${c2}"><h3>${sec.label}</h3><div class="sg-cards"></div></section>`);
+      const cards = row.querySelector('.sg-cards')!;
+      sec.items.forEach((e) => {
+        const glyph = e.kind === 'chapter' ? `<em>${numerals[WORLDS.indexOf(e.world)]}</em>` : SCENE_GLYPH[e.kind] ?? SCENE_GLYPH.interlude;
+        const card = h(`<button class="sg-card ${e.kind} ${e.open ? '' : 'locked'}"><span class="g">${e.open ? glyph : '?'}</span><b>${e.open ? e.title : '· · ·'}</b></button>`);
+        if (e.open) {
+          card.addEventListener('pointerenter', () => this.sounds.hover());
+          card.addEventListener('click', () => {
+            this.sounds.click();
+            play(e.id);
+          });
+        }
+        cards.appendChild(card);
+      });
+      list.appendChild(row);
+    }
+    el.querySelector('.row')!.append(this.btn(this.t('back'), () => {
+      this.sounds.back();
+      back();
+    }, 'ghost'));
   }
 
   // ───────────────────────────── world map ─────────────────────────────
@@ -513,7 +551,7 @@ export class Screens {
     return el;
   }
 
-  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; map: () => void }) {
+  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; map: () => void; scene?: () => void; sceneNew?: boolean }) {
     const el = this.screen('results dim center', `<div class="res">
       <div class="title ${o.victory ? '' : 'lose'}">${o.endless !== undefined ? `${this.t('endless')} · ${o.endless}` : o.victory ? this.t('victory') : this.t('defeat')}</div>
       ${o.victory || o.endless !== undefined ? `<div class="stars"><i>${ICON.star}</i><i class="mid">${ICON.star}</i><i>${ICON.star}</i></div>` : ''}
@@ -533,6 +571,12 @@ export class Screens {
       el.remove();
       o.next!();
     }, 'primary', ICON.next));
+    // the story: a new scene waits on the way out (a glowing film strip); an old one can be watched again
+    if (o.scene) row.append(this.btn(this.t('watchScene'), () => {
+      el.remove();
+      o.scene!();
+    }, 'ghost', FILM_ICON));
+    if (o.sceneNew) el.querySelector('.res')!.insertAdjacentHTML('beforeend', `<div class="story-hint"><i>${FILM_ICON}</i>${this.t('newScene')}</div>`);
     if (o.victory) {
       const stars = [...el.querySelectorAll('.stars i')];
       for (let i = 0; i < 3; i++) {
@@ -554,6 +598,47 @@ export class Screens {
     if (mode === 'elsewhere') row.append(this.btn(this.t('openSite'), () => window.open(url, '_blank', 'noopener')));
   }
 }
+
+const FILM_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M3 15h18M7 5v4M12 5v4M17 5v4M7 15v4M12 15v4M17 15v4"/><path d="M10.5 10.6v2.8l2.6-1.4z" fill="currentColor"/></svg>`;
+
+const SCENE_GLYPH: Record<string, string> = {
+  opening: `<svg viewBox="0 0 24 24"><path d="M12 2l2.6 6.4L21 9l-5 4.4L17.6 20 12 16.6 6.4 20 8 13.4 3 9l6.4-.6z" fill="currentColor"/></svg>`,
+  interlude: `<svg viewBox="0 0 24 24"><ellipse cx="8" cy="17" rx="4" ry="3" transform="rotate(-20 8 17)" fill="currentColor"/><path d="M11.5 16V4c3 2 6 3 6 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`,
+  guardian: `<svg viewBox="0 0 24 24"><path d="M12 2l5 7-5 13-5-13z" fill="currentColor"/><path d="M7 9h10" stroke="#00000044" stroke-width="1.4"/></svg>`,
+  memory: `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="7.5" ry="9" fill="currentColor"/><circle cx="9.3" cy="10" r="1.4" fill="#1b1630"/><circle cx="14.7" cy="10" r="1.4" fill="#1b1630"/><path d="M10 15.2l4 2.4M14 15.2l-4 2.4" stroke="#1b1630" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  ending: `<svg viewBox="0 0 24 24"><path d="M3 18l2-11 4.5 5L12 4l2.5 8L19 7l2 11z" fill="currentColor"/></svg>`,
+  epilogue: `<svg viewBox="0 0 24 24"><path d="M8 4.5l6 5-5 3 5 3-3 4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+
+const GALLERY_CSS = `
+.story-gallery { background: radial-gradient(ellipse at 50% 20%, rgba(34,24,61,.82), rgba(7,5,13,.94)); overflow: hidden; }
+.story-gallery .sg-panel { position: absolute; inset: calc(16px + var(--safe-t, 0px)) calc(16px + var(--safe-r, 0px)) calc(16px + var(--safe-b, 0px)) calc(16px + var(--safe-l, 0px)); display: flex; flex-direction: column; align-items: center; }
+.story-gallery h2 { font-family: var(--deco, Georgia, serif); color: var(--gold, #ffd36b); font-size: clamp(26px, 4vw, 40px); margin: 4px 0 10px; letter-spacing: .08em; text-shadow: 0 3px 0 #6a4310, 0 0 24px rgba(255,211,107,.4); }
+.story-gallery .sg-list { flex: 1; width: min(1100px, 100%); overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 6px 12px; scrollbar-width: thin; }
+.story-gallery .sg-sec h3 { margin: 0 0 6px; font-family: var(--serif, Georgia, serif); font-weight: 700; font-size: 15px; letter-spacing: .12em; color: var(--c1); text-transform: uppercase; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+.story-gallery .sg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.story-gallery .sg-card { position: relative; height: 84px; border: 0; border-radius: 14px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px;
+  background: linear-gradient(160deg, var(--c2), #1a1330 120%); color: #fff7e6; box-shadow: inset 0 0 0 2px rgba(255,247,230,.16), 0 6px 16px rgba(0,0,0,.4); transition: transform .15s, box-shadow .15s; font-family: var(--round, sans-serif); }
+.story-gallery .sg-card:hover { transform: translateY(-2px) scale(1.03); box-shadow: inset 0 0 0 2px var(--c1), 0 10px 22px rgba(0,0,0,.5); }
+.story-gallery .sg-card .g { width: 28px; height: 28px; color: var(--c1); filter: drop-shadow(0 0 8px rgba(255,255,255,.25)); display: flex; align-items: center; justify-content: center; }
+.story-gallery .sg-card .g svg { width: 100%; height: 100%; }
+.story-gallery .sg-card .g em { font-style: normal; font-family: var(--deco, Georgia, serif); font-weight: 900; font-size: 22px; }
+.story-gallery .sg-card b { font-size: 13px; font-weight: 800; line-height: 1.15; text-align: center; }
+.story-gallery .sg-card.chapter { background: linear-gradient(160deg, var(--c1), var(--c2) 70%); color: #2a1d14; }
+.story-gallery .sg-card.chapter .g { color: #2a1d14; }
+.story-gallery .sg-card.memory { background: linear-gradient(160deg, #4a3470, #1a1330); }
+.story-gallery .sg-card.memory .g { color: #e6d9ff; }
+.story-gallery .sg-card.ending, .story-gallery .sg-card.opening { background: linear-gradient(160deg, #6a4ab0, #20163a); }
+.story-gallery .sg-card.ending .g, .story-gallery .sg-card.opening .g { color: var(--gold, #ffd36b); }
+.story-gallery .sg-card.locked { cursor: default; filter: grayscale(1) brightness(.55); }
+.story-gallery .sg-card.locked:hover { transform: none; box-shadow: inset 0 0 0 2px rgba(255,247,230,.16); }
+.story-gallery .sg-card.locked .g { font-family: var(--deco, Georgia, serif); font-size: 26px; color: rgba(255,247,230,.6); }
+.story-gallery .row { display: flex; justify-content: center; padding-top: 8px; }
+.res .story-hint { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold, #ffd36b); text-shadow: 0 0 14px rgba(255,211,107,.6); animation: storyhint 1.6s ease-in-out infinite; }
+.res .story-hint i { width: 22px; height: 22px; display: inline-block; }
+@keyframes storyhint { 50% { opacity: .55; } }
+@media (max-width: 640px) { .story-gallery .sg-cards { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } .story-gallery .sg-card { height: 74px; } }
+`;
 
 function worldDecor(w: WorldId, cx: number, cy: number, r: number): string {
   let s = '';

@@ -73,10 +73,10 @@ async function boot() {
     await app.openMap();
     return;
   }
+  // story scenes: ?cine=intro|ending|epilogue|ch-desert|m1…cx|gallery (see game/story.ts devCine)
   if (p.has('cine')) {
-    const { playCutscene } = await import('./game/cutscenes');
-    await app.boot(true);
-    await playCutscene(app, p.get('cine') === 'ending' ? 'ending' : 'intro');
+    const { devCine } = await import('./game/story');
+    await devCine(app, p);
     return;
   }
   await app.boot(p.has('skip'));
