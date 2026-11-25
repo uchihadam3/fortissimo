@@ -9,9 +9,9 @@ import { Showcase } from './showcase';
 import { JourneyBattle, type BattleResult } from './journeyBattle';
 import { CAMPAIGN, LEVEL_BY_ID, endlessDef } from '../data/campaign';
 import { loadSettings, saveSettings, type Settings } from '../core/settings';
-import { deleteSlot, exportFile, lastSlot, loadSlot, newSave, saveFromCode, saveToCode, writeSlot, type SaveData } from '../core/save';
+import { deleteSlot, exportFile, lastSlot, loadSlot, newSave, saveFromCode, saveToCode, writeSlot, rememberCheckpoint, type SaveData } from '../core/save';
 import type { WorldId } from '../sim/defs';
-import type { Mode } from '../sim/journey';
+import { Journey, type Checkpoint, type Mode } from '../sim/journey';
 import { isLevelOpen } from '../ui/screens';
 import { listSlots } from '../core/save';
 import { SCENES, chapterDue, flagOf, playStory, sceneAfter, sceneTitle, seen, shardsOf, unlocked, type SceneDef } from './story';
@@ -287,7 +287,7 @@ export class App {
     }
   }
 
-  async playLevel(id: string, mode: Mode): Promise<void> {
+  async playLevel(id: string, mode: Mode, resume?: Checkpoint): Promise<void> {
     const entry = LEVEL_BY_ID.get(id);
     if (!entry || !this.save) return;
     await this.screens.fadeTo(1, 500);
@@ -309,9 +309,13 @@ export class App {
       seenEnemies: save.seenEnemies,
       tutorials: true,
       onEnemySeen: () => this.persist(),
+      resume: resume && Journey.canResume(entry.def, resume) ? resume : undefined,
     }, this.uiRoot);
     this.battle = b;
     b.view.turtle.setShards(shardsOf(save));
+    // a land whose guardian has fallen keeps much of its colour when the band comes back
+    const guardian = CAMPAIGN.find((l) => l.world === entry.world && l.kind === 'boss');
+    if (guardian && (save.levels[guardian.id]?.stars ?? 0) > 0) b.view.restoredLife = 0.7;
     this.markVoice(b, entry.world, entry.kind === 'boss');
     b.onPauseRequest = () => this.openPause();
     this.engine.paused = false;
@@ -384,6 +388,8 @@ export class App {
       return this.openMap();
     }
     const victory = r.outcome === 'victory';
+    // where a long journey can start again: the movement where the band fell (cleared by a win)
+    rememberCheckpoint(save, id, victory ? null : r.checkpoint);
     let firstClear = false;
     if (victory) {
       const rec = save.levels[id] ?? { stars: 0 };
@@ -425,6 +431,7 @@ export class App {
       crown: victory && mode === 'virtuoso',
       next: victory && nextEntry && isLevelOpen(save, nextEntry) ? withStory(() => this.playLevel(nextEntry.id, 'normal')) : undefined,
       retry: () => this.playLevel(id, mode),
+      retryFrom: !victory && r.checkpoint ? { movement: r.checkpoint.movement, go: () => this.playLevel(id, mode, r.checkpoint!) } : undefined,
       map: withStory(() => this.openMap()),
       scene: scene && !pending ? async () => {
         await this.screens.fadeTo(1, 600);

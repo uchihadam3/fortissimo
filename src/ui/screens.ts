@@ -552,7 +552,7 @@ export class Screens {
     return el;
   }
 
-  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; map: () => void; scene?: () => void; sceneNew?: boolean }) {
+  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; retryFrom?: { movement: number; go: () => void }; map: () => void; scene?: () => void; sceneNew?: boolean }) {
     const el = this.screen('results dim center', `<div class="res">
       <div class="title ${o.victory ? '' : 'lose'}">${o.endless !== undefined ? `${this.t('endless')} · ${o.endless}` : o.victory ? this.t('victory') : this.t('defeat')}</div>
       ${o.victory || o.endless !== undefined ? `<div class="stars"><i>${ICON.star}</i><i class="mid">${ICON.star}</i><i>${ICON.star}</i></div>` : ''}
@@ -567,7 +567,17 @@ export class Screens {
     row.append(this.btn(this.t('retry'), () => {
       el.remove();
       o.retry();
-    }, o.victory ? 'ghost' : 'primary', ICON.restart));
+    }, o.victory || o.retryFrom ? 'ghost' : 'primary', ICON.restart));
+    // fell in a later movement: start again from that movement (its Roman numeral, no words needed)
+    if (o.retryFrom) {
+      const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'][o.retryFrom.movement] ?? String(o.retryFrom.movement + 1);
+      const b = this.btn(roman, () => {
+        el.remove();
+        o.retryFrom!.go();
+      }, 'primary', ICON.restart);
+      b.classList.add('retry-from');
+      row.append(b);
+    }
     if (o.next) row.append(this.btn(this.t('next'), () => {
       el.remove();
       o.next!();
