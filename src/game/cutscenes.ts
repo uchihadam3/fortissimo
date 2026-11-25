@@ -22,7 +22,7 @@ import { Journey, type Feature, type JourneyDef, type LandmarkKind } from '../si
 import { JourneyView } from '../view/journeyView';
 import { showcaseDef } from './showcase';
 import { MaestroView, type MaestroPose } from '../view/models';
-import { MusicianView, type MusicianPose } from '../view/musicians';
+import { MusicianView, type MusicianMood, type MusicianPose } from '../view/musicians';
 import { SilenceView } from '../view/silence';
 import { EnemyView } from '../view/enemies';
 import type { EnemyKind } from '../sim/defs';
@@ -63,6 +63,18 @@ export const ease = {
 const UP = new THREE.Vector3(0, 1, 0);
 const tmpV = new THREE.Vector3();
 const tmpM = new THREE.Matrix4();
+
+/** the band's size in the cinematics: about the size of the towers on the colossus in battle (scaleMul 2.3) */
+export const BAND_SCALE = 2.2;
+
+/**
+ * Turn the Silence's whole body toward a point (the view's own `lookAt` only turns its head and
+ * shoulders), and its mask with it.
+ */
+export function faceSilence(s: SilenceView, p: THREE.Vector3) {
+  s.group.lookAt(p.x, s.group.position.y, p.z);
+  s.lookAt(p);
+}
 
 /** where each musician stands on the shell (shell-local), facing outward like a bandstand */
 export const SEATS: Record<TowerKind, { x: number; z: number }> = {
@@ -343,6 +355,9 @@ export class Cine {
     // INTEGRATION: JourneyView overwrites turtle.lookAt each frame (nearest enemy); a `lookOverride`
     // on JourneyView/Turtle would replace this property trick.
     const turtle = this.view.turtle;
+    // stand the colossus on its first spot right away, so scripts can aim things at it while they set up
+    this.view.poseAtS(this.s0, tmpM).decompose(turtle.group.position, turtle.group.quaternion, turtle.group.scale);
+    turtle.group.updateMatrixWorld(true);
     let viewLook: THREE.Vector3 | null = null;
     Object.defineProperty(turtle, 'lookAt', {
       configurable: true,
@@ -423,7 +438,7 @@ export class Cine {
   seat(kind: TowerKind, opts: { scale?: number; pose?: MusicianPose } = {}): Actor {
     let a = this.band.get(kind);
     if (!a) {
-      const mv = new MusicianView(kind, { scale: opts.scale ?? 1.5 });
+      const mv = new MusicianView(kind, { scale: opts.scale ?? BAND_SCALE });
       a = new Actor(mv, kind);
       this.band.set(kind, a);
       this.addActor(a, this.view.turtle.shell);
@@ -436,12 +451,19 @@ export class Cine {
   }
 
   /** a musician somewhere in the world (a rescue) */
-  musician(kind: TowerKind, at: THREE.Vector3, opts: { scale?: number; yaw?: number; pose?: MusicianPose; frozen?: number } = {}): Actor {
-    const mv = new MusicianView(kind, { scale: opts.scale ?? 1.5 });
+  /**
+   * A musician somewhere in the world (a rescue). `frozen` 1: a stone statue (caught mid-gesture when
+   * its pose is 'play'); `mood` 'muted': a grey, squeezed captive; 'disabled': worn out.
+   */
+  musician(kind: TowerKind, at: THREE.Vector3, opts: { scale?: number; yaw?: number; pose?: MusicianPose; frozen?: number; mood?: MusicianMood } = {}): Actor {
+    const mv = new MusicianView(kind, { scale: opts.scale ?? BAND_SCALE });
     const a = new Actor(mv, kind);
     a.holder.position.copy(at);
     a.holder.rotation.y = opts.yaw ?? 0;
     mv.pose = opts.pose ?? 'idle';
+    if (opts.mood) mv.setMood(opts.mood);
+    // a statue caught in the middle of a beat: strike first, then turn to stone
+    if (mv.pose === 'play' && (opts.frozen ?? 0) > 0.5) mv.play(1);
     if (opts.frozen !== undefined) mv.setFrozen(opts.frozen);
     this.addActor(a, this.view.scene);
     return a;
@@ -1106,6 +1128,9 @@ export class Cine {
     const pos = evalPath(shot.pos, shot.ease(k));
     const look = evalPath(shot.look, shot.lookEase(k));
     cam.position.copy(pos);
+    // never inside the ground (a camera placed near a subject can land behind a hill)
+    const floor = this.view.land.heightAt(pos.x, pos.z) + 0.4;
+    if (cam.position.y < floor) cam.position.y = floor;
     cam.up.copy(UP);
     cam.lookAt(look);
     const roll = shot.roll[0] + (shot.roll[1] - shot.roll[0]) * ease.sine(k);
@@ -1355,13 +1380,16 @@ function openingScript(app: App, c: Cine) {
   const giantHead = () => giant.group.localToWorld(new THREE.Vector3(0, 2.9, 0.25));
   // INTEGRATION: if SilenceView exposes handWorld(out) (its reaching hand), the theft aims at it;
   // otherwise this estimates where a hand reaching over the colossus would be.
+  // (today it reads the right wrist of the rig, which SilenceView keeps private)
   const handOf = (): THREE.Vector3 => {
-    const hw = (giant as unknown as { handWorld?: (o: THREE.Vector3) => THREE.Vector3 }).handWorld;
-    if (typeof hw === 'function') return hw.call(giant, new THREE.Vector3());
+    const g = giant as unknown as { handWorld?: (o: THREE.Vector3) => THREE.Vector3; arms?: { wrist?: THREE.Object3D }[] };
+    if (typeof g.handWorld === 'function') return g.handWorld.call(giant, new THREE.Vector3());
+    const wrist = g.arms?.[1]?.wrist;
+    if (wrist && giant.emerge > 0.5) return wrist.getWorldPosition(new THREE.Vector3());
     const h = heart();
     return h.clone().lerp(giant.group.position.clone().setY(h.y + 40), 0.28).setY(h.y + 22);
   };
-  c.add({ update: () => giant.lookAt(turtle.group.position) }, null);
+  c.add({ update: () => faceSilence(giant, turtle.group.position) }, null);
   // its storm front: a wall of ink-smoke boiling up over the horizon
   const storm = c.add(new InkStorm(255, 210, Math.PI * 0.7), null);
   v.scene.add(storm.mesh);
@@ -1772,7 +1800,7 @@ function endingScript(app: App, c: Cine) {
   const sil = c.silence(30, far.clone());
   sil.pose = 'recoil';
   sil.emerge = 1;
-  c.add({ update: () => sil.lookAt(turtle.group.position) }, null);
+  c.add({ update: () => { if (sil.group.parent !== turtle.shell) faceSilence(sil, turtle.group.position); } }, null);
   let size = 30;
   let lift = 0;
   c.add({ update: () => {
@@ -1947,6 +1975,8 @@ function endingScript(app: App, c: Cine) {
     if (c.t >= T_SONG && sil.group.parent === turtle.shell) {
       sil.group.position.copy(seatPos(0.95, -3.55, 0.02));
       sil.group.rotation.set(silBow, Math.PI * 0.9, 0);
+      // it looks where the colossus is going
+      sil.lookAt(turtle.group.localToWorld(tmpV.set(0, 6, -40)));
     }
   } }, null);
   // the 'add' above runs after the size/position updater: keep its world placement off once seated
@@ -2346,7 +2376,7 @@ function abyssScript(c: Cine) {
   little.pose = 'small';
   little.emerge = 0;
   c.during(14, 18, (k) => (little.emerge = ease.outCubic(k)));
-  c.add({ update: () => little.lookAt(v.engine.camera.position) }, null);
+  c.add({ update: () => faceSilence(little, v.engine.camera.position) }, null);
   c.at(14, () => v.fx.burst(restW(), '#d9d3ff', 40, 2, 0.14, 1.4));
   c.shot(15, 21, { pos: [() => restW().add(new THREE.Vector3(2.2, 0.4, 2.2)), () => restW().add(new THREE.Vector3(1.7, 0.3, 1.7))], look: () => restW().add(tmpV.set(0, -0.3, 0)), fov: 30 });
   c.end(21);

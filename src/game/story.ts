@@ -18,7 +18,7 @@ import { LOOKS, type WorldLook } from '../view/styles';
 import { SHARD_COLORS } from '../view/turtle';
 import type { MusicianView } from '../view/musicians';
 import {
-  Actor, BAND_COLORS, BAND_ORDER, Cine, FULL_BAND, SEATS, VOICE_OF, WORLD_INDEX, ease, playCutscene, runScene, seatPos,
+  Actor, BAND_COLORS, BAND_ORDER, BAND_SCALE, Cine, FULL_BAND, SEATS, VOICE_OF, WORLD_INDEX, ease, faceSilence, playCutscene, runScene, seatPos,
   type Anchor, type SetSpec,
 } from './cutscenes';
 import {
@@ -354,7 +354,9 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       const sm = new SandMound('#e3c48c');
       sm.group.position.copy(spot);
       c.place(sm.group);
-      const cho = c.musician('shaker', spot.clone().setY(spot.y - 0.9), { frozen: 0.55, pose: 'play', yaw: Math.atan2(v.turtle.group.position.x - spot.x, v.turtle.group.position.z - spot.z) });
+      // buried up to the beak in the mound (whose top is ~0.54 above the ground), shaking a rattle that makes no sound
+      const cho = c.musician('shaker', spot, { mood: 'muted', pose: 'play', yaw: Math.atan2(v.turtle.group.position.x - spot.x, v.turtle.group.position.z - spot.z) });
+      cho.holder.position.y = spot.y + 0.54 - (cho.view as MusicianView).size * BAND_SCALE * 0.47;
       c.add({ update: () => {
         if (c.t < 9.6) {
           cho.spin = Math.sin(c.wt * 18) * 0.12;
@@ -367,7 +369,7 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       c.shot(0, 5.4, { pos: [c.T(-26, 7, -30), c.T(-20, 6, -24)], look: [c.T(0, 3, -4), c.T(0, 4, -2)], fov: 40, shake: 0.08 });
       cardChapter(app, c, 'desert', 0.6, 5.0);
       // 2. a head in the sand, shaking a shaker that makes no sound
-      c.shot(5.4, 9.2, { pos: [c.R(() => spot, 2.4, 0.9, -2.6), c.R(() => spot, 1.9, 0.8, -2.1)], look: () => spot.clone().setY(spot.y + 0.5), fov: 32 });
+      c.shot(5.4, 9.2, { pos: [c.R(() => spot, 2.4, 1.1, -2.6), c.R(() => spot, 1.9, 1.0, -2.1)], look: () => spot.clone().setY(spot.y + 0.8), fov: 32 });
       c.placeName(5.8, 8.8, placeOf('d1', lang));
       c.cue(5.4, 'story:frozen');
       c.grade(5.4, 1, { aberration: 0.2 });
@@ -379,7 +381,7 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       // 4. out of the sand!
       c.at(11.8, () => {
         cho.holder.position.y = spot.y;
-        (cho.view as MusicianView).setFrozen(0);
+        (cho.view as MusicianView).setMood('normal');
         v.fx.dust(spot.clone().setY(spot.y + 0.4), '#e8c890', 60);
         v.fx.burst(spot.clone().setY(spot.y + 1), '#ffe066', 40, 4, 0.2, 1);
         sm.group.scale.set(1.2, 0.4, 1.2);
@@ -476,7 +478,8 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       const gravePos = cart.group.localToWorld(new THREE.Vector3(3.6, 0, 0));
       gravePos.y = v.land.heightAt(gravePos.x, gravePos.z);
       cart.chainTo(new THREE.Vector3(3.3, 0.5, 0));
-      const grave = c.musician('bass', gravePos, { frozen: 0.5, pose: 'sleep', scale: 1.6 });
+      // greyed and straining (eyes squeezed shut) under the load
+      const grave = c.musician('bass', gravePos, { mood: 'muted', pose: 'idle' });
       // he leans forward, hauling the cart along
       const ahead = c.roadPoint(sStop + 14, -10, 0);
       grave.holder.lookAt(ahead.x, grave.holder.position.y, ahead.z);
@@ -496,7 +499,7 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       c.colourCircle(10.8, 2, () => gravePos, 0.5, 7, 1.12);
       c.at(11.4, () => {
         c.debrisOf(cart.breakChain(gravePos.clone().setY(gravePos.y + 0.6)));
-        (grave.view as MusicianView).setFrozen(0);
+        (grave.view as MusicianView).setMood('normal');
         grave.tilt = 0;
         (grave.view as MusicianView).pose = 'scared';
         v.fx.burst(gravePos.clone().setY(gravePos.y + 0.6), '#ffb070', 30, 4, 0.2, 0.8);
@@ -661,24 +664,25 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       tower.group.rotation.y = c.roadYaw(sStop);
       c.place(tower.group);
       const hang = tower.group.localToWorld(tower.hang.clone()).add(tmp.set(0, -1.3, 0));
-      const cage = c.add(new ThornCage(0.85, 1.9));
+      const cage = c.add(new ThornCage(0.88, 2.1));
       cage.group.position.copy(hang);
-      const owl = c.musician('bell', hang.clone().add(tmp.set(0, 0.05, 0)), { frozen: 0.45, pose: 'scared' });
+      const owl = c.musician('bell', hang.clone().add(tmp.set(0, 0.05, 0)), { mood: 'muted', pose: 'scared' });
       owl.holder.lookAt(v.turtle.group.position.x, owl.holder.position.y, v.turtle.group.position.z);
       c.shiver(owl, 0, 9, 0.5);
       c.cue(0.2, 'story:frozen');
       c.shot(0, 4.4, { pos: [c.R(() => towerAt, -9, 3, -8), c.R(() => towerAt, -7.5, 4, -6.5)], look: [() => hang.clone(), () => hang.clone().setY(hang.y - 1)], fov: 44 });
       c.placeName(0.8, 4.0, lang === 'pt' ? 'O Campanário' : 'The Belfry');
-      c.shot(4.4, 7.2, { pos: [c.R(() => hang, 2.4, 0.4, -2.8), c.R(() => hang, 2, 0.5, -2.3)], look: () => hang.clone().setY(hang.y + 0.8), fov: 32 });
+      // through the open arch (between the belfry pillars)
+      c.shot(4.4, 7.2, { pos: [c.R(() => hang, 3.9, 0.5, -0.9), c.R(() => hang, 3.3, 0.6, -0.75)], look: () => hang.clone().setY(hang.y + 0.8), fov: 32 });
       // drum and harp together
       c.cue(7.2, 'story:wake');
       serenade(c, 7.4, 2.6, ['harp', 'drum'], () => hang.clone().setY(hang.y + 0.9), 24);
       c.shot(7.2, 10, { pos: [c.Sh(-0.2, 7.0, -5.2), c.Sh(-0.8, 6.8, -5.6)], look: () => hang.clone().setY(hang.y + 0.6), fov: 40 });
       c.during(9.6, 11.4, (k) => (cage.crumble = ease.inOut(k)));
       c.at(9.8, () => v.fx.burst(hang.clone().setY(hang.y + 1), '#2a1648', 50, 4, 0.3, 1.2, false, 2));
-      c.during(10.2, 11.4, (k) => (owl.view as MusicianView).setFrozen(0.45 * (1 - k)));
+      c.at(10.4, () => (owl.view as MusicianView).setMood('normal'));
       c.colourCircle(10, 3, () => hang, 0.5, 9, 1.12);
-      c.shot(10, 12.6, { pos: [c.R(() => hang, 2.8, 0.2, -3.2), c.R(() => hang, 2.4, 0.4, -2.8)], look: () => hang.clone().setY(hang.y + 0.8), fov: 34 });
+      c.shot(10, 12.6, { pos: [c.R(() => hang, 4.2, 0.3, -1.0), c.R(() => hang, 3.6, 0.45, -0.85)], look: () => hang.clone().setY(hang.y + 0.8), fov: 34 });
       // she rings a little bell and flutters down to the shell
       c.at(11.6, () => ((owl.view as MusicianView).pose = 'cheer'));
       joinBand(c, owl, 'bell', 12, 1.8, 4);
@@ -753,13 +757,15 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     const valley = c.roadPoint(c.s0 + 6, 0, 0);
     const hill = c.roadPoint(c.s0 - 10, -14, 0);
     const fest = festival(c, valley, '#ffcf7a');
-    const kid = c.silence(0.38, hill);
+    // alone on a rock on the hillside, above the tall grass
+    const kid = c.silence(0.38, perchRock(c, hill));
     kid.pose = 'small';
-    kid.lookAt(valley);
+    faceSilence(kid, valley);
+    memoryKey(c, () => kid.group.position.clone(), () => valley.clone());
     c.cue(0.3, 'story:memory');
-    c.shot(0, 5, { pos: [c.R(() => hill, -2.6, 1.9, 2.8), c.R(() => hill, -2.2, 1.7, 2.3)], look: () => valley.clone().setY(valley.y + 1.5), fov: 40 });
+    c.shot(0, 5, { pos: [c.R(() => hill, -2.6, 2.6, 2.8), c.R(() => hill, -2.2, 2.4, 2.3)], look: () => valley.clone().setY(valley.y + 1.5), fov: 40 });
     c.shot(5, 9.4, { pos: [c.R(() => valley, 5, 1.6, 7), c.R(() => valley, 3.4, 1.4, 6)], look: () => valley.clone().setY(valley.y + 0.8), fov: 38 });
-    c.shot(9.4, 13, { pos: [c.R(() => hill, 2.2, 1.2, -1.8), c.R(() => hill, 1.9, 1.1, -1.5)], look: () => hill.clone().setY(hill.y + 0.9), fov: 30 });
+    c.shot(9.4, 13, { pos: [c.R(() => hill, 2.5, 1.9, -2.0), c.R(() => hill, 2.2, 1.8, -1.7)], look: () => hill.clone().setY(hill.y + 1.5), fov: 32 });
     c.during(9.4, 13, () => (kid.group.rotation.z = Math.sin(c.wt * 2.2) * 0.06));
     // a dancer glances toward the hill… and turns away: nobody sees it
     const glancer = fest.dancers[0];
@@ -785,12 +791,15 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       const spot = c.roadPoint(sStop + 2, -9.5, 0);
       const pr = c.add(new CrystalPrison());
       pr.group.position.copy(spot);
-      const cri = c.musician('crystal', spot.clone().setY(spot.y + 0.1), { frozen: 0.6, pose: 'sleep' });
+      // big enough to hold her (the crystals stand in a ring around her)
+      pr.group.scale.setScalar(1.7);
+      // asleep inside the grey crystal
+      const cri = c.musician('crystal', spot.clone().setY(spot.y + 0.1), { pose: 'sleep' });
       cri.holder.lookAt(v.turtle.group.position.x, cri.holder.position.y, v.turtle.group.position.z);
       c.cue(0.2, 'story:frozen');
       c.shot(0, 4.6, { pos: [c.T(-24, 5, -18), c.T(-20, 5, -14)], look: [() => spot.clone().setY(spot.y + 1), () => spot.clone().setY(spot.y + 1.4)], fov: 40 });
       c.placeName(0.8, 4.2, placeOf('d2', lang));
-      c.shot(4.6, 7.4, { pos: [c.R(() => spot, 2.6, 1.4, -2.8), c.R(() => spot, 2.1, 1.3, -2.3)], look: () => spot.clone().setY(spot.y + 1.1), fov: 32 });
+      c.shot(4.6, 7.4, { pos: [c.R(() => spot, 4.3, 1.8, -4.5), c.R(() => spot, 3.7, 1.6, -3.9)], look: () => spot.clone().setY(spot.y + 1.0), fov: 34 });
       c.cue(7.4, 'story:wake');
       serenade(c, 7.6, 3, 'all', () => spot.clone().setY(spot.y + 1.2), 24);
       c.shot(7.4, 10, { pos: [c.Sh(-0.6, 7.0, -5.4), c.Sh(-1.2, 6.8, -5.6)], look: () => spot.clone().setY(spot.y + 1), fov: 40 });
@@ -798,14 +807,14 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
         pr.shake = ease.in(k);
         pr.charge = k;
       });
-      c.shot(10, 12.4, { pos: [c.R(() => spot, 2.8, 1.0, -3.0), c.R(() => spot, 2.3, 1.1, -2.6)], look: () => spot.clone().setY(spot.y + 1.2), fov: 34, shake: 0.15 });
+      c.shot(10, 12.4, { pos: [c.R(() => spot, 4.4, 1.4, -4.6), c.R(() => spot, 3.9, 1.5, -4.1)], look: () => spot.clone().setY(spot.y + 1.2), fov: 34, shake: 0.15 });
       c.at(12.1, () => {
         c.debrisOf(pr.shatter(spot.clone()));
         v.fx.flash(spot.clone().setY(spot.y + 1.2), 4, '#d9b8ff', 0.4);
         v.fx.burst(spot.clone().setY(spot.y + 1.2), '#e2c8ff', 60, 6, 0.2, 1.2);
         c.shake(0.4);
       });
-      c.during(12.1, 13.2, (k) => (cri.view as MusicianView).setFrozen(0.6 * (1 - k)));
+      c.at(12.2, () => ((cri.view as MusicianView).pose = 'cheer'));
       c.colourCircle(12.1, 2.6, () => spot, 0.5, 9, 1.12);
       // a twirl of joy
       c.during(12.6, 13.8, (k) => (cri.spin = ease.inOut(k) * Math.PI * 4));
@@ -944,7 +953,8 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     const kidAt = c.roadPoint(c.s0 - 6, -7, 0);
     const kid = c.silence(0.38, kidAt);
     kid.pose = 'small';
-    kid.lookAt(valley);
+    faceSilence(kid, valley);
+    memoryKey(c, () => kid.group.position.clone(), () => valley.clone());
     c.cue(0.3, 'story:memory');
     // the dancers clap: little golden sparks
     c.add({ update: () => {
@@ -972,7 +982,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     c.during(12.4, 19, (k) => {
       kid.group.position.lerpVectors(near, away, k);
       kid.group.position.y = c.view.land.heightAt(kid.group.position.x, kid.group.position.z);
-      kid.lookAt(away);
+      faceSilence(kid, away);
     });
     c.shot(11.4, 19, { pos: [c.R(() => valley, -3, 2.6, -4), c.R(() => valley, -4, 3.4, -5)], look: () => kid.group.position.clone().setY(kid.group.position.y + 0.8), fov: 40 });
     c.end(19);
@@ -1072,7 +1082,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.add({ update: () => {
         const back = v.turtle.group.localToWorld(new THREE.Vector3(1.5, 0, 3.5));
         ghost.group.position.set(back.x, maxY, back.z);
-        ghost.lookAt(pond.group.position);
+        faceSilence(ghost, pond.group.position);
       } }, null);
       c.cue(0.2, 'story:wonder');
       c.shot(0, 4.4, { pos: [c.T(-24, 6, 2), c.T(-22, 5, -2)], look: [() => pond.group.position.clone(), c.T(-6, 2, -1)], fov: 40 });
@@ -1195,13 +1205,16 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       shards.push(m);
     }
     const head = () => kid.group.position.clone().add(tmp.set(0, 0.42 * 2.8, 0));
+    // the side the close-ups are filmed from (it turns to it before its mask cracks)
+    const front = c.R(() => at, 2.6, 0, -3.4);
+    memoryKey(c, () => kid.group.position.clone(), front, '#cfe4ff');
     c.shot(0, 5, { pos: [c.R(() => at, -7, 3.4, -6), c.R(() => at, -5.6, 2.6, -4.8)], look: () => at.clone().setY(at.y + 0.6), fov: 40 });
     // it picks the pieces up one by one…
     shards.forEach((m, i) => {
       const t0 = 5 + i * 0.65;
       c.at(t0, () => {
         kid.pose = 'reach';
-        kid.lookAt(m.position);
+        faceSilence(kid, m.position);
       });
       c.during(t0 + 0.2, t0 + 0.6, (k) => m.position.lerp(head(), k * 0.5));
       c.at(t0 + 0.6, () => {
@@ -1210,8 +1223,9 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
         c.view.fx.burst(head(), '#8a86a0', 6, 0.6, 0.12, 0.5);
       });
     });
-    c.shot(5, 11, { pos: [c.R(() => at, 2.4, 1.0, -2.2), c.R(() => at, 2.0, 0.9, -1.8)], look: () => at.clone().setY(at.y + 0.7), fov: 34 });
+    c.shot(5, 11, { pos: [c.R(() => at, 3.4, 1.5, -3.0), c.R(() => at, 2.9, 1.3, -2.6)], look: () => at.clone().setY(at.y + 0.7), fov: 36 });
     // …and the mask cracks for the first time
+    c.at(10.95, () => faceSilence(kid, front()));
     c.at(11.6, () => {
       c.view.fx.flash(head(), 0.8, '#ffffff', 0.3);
       c.view.fx.burst(head(), '#ffffff', 20, 1.2, 0.08, 0.6);
@@ -1389,7 +1403,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
     const at = c.roadPoint(c.s0 + 10, 0, 0);
     const kid = c.silence(0.6, at);
     kid.pose = 'small';
-    kid.lookAt(c.roadPoint(c.s0 - 20, 0, 0));
+    faceSilence(kid, c.roadPoint(c.s0 - 20, 0, 0));
     let size = 0.6;
     c.add({ update: () => kid.group.scale.setScalar(size) }, null);
     c.cue(0.3, 'story:memory');
@@ -1490,7 +1504,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       sil.pose = 'loom';
       const away = lm.localToWorld(new THREE.Vector3(0, 33.4, -50));
       let k0 = 0;
-      c.add({ update: () => sil.lookAt(away.clone().lerp(v.turtle.group.position, k0)) }, null);
+      c.add({ update: () => faceSilence(sil, away.clone().lerp(v.turtle.group.position, k0)) }, null);
       c.cue(0.2, 'story:dread');
       c.shot(0, 4.4, { pos: [c.T(-12, 2, 10), c.T(-11, 2.4, 8)], look: [() => lm.position.clone().setY(lm.position.y + 20), () => lm.position.clone().setY(lm.position.y + 30)], fov: 40 });
       c.placeName(0.8, 4, placeOf('c3', lang));
@@ -1523,7 +1537,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       let scale = 4;
       c.add({ update: () => {
         sil.group.scale.setScalar(scale);
-        sil.lookAt(v.turtle.group.position);
+        faceSilence(sil, v.turtle.group.position);
       } }, null);
       c.cue(0.2, 'story:dread');
       c.shot(0, 3.6, { pos: [c.T(-6, 2, 8), c.T(-5, 2.2, 6)], look: () => from.clone().setY(from.y + 6), fov: 36 });
@@ -1616,9 +1630,38 @@ function memoryScene(app: App, world: WorldId, id: string, script: (c: Cine) => 
     c.memoryFrame(0, true);
     c.grade(0, 0.01, { saturation: 0.62, vignette: 0.85, grain: 0.085, tint: '#f0dcff', contrast: 0.94, warmth: 0.04 });
     c.bars(0, 11);
+    // a brighter moon: the little ink figure must read against the night
+    c.light(0, 0.01, 1.7, 0.95);
     void id;
     script(c);
   }, 1600);
+}
+
+/**
+ * A soft light that follows a memory's little figure (so its porcelain mask and the edge of its cloak
+ * catch the light): warm from the side of `toward` (a festival), cool from behind.
+ */
+function memoryKey(c: Cine, at: () => THREE.Vector3, toward: () => THREE.Vector3, warm = '#ffc98a') {
+  const key = new THREE.PointLight(warm, 9, 9, 1.6);
+  const rim = new THREE.PointLight('#9fb4ff', 6, 8, 1.6);
+  c.place(key);
+  c.place(rim);
+  c.add({ update: () => {
+    const p = at(), d = toward().sub(p).setY(0).normalize();
+    key.position.copy(p).addScaledVector(d, 2.2).setY(p.y + 1.6);
+    rim.position.copy(p).addScaledVector(d, -1.8).setY(p.y + 2.2);
+  } }, null);
+}
+
+/** a dark rock to stand on (above the tall grass) */
+function perchRock(c: Cine, at: THREE.Vector3, h = 0.8): THREE.Vector3 {
+  const g = new THREE.DodecahedronGeometry(1, 1);
+  g.scale(1.3, h * 1.1, 1.1);
+  const rock = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: '#4a4658', roughness: 0.95, flatShading: true }));
+  rock.position.copy(at).setY(at.y - 0.15);
+  rock.castShadow = rock.receiveShadow = true;
+  c.place(rock);
+  return at.clone().setY(at.y + h * 1.1 - 0.2);
 }
 
 /** a little festival of note-birds (dancers, lanterns, a fire and fireflies) */

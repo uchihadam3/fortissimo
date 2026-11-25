@@ -319,7 +319,8 @@ export class ThornCage {
       // taper toward the top
       const pa = tube.attributes.position as THREE.BufferAttribute;
       for (let v = 0; v < pa.count; v++) {
-        const y = pa.getY(v) / height;
+        // (the tube's bottom ring dips below 0: clamp, or pow() of a negative number is NaN)
+        const y = Math.max(0, Math.min(1, pa.getY(v) / height));
         const cx = radius * (1 - Math.pow(y, 2.2) * 0.85);
         const ox = pa.getX(v) - cx, oz = pa.getZ(v);
         const k = 1 - y * 0.7;
