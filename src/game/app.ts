@@ -13,7 +13,8 @@ import { deleteSlot, exportFile, lastSlot, loadSlot, newSave, saveFromCode, save
 import type { WorldId } from '../sim/defs';
 import type { Mode } from '../sim/journey';
 import { isLevelOpen } from '../ui/screens';
-import { playCutscene } from './cutscenes';
+import { listSlots } from '../core/save';
+import { SCENES, chapterDue, flagOf, playStory, sceneAfter, sceneTitle, seen, shardsOf, unlocked, type SceneDef } from './story';
 
 export const INSTALL_URL = 'https://uchihadam3.github.io/fortissimo/';
 
@@ -105,6 +106,9 @@ export class App {
     }
     if (world) {
       this.showcase = new Showcase(this.engine, world);
+      // the Heart on the shell shows the shards already home (the journey in progress)
+      const last = lastSlot();
+      this.showcase.view.turtle.setShards(shardsOf(this.save ?? (last !== null ? loadSlot(last) : null)));
       this.engine.paused = false;
     }
   }
@@ -127,6 +131,7 @@ export class App {
       onNew: () => this.slots('new'),
       onLoad: () => this.slots('load'),
       onOptions: () => this.screens.options(this.settings, (s) => this.changeSettings(s), () => this.menu()),
+      onStory: listSlots().some((s) => s.data?.flags.intro) ? () => this.storyGallery() : undefined,
       onCredits: () => this.screens.credits(() => this.menu()),
       onInstall: () => this.install(),
     });
@@ -191,13 +196,52 @@ export class App {
     this.screens.clear();
     if (isNew && !d.flags.intro) {
       this.setShowcase(null);
-      await playCutscene(this, 'intro');
+      await playStory(this, 'intro');
       d.flags.intro = true;
       this.persist();
+      // the first land's chapter opening plays on the way into the first journey
       await this.playLevel('m1', 'normal');
       return;
     }
     await this.openMap();
+  }
+
+  /** Play a story scene once and remember it was seen (it ends on a black screen). */
+  private async storyScene(s: SceneDef) {
+    this.disposeBattle();
+    this.setShowcase(null);
+    await playStory(this, s.id);
+    if (this.save) {
+      this.save.flags[flagOf(s)] = true;
+      this.persist();
+    }
+  }
+
+  // ───────────────────────────── the story gallery ─────────────────────────────
+
+  /** Every story scene, to watch again; locked ones show only their place in the story. */
+  storyGallery() {
+    this.disposeBattle();
+    if (!this.showcase) this.setShowcase('meadow');
+    audio.playSong('menu', { fade: 2 });
+    const saves = listSlots().map((s) => s.data).filter((d): d is SaveData => !!d);
+    const entries = SCENES.map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      world: s.world,
+      title: sceneTitle(s, this.screens.lang),
+      open: saves.some((d) => unlocked(d, s)),
+    }));
+    this.screens.storyGallery(entries, async (id) => {
+      await this.screens.fadeTo(1, 600);
+      this.screens.clear();
+      this.setShowcase(null);
+      await playStory(this, id);
+      this.setShowcase('meadow');
+      audio.playSong('menu', { fade: 2 });
+      this.storyGallery();
+      await this.screens.fadeTo(0, 900);
+    }, () => this.menu());
   }
 
   /** Clear menus and background scenes before a cinematic. */
@@ -248,6 +292,11 @@ export class App {
     if (!entry || !this.save) return;
     await this.screens.fadeTo(1, 500);
     this.screens.clear();
+    // the first time the band enters a land: its chapter opening
+    if (chapterDue(this.save, entry.world)) {
+      const ch = SCENES.find((s) => s.kind === 'chapter' && s.world === entry.world);
+      if (ch) await this.storyScene(ch);
+    }
     this.screens.loading(true);
     this.setShowcase(null);
     this.disposeBattle();
@@ -262,12 +311,31 @@ export class App {
       onEnemySeen: () => this.persist(),
     }, this.uiRoot);
     this.battle = b;
+    b.view.turtle.setShards(shardsOf(save));
+    this.markVoice(b, entry.world, entry.kind === 'boss');
     b.onPauseRequest = () => this.openPause();
     this.engine.paused = false;
     this.screens.loading(false);
     await this.screens.fadeTo(0, 900);
     const r = await b.done;
     await this.afterBattle(id, mode, r);
+  }
+
+  /**
+   * The land's great Voice at the end of the road stays wrapped in ink until its guardian is beaten.
+   * Arriving loosens the ink a little; arriving at the guardian's journey frees it.
+   */
+  private markVoice(b: JourneyBattle, world: WorldId, boss: boolean) {
+    const guardian = CAMPAIGN.find((l) => l.world === world && l.kind === 'boss');
+    if (!guardian || !this.save || (this.save.levels[guardian.id]?.stars ?? 0) > 0) return;
+    const lm = b.view.landmark;
+    lm.setCorrupt(1);
+    // INTEGRATION: the arrival is detected through landmark.ring() (JourneyView calls it on 'arrive')
+    const ring = lm.ring.bind(lm);
+    lm.ring = () => {
+      ring();
+      lm.setCorrupt(boss ? 0 : 0.6, false);
+    };
   }
 
   private async playEndless(world: WorldId): Promise<void> {
@@ -280,6 +348,7 @@ export class App {
     const def = endlessDef(world);
     const b = new JourneyBattle(this.engine, def, { mode: 'normal', known: this.save.knownTowers, seenEnemies: this.save.seenEnemies, tutorials: false }, this.uiRoot);
     this.battle = b;
+    b.view.turtle.setShards(shardsOf(this.save));
     b.onPauseRequest = () => this.openPause();
     this.engine.paused = false;
     this.screens.loading(false);
@@ -327,17 +396,25 @@ export class App {
       if (next && isLevelOpen(save, next)) save.current = next.id;
     }
     this.persist();
-    // story moments
-    if (victory && firstClear && entry.kind === 'boss') {
-      this.disposeBattle();
-      if (entry.world === 'citadel') {
-        await playCutscene(this, 'ending');
-        save.flags.ending = true;
-        this.persist();
-        await this.screens.credits(() => {}, true);
-        return this.openMap();
-      }
+    void firstClear;
+    // story moments: the ending after the Silence, the epilogue after the Abyss (with the cast credits)
+    const scene = victory ? sceneAfter(id) : undefined;
+    if (scene && !seen(save, scene) && (scene.kind === 'ending' || scene.kind === 'epilogue')) {
+      await this.screens.fadeTo(1, 900);
+      this.screens.clear();
+      await this.storyScene(scene);
+      return this.openMap();
     }
+    // the interlude plays the first time on the way out of the results (later it can be watched again)
+    const pending = scene && !seen(save, scene) ? scene : null;
+    const withStory = (go: () => Promise<void> | void) => async () => {
+      if (pending) {
+        await this.screens.fadeTo(1, 600);
+        this.screens.clear();
+        await this.storyScene(pending);
+      }
+      await go();
+    };
     const nextEntry = CAMPAIGN.find((l) => (l.kind === 'main' || l.kind === 'boss') && l.requires.includes(id));
     await this.screens.results({
       victory,
@@ -346,9 +423,16 @@ export class App {
       collected: r.collected,
       time: r.time,
       crown: victory && mode === 'virtuoso',
-      next: victory && nextEntry && isLevelOpen(save, nextEntry) ? () => this.playLevel(nextEntry.id, 'normal') : undefined,
+      next: victory && nextEntry && isLevelOpen(save, nextEntry) ? withStory(() => this.playLevel(nextEntry.id, 'normal')) : undefined,
       retry: () => this.playLevel(id, mode),
-      map: () => this.openMap(),
+      map: withStory(() => this.openMap()),
+      scene: scene && !pending ? async () => {
+        await this.screens.fadeTo(1, 600);
+        this.screens.clear();
+        await this.storyScene(scene);
+        await this.openMap();
+      } : undefined,
+      sceneNew: !!pending,
     });
   }
 

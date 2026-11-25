@@ -72,6 +72,12 @@ export const STRINGS = {
     theEnd: 'Fim',
     loading: 'Preparando a jornada…',
     worldDone: 'Terra restaurada',
+    story: 'História',
+    chapter: 'Capítulo',
+    prologue: 'Prólogo',
+    epilogue: 'Epílogo',
+    watchScene: 'Ver a cena',
+    newScene: 'Nova cena',
   },
   en: {
     tapToStart: 'Tap to start',
@@ -145,7 +151,55 @@ export const STRINGS = {
     theEnd: 'The End',
     loading: 'Preparing the journey…',
     worldDone: 'Land restored',
+    story: 'Story',
+    chapter: 'Chapter',
+    prologue: 'Prologue',
+    epilogue: 'Epilogue',
+    watchScene: 'Watch the scene',
+    newScene: 'New scene',
   },
 };
 
 export type StringKey = keyof (typeof STRINGS)['pt'];
+
+/** Chapter numerals (the five lands). */
+export const CHAPTER_NUMERALS = ['I', 'II', 'III', 'IV', 'V'];
+
+/** The five great Voices of Harmonia (place names in the guardian scenes). */
+export const VOICE_NAMES: Record<'meadow' | 'desert' | 'ice' | 'forge' | 'citadel', { pt: string; en: string }> = {
+  meadow: { pt: 'O Sino do Prado', en: 'The Meadow Bell' },
+  desert: { pt: 'A Harpa das Dunas', en: 'The Dune Harp' },
+  ice: { pt: 'O Órgão de Cristal', en: 'The Crystal Organ' },
+  forge: { pt: 'O Carrilhão da Forja', en: 'The Forge Carillon' },
+  citadel: { pt: 'A Agulha', en: 'The Needle' },
+};
+
+/** Titles of the story scenes in the gallery (the scenes themselves are wordless). */
+export const SCENE_NAMES: Record<string, { pt: string; en: string }> = {
+  intro: { pt: 'O Dia em que a Música Parou', en: 'The Day the Music Stopped' },
+  m1: { pt: 'O Tambor de Pedra', en: 'The Stone Drummer' },
+  m2: { pt: 'A Gaiola de Espinhos', en: 'The Cage of Thorns' },
+  m3: { pt: 'Cinco Estrelas Apagadas', en: 'Five Dark Stars' },
+  m4: { pt: 'O Sino Toca', en: 'The Bell Rings' },
+  mx: { pt: 'Memória: Vagalumes', en: 'Memory: Fireflies' },
+  d1: { pt: 'O Cristal do Oásis', en: 'The Oasis Crystal' },
+  d2: { pt: 'Obeliscos na Noite', en: 'Obelisks in the Night' },
+  d3: { pt: 'O Escaravelho', en: 'The Scarab' },
+  d4: { pt: 'A Harpa ao Vento', en: 'The Harp in the Wind' },
+  dx: { pt: 'Memória: Palmas Mudas', en: 'Memory: Silent Claps' },
+  i1: { pt: 'O Coro Gelado', en: 'The Frozen Choir' },
+  i2: { pt: 'O Lago de Espelho', en: 'Mirror Lake' },
+  i3: { pt: 'A Aurora Apagada', en: 'The Aurora Fades' },
+  i4: { pt: 'O Órgão Canta', en: 'The Organ Sings' },
+  ix: { pt: 'Memória: Notas Quebradas', en: 'Memory: Broken Notes' },
+  f1: { pt: 'A Ponte de Lava', en: 'The Lava Bridge' },
+  f2: { pt: 'A Bigorna', en: 'The Anvil' },
+  f3: { pt: 'O Golem Desperta', en: 'The Golem Wakes' },
+  f4: { pt: 'O Ferreiro Gentil', en: 'The Gentle Smith' },
+  fx: { pt: 'Memória: A Coroa Partida', en: 'Memory: The Broken Crown' },
+  c1: { pt: 'Ecos Vazios', en: 'Hollow Echoes' },
+  c2: { pt: 'A Máscara se Vira', en: 'The Mask Turns' },
+  c3: { pt: 'O Silêncio Desce', en: 'The Silence Descends' },
+  ending: { pt: 'A Grande Canção', en: 'The Great Song' },
+  epilogue: { pt: 'O Abismo · A Próxima Turnê', en: 'The Abyss · The Next Tour' },
+};

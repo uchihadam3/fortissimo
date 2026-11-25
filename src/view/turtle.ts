@@ -12,6 +12,9 @@ import { noise2 } from '../core/noise';
 import { SHELL, HEX_R, hexCenter, domeY, SLOT_DEFS } from '../sim/shell';
 export { SHELL };
 
+/** The colour of each land's shard of the Heart (meadow, desert, ice, forge, citadel). */
+export const SHARD_COLORS = ['#7cd35a', '#ffb347', '#8fe2ff', '#ff6a3a', '#ffd36b'];
+
 export interface Slot {
   id: number;
   /** local position on the shell (top of the pad) */
@@ -65,6 +68,14 @@ export class Turtle {
   private lanterns: THREE.Mesh[] = [];
   private heart: THREE.Mesh;
   private heartRings: THREE.Mesh[] = [];
+  /** the Heart of the Song: a core crystal crowned by five facets (one per land's shard) */
+  readonly heartGroup = new THREE.Group();
+  private facets: { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; color: THREE.Color; lit: number; flash: number }[] = [];
+  private shardCount = 0;
+  /** cinematics: how visible the facets still missing are (0 = gone, just after the theft · 1 = dark glass sockets) */
+  facetGhost = 1;
+  /** cinematics: 1 = every facet hidden (the Heart has just shattered) */
+  heartBroken = 0;
   private blinkT = 0;
   private nextBlink = 2;
   private lookYaw = 0;
@@ -302,31 +313,116 @@ export class Turtle {
     }
   }
 
+  /**
+   * The Heart of the Song: a stone base, a golden stem, a small core crystal and, around it, a crown of
+   * five tall facets — one for each land. A facet lights up in its land's colour when that land's
+   * shard comes home (`setShards`); the missing ones stay as dark glass, so the goal reads at a glance.
+   */
   private buildHeart(): THREE.Mesh {
     const top = SHELL.y0 + domeY(0, 0);
-    const base = new THREE.Mesh(cyl(0.55, 0.75, 0.5, 8), stdMat('#efe6d6', 0.6));
+    const base = new THREE.Mesh(cyl(0.55, 0.75, 0.5, 10), stdMat('#efe6d6', 0.6));
     base.position.y = top + 0.1;
     this.shell.add(base);
-    const ped = new THREE.Mesh(cyl(0.18, 0.3, 0.8, 8), stdMat('#e9b949', 0.3, 0.8));
+    const ped = new THREE.Mesh(cyl(0.16, 0.3, 0.8, 10), stdMat('#e9b949', 0.3, 0.8));
     ped.position.y = top + 0.7;
     this.shell.add(ped);
-    const g = new THREE.OctahedronGeometry(0.42, 0);
-    g.scale(1, 1.6, 1);
-    this.heartMat = new THREE.MeshStandardMaterial({ color: '#c9efff', emissive: new THREE.Color('#7fd6ff'), emissiveIntensity: 1.6, roughness: 0.1, flatShading: true });
-    const m = new THREE.Mesh(g, this.heartMat);
-    m.position.y = top + 1.75;
-    this.shell.add(m);
-    for (let i = 0; i < 3; i++) {
-      const r = new THREE.Mesh(torus(0.7 + i * 0.1, 0.03, 6, 48), stdMat('#e9b949', 0.3, 0.85));
-      r.position.y = top + 1.75;
-      this.shell.add(r);
+    // a golden cup the facets stand in
+    const cup = new THREE.Mesh(cyl(0.46, 0.2, 0.22, 10), stdMat('#e9b949', 0.28, 0.85));
+    cup.position.y = top + 1.16;
+    this.shell.add(cup);
+    const H = this.heartGroup;
+    H.position.y = top + 1.75;
+    this.shell.add(H);
+    const g = new THREE.IcosahedronGeometry(0.27, 0);
+    g.scale(1, 1.3, 1);
+    this.heartMat = new THREE.MeshStandardMaterial({ color: '#e6f8ff', emissive: new THREE.Color('#8fdcff'), emissiveIntensity: 1.6, roughness: 0.1, flatShading: true });
+    const core = new THREE.Mesh(g, this.heartMat);
+    H.add(core);
+    // five facets, a crown of crystal petals leaning outward (facet 0 faces forward, then clockwise)
+    for (let i = 0; i < 5; i++) {
+      const a = Math.PI / 2 - (i / 5) * Math.PI * 2;
+      const pivot = new THREE.Group();
+      pivot.rotation.y = a;
+      const fg = new THREE.OctahedronGeometry(0.2, 0);
+      fg.scale(0.8, 2.6, 0.62);
+      fg.translate(0, 0.52, 0);
+      const color = new THREE.Color(SHARD_COLORS[i]);
+      const mat = new THREE.MeshStandardMaterial({ color: '#3a3f58', emissive: color.clone(), emissiveIntensity: 0, roughness: 0.12, metalness: 0.15, flatShading: true, transparent: true, opacity: 0.5 });
+      const m = new THREE.Mesh(fg, mat);
+      m.position.set(0.24, -0.55, 0);
+      m.rotation.z = -0.42;
+      pivot.add(m);
+      H.add(pivot);
+      this.facets.push({ mesh: m, mat, color, lit: 0, flash: 0 });
+    }
+    for (let i = 0; i < 2; i++) {
+      const r = new THREE.Mesh(torus(0.86 + i * 0.12, 0.028, 6, 56), stdMat('#e9b949', 0.3, 0.85));
+      H.add(r);
       this.heartRings.push(r);
     }
     const light = new THREE.PointLight('#9fe0ff', 4, 9, 1.8);
-    light.position.y = top + 1.8;
-    this.shell.add(light);
+    light.position.y = 0.05;
+    H.add(light);
     this.heartLight = light;
-    return m;
+    return core;
+  }
+
+  /** How many shards of the Heart came home (0…5): the facets light up one by one. */
+  setShards(n: number) {
+    this.shardCount = Math.max(0, Math.min(5, Math.round(n)));
+  }
+
+  get shards(): number {
+    return this.shardCount;
+  }
+
+  /** a shard just arrived: its facet flashes */
+  flashFacet(i: number) {
+    const f = this.facets[i];
+    if (f) f.flash = 1;
+  }
+
+  /** world position of a facet (where a returning shard lands) */
+  facetWorld(i: number, out = new THREE.Vector3()): THREE.Vector3 {
+    const f = this.facets[Math.max(0, Math.min(4, i))];
+    return f.mesh.localToWorld(out.set(0, 0.55, 0));
+  }
+
+  /** world position of the Heart's core */
+  heartWorld(out = new THREE.Vector3()): THREE.Vector3 {
+    return this.heartGroup.getWorldPosition(out);
+  }
+
+  private updateHeart(dt: number, t: number, bp: number) {
+    const pulse = Math.exp(-bp * 5);
+    this.heartMat.emissiveIntensity = 0.12 + 1.25 * this.heartGlow * (1 + pulse * 0.3);
+    this.heart.rotation.y = t * 0.7;
+    this.heart.scale.setScalar((1 + pulse * 0.08 * this.heartGlow) * (0.7 + 0.3 * Math.min(1, this.heartGlow * 2)));
+    const light = new THREE.Color('#9fe0ff').multiplyScalar(0.6 + 0.4 * this.heartGlow);
+    let litSum = 0;
+    this.facets.forEach((f, i) => {
+      const want = i < this.shardCount ? 1 : 0;
+      f.lit = damp(f.lit, want, 4, dt);
+      f.flash = Math.max(0, f.flash - dt * 1.2);
+      const k = f.lit;
+      const show = (1 - this.heartBroken) * (k > 0.02 ? 1 : this.facetGhost);
+      f.mesh.visible = show > 0.01;
+      f.mat.opacity = Math.min(1, 0.42 + k * 0.58) * show;
+      f.mat.color.setRGB(0.23 + (f.color.r * 0.9 - 0.23) * k, 0.25 + (f.color.g * 0.9 - 0.25) * k, 0.35 + (f.color.b * 0.9 - 0.35) * k);
+      f.mat.emissive.copy(f.color).lerp(new THREE.Color(1, 1, 1), f.flash * 0.4);
+      f.mat.emissiveIntensity = k * (0.9 + pulse * 0.45) + f.flash * 1.6;
+      const s = 1 + f.flash * 0.45 * Math.sin(f.flash * Math.PI) + k * pulse * 0.05;
+      f.mesh.scale.setScalar(s);
+      light.add(f.color.clone().multiplyScalar(k * 0.35));
+      litSum += k;
+    });
+    this.heartGroup.rotation.y = t * 0.25;
+    this.heartLight.color.copy(light).multiplyScalar(1 / Math.max(1, 0.6 + 0.4 * this.heartGlow + litSum * 0.35));
+    this.heartLight.intensity = 3.2 * this.heartGlow + litSum * 0.7;
+    this.heartRings.forEach((r, i) => {
+      r.rotation.x = t * (0.5 + i * 0.3) + i;
+      r.rotation.y = t * (0.35 + i * 0.2);
+    });
   }
 
   // ───────────────────────────── head, legs, tail ─────────────────────────────
@@ -644,14 +740,7 @@ export class Turtle {
     // village life
     this.flags.forEach((f, i) => (f.rotation.y = Math.sin(t * 3 + i) * 0.4 + 0.3));
     this.lanterns.forEach((l, i) => (l.scale.setScalar((1 + Math.exp(-bp * 4) * 0.25 + Math.sin(t * 2 + i) * 0.04) * (0.2 + 0.8 * this.lights))));
-    this.heartMat.emissiveIntensity = 0.15 + 1.5 * this.heartGlow * (1 + Math.exp(-bp * 5) * 0.3);
-    this.heartLight.intensity = 4 * this.heartGlow;
-    this.heart.rotation.y = t * 0.7;
-    this.heart.scale.setScalar(1 + Math.exp(-bp * 5) * 0.08);
-    this.heartRings.forEach((r, i) => {
-      r.rotation.x = t * (0.5 + i * 0.3) + i;
-      r.rotation.y = t * (0.35 + i * 0.2);
-    });
+    this.updateHeart(dt, t, bp);
     if (this.lastBeat !== Math.floor(beatPos)) this.lastBeat = Math.floor(beatPos);
   }
 }
