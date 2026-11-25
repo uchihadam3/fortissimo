@@ -28,18 +28,18 @@ function stage(kind: TowerKind, level: number): THREE.Group {
     const rug = mixc(body, '#ffffff', 0.18), rim = level >= 1 ? new THREE.Color(GOLD) : mixc(body, '#fff4dc', 0.7);
     b.add('stage', 'm', paint(at(cyl(0.31, 0.31, 0.012, 28), 0, 0.064, 0), (p) => (Math.hypot(p.x, p.z) > 0.26 ? rim : rug)));
     if (level >= 1) {
-      b.add('stage', 'x', paint(at(torus(0.4, 0.015, 6, 40).rotateX(Math.PI / 2), 0, 0.06, 0), GOLD));
+      b.add('stage', 'm', paint(at(torus(0.4, 0.015, 6, 40).rotateX(Math.PI / 2), 0, 0.06, 0), GOLD));
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * Math.PI * 2;
-        b.add('stage', 'x', paint(at(sph(0.02, 8, 6), Math.cos(a) * 0.425, 0.03, Math.sin(a) * 0.425), GOLD));
+        b.add('stage', 'm', paint(at(sph(0.02, 8, 6), Math.cos(a) * 0.425, 0.03, Math.sin(a) * 0.425), GOLD));
       }
     }
     if (level >= 2) {
       // footlights all around and a golden star in the middle of the rug
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-        b.add('stage', 'g', paint(at(cyl(0.022, 0.026, 0.03, 8), Math.cos(a) * 0.36, 0.075, Math.sin(a) * 0.36), '#3a2a20'));
-        b.add('stage', 'f', paint(at(sph(0.022, 10, 8), Math.cos(a) * 0.36, 0.1, Math.sin(a) * 0.36), '#ffe8a0', 1.2));
+        b.add('stage', 'm', paint(at(cyl(0.022, 0.026, 0.03, 8), Math.cos(a) * 0.36, 0.075, Math.sin(a) * 0.36), '#3a2a20'));
+        b.add('stage', 'm', paint(at(sph(0.022, 10, 8), Math.cos(a) * 0.36, 0.1, Math.sin(a) * 0.36), '#ffe8a0', 1.2));
       }
       const star = new THREE.Shape();
       for (let i = 0; i < 10; i++) {
@@ -47,7 +47,7 @@ function stage(kind: TowerKind, level: number): THREE.Group {
         if (i) star.lineTo(Math.cos(a) * r, Math.sin(a) * r);
         else star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
       }
-      b.add('stage', 'x', paint(new THREE.ShapeGeometry(star).rotateX(-Math.PI / 2).translate(0, 0.072, 0), GOLD, 0.25));
+      b.add('stage', 'm', paint(new THREE.ShapeGeometry(star).rotateX(-Math.PI / 2).translate(0, 0.072, 0), GOLD, 0.25));
     }
     g = b.into('stage', new THREE.Group());
     stageCache.set(key, g);

@@ -117,14 +117,15 @@ function stitchX(b: Bins, part: string, mk: MK, x: number, y: number, z: number,
 function fan(outline0: [number, number][], color: (t: number, x: number, z: number) => THREE.Color, glow: (t: number) => number = () => 0, rings0 = 4): Geo {
   // resample the outline densely so painted details (eyespots, glowing edges) have vertices to live on
   const outline: [number, number][] = [];
+  const ext = Math.max(...outline0.map(([x, z]) => Math.hypot(x, z)));
+  const step = Math.max(0.03, ext / 40);
   for (let i = 0; i < outline0.length - 1; i++) {
     const [x0, z0] = outline0[i], [x1, z1] = outline0[i + 1];
-    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.025));
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / step));
     for (let k = 0; k < steps; k++) outline.push([x0 + ((x1 - x0) * k) / steps, z0 + ((z1 - z0) * k) / steps]);
   }
   outline.push(outline0[outline0.length - 1]);
-  const ext = Math.max(...outline.map(([x, z]) => Math.hypot(x, z)));
-  const rings = Math.max(rings0, Math.ceil(ext / 0.03));
+  const rings = Math.max(rings0, Math.min(18, Math.ceil(ext / 0.045)));
   const pos: number[] = [0, 0, 0], col: number[] = [], gl: number[] = [], idx: number[] = [];
   const c0 = color(0, 0, 0);
   col.push(c0.r, c0.g, c0.b);
@@ -872,7 +873,7 @@ function buildTemplate(kind: EnemyKind): Tpl {
         b.add(sd < 0 ? 'legL' : 'legR', 'g', paint(at(cyl(0.03, 0.036, 0.52, 8), 0, -0.26, 0), '#0c0a14'), paint(at(ell(0.05, 0.03, 0.1), 0, -0.52, 0.04), '#0c0a14'), paint(at(cone(0.03, 0.08, 6).rotateX(Math.PI / 2), 0, -0.53, 0.15), '#0c0a14'));
         node(sd < 0 ? 'legL' : 'legR', body, sd * 0.075, 0.55, 0);
       }
-      const prof = [[0, 0.5], [0.17, 0.5], [0.2, 0.62], [0.17, 0.8], [0.2, 0.96], [0.27, 1.08], [0.23, 1.16], [0.1, 1.2], [0, 1.21]];
+      const prof = [[0, 0.5], [0.12, 0.5], [0.14, 0.6], [0.125, 0.76], [0.18, 0.94], [0.27, 1.08], [0.23, 1.16], [0.1, 1.2], [0, 1.21]];
       b.add('b', 'g', paint(lathe(prof, 24), (q, nn) => {
         const v = Math.max(0, (q.y - 0.72) * 0.36);
         if (nn.z > 0.3 && Math.abs(q.x) < v) return _c.set('#8a7fa8');
@@ -902,7 +903,7 @@ function buildTemplate(kind: EnemyKind): Tpl {
         b.add('b', 'g', paint(sp, (q) => _c.set('#1a1428').lerp(new THREE.Color('#8a6ae8'), smooth(1.5, 1.75, q.y)), 0.2));
       }
       node('b', body);
-      for (const sd of [-1, 1]) b.add('tails', 'd', paint(at(ell(0.065, 0.3, 0.016), sd * 0.065, -0.27, 0).rotateX(0.08), (q) => (q.y < -0.48 ? _c.set('#6a4ab8') : _c.set(coat))));
+      for (const sd of [-1, 1]) b.add('tails', 'd', paint(at(ell(0.07, 0.38, 0.016), sd * 0.06, -0.34, 0).rotateX(0.08).rotateZ(sd * 0.08), (q) => (q.y < -0.62 ? _c.set('#6a4ab8') : _c.set(coat))));
       node('tails', body, 0, 0.7, -0.17);
       for (const sd of [-1, 1]) {
         const part = sd < 0 ? 'armL' : 'armR';
@@ -1063,7 +1064,8 @@ function buildTemplate(kind: EnemyKind): Tpl {
       node('b', body);
       node('wingL', body, -0.24, 0.06, 0);
       node('wingR', body, 0.24, 0.06, 0);
-      t.height = 1.0;
+      root.scale.setScalar(1.2);
+      t.height = 1.2;
       t.style = 'fly';
       t.flap = 7;
       t.rim = '#e4f6ff';
@@ -1129,6 +1131,11 @@ function golemPlates(): THREE.Group {
 }
 
 const templates = new Map<EnemyKind, Tpl>();
+/**
+ * Material sets of creatures that left the stage, ready for the next one of the same kind: no
+ * shader program is ever released (and recompiled) in the middle of a battle.
+ */
+const matPool = new Map<EnemyKind, CharMats[]>();
 function template(kind: EnemyKind): Tpl {
   let t = templates.get(kind);
   if (!t) {
@@ -1138,6 +1145,17 @@ function template(kind: EnemyKind): Tpl {
   }
   return t;
 }
+
+/**
+ * The ink each creature bursts into when it turns back into golden notes.
+ * INTEGRATION: journeyView's `INK` map (used by `fx.release`) only knows the v1 kinds; it can use this.
+ */
+export const CREATURE_INK: Record<EnemyKind, string> = {
+  blot: '#3b3068', blotling: '#7a68c0', scurry: '#4a63a3', bubble: '#b9a6f0', moth: '#aa9fc6', scorpion: '#c49a5a', whirl: '#d0a262',
+  echo: '#9fe6d4', obelisk: '#4a3d6a', wolf: '#3a4876', shell: '#7fc4ec', phantom: '#d9dfff', muffler: '#c9c4dc', ember: '#ff7a2a',
+  slug: '#ff6a1f', shield: '#5c6072', mender: '#7dff9a', mimic: '#2a2346', knight: '#3d2470', conductor: '#6a4ab8',
+  bossBlot: '#43357c', bossScarab: '#ffb347', bossMoth: '#8fe2ff', bossGolem: '#ff6a3a', silence: '#1d1a2b',
+};
 
 // ───────────────────────────── the view ─────────────────────────────
 
@@ -1151,6 +1169,10 @@ export class EnemyView {
   readonly group: THREE.Group;
   private tpl: Tpl | null = null;
   private mats: CharMats | null = null;
+  // INTEGRATION: journeyView can set `view.burrowed = enemy.burrowed` for the scorpions (sim
+  // `burrow` ability) like it does for the Scarab, and call `setMimicKind(kind)` once the sim says
+  // which instrument a Mimic copies. The Silence boss exposes its SilenceView as `silenceView`
+  // (poses / reach / dissolve for its phases).
   private n: Record<string, THREE.Object3D> = {};
   private body!: THREE.Object3D;
   private height: number;
@@ -1194,7 +1216,7 @@ export class EnemyView {
       const tpl = template(kind);
       this.tpl = tpl;
       const root = tpl.root.clone(true);
-      this.mats = new CharMats(tpl.rim, tpl.rimK, tpl.glass);
+      this.mats = matPool.get(kind)?.pop() ?? new CharMats(tpl.rim, tpl.rimK, tpl.glass);
       this.mats.apply(root);
       root.traverse((o) => {
         if (o.name) this.n[o.name] = o;
@@ -1268,6 +1290,8 @@ export class EnemyView {
   get silenceView(): SilenceView | null {
     return this.silence;
   }
+  /** the battle Silence looms and reaches by itself; cinematics set this false and pose it themselves */
+  autoPose = true;
 
   push(t: number, x: number, z: number) {
     const last = this.hist[this.hist.length - 1];
@@ -1342,12 +1366,14 @@ export class EnemyView {
       y += (0.12 + Math.sin(vt * 1.4) * 0.08) * sc;
       const sv = this.silence;
       // it looms, and now and then reaches for what is ahead of it
-      const cyc = (vt * 0.12 + this.seed) % 1;
-      sv.pose = cyc > 0.72 ? 'reach' : 'loom';
-      if (sv.pose === 'reach') {
-        const ahead = new THREE.Vector3(Math.sin(this.dir) * 8, -1.5, Math.cos(this.dir) * 8).add(this.group.position);
-        sv.reach(ahead);
-      } else sv.reach(null);
+      if (this.autoPose) {
+        const cyc = (vt * 0.12 + this.seed) % 1;
+        sv.pose = cyc > 0.72 ? 'reach' : 'loom';
+        if (sv.pose === 'reach') {
+          const ahead = new THREE.Vector3(Math.sin(this.dir) * 8, -1.5, Math.cos(this.dir) * 8).add(this.group.position);
+          sv.reach(ahead);
+        } else sv.reach(null);
+      }
       sv.flash = this.flash;
       sv.update(dt, vt);
     } else if (tpl) {
@@ -1355,7 +1381,7 @@ export class EnemyView {
         case 'fly': {
           y += (1.2 + Math.sin(vt * 2.2 + this.seed) * 0.12 + (kind === 'bossMoth' ? 0.5 : 0)) * sc;
           const flap = Math.sin(t * tpl.flap);
-          const a = kind === 'bossMoth' ? 0.15 + flap * 0.45 : 0.1 + flap * 0.65;
+          const a = kind === 'bossMoth' ? 0.42 + flap * 0.4 : 0.1 + flap * 0.65;
           if (n.wingL) n.wingL.rotation.z = a;
           if (n.wingR) n.wingR.rotation.z = -a;
           this.body.position.y = -flap * 0.03;
@@ -1411,11 +1437,11 @@ export class EnemyView {
     this.slowT = Math.max(0, this.slowT - dt * 0.6);
     const u = this.mats?.u;
     if (u) {
-      u.uFlash.value.setScalar(this.flash * 0.9);
+      u.uFlash.value.setRGB(this.flash * 0.68, this.flash * 0.62, this.flash * 0.5);
       u.uSlow.value = this.slowT * 0.85;
     }
     if (this.mimic) {
-      this.mimic.mats.u.uFlash.value.setScalar(this.flash * 0.9);
+      this.mimic.mats.u.uFlash.value.setRGB(this.flash * 0.68, this.flash * 0.62, this.flash * 0.5);
       this.mimic.mats.u.uSlow.value = this.slowT * 0.85;
       this.mimic.update(dt, vt, beatPos);
     }
@@ -1630,8 +1656,18 @@ export class EnemyView {
   }
 
   dispose() {
-    // geometry is shared with the template; only the per-instance materials and the bar are ours
-    this.mats?.dispose();
+    // geometry is shared with the template; the materials go back to the pool, the bar is ours
+    if (this.mats) {
+      const u = this.mats.u;
+      u.uFlash.value.setScalar(0);
+      u.uSlow.value = 0;
+      if (this.kind === 'phantom') this.mats.get('h').opacity = this.mats.glassOpacity;
+      let pool = matPool.get(this.kind);
+      if (!pool) matPool.set(this.kind, (pool = []));
+      if (pool.length < 48) pool.push(this.mats);
+      else this.mats.dispose();
+      this.mats = null;
+    }
     this.mimic?.dispose();
     this.silence?.dispose();
     if (this.aura) (this.aura.material as THREE.Material).dispose();

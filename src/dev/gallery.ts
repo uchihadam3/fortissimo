@@ -232,6 +232,56 @@ export function gallery(app: HTMLElement, p: URLSearchParams) {
       pitch = 0.16;
       break;
     }
+    case 'field': {
+      // the game's view: the colossus with its band, every creature at game scale around it
+      const turtle = new Turtle();
+      scene.add(turtle.group);
+      const towers: TowerView[] = [];
+      const kinds12: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass', 'harp', 'drum', 'crystal', 'bell'];
+      kinds12.forEach((k, i) => {
+        const tv = new TowerView(k, i % 3, i);
+        tv.scaleMul = 2.3;
+        tv.group.position.copy(turtle.slots[i].pos);
+        turtle.shell.add(tv.group);
+        towers.push(tv);
+      });
+      TowerView.audience = cam.position;
+      items.push({
+        obj: turtle.group,
+        update: (dt, t, beat) => {
+          turtle.update(dt, t, beat, (_b, out) => out.identity(), () => 0, false);
+          for (const tv of towers) {
+            tv.update(dt, t, beat);
+            if (Math.floor(beat * 2) !== Math.floor((beat - dt / 0.6) * 2)) tv.fire();
+          }
+        },
+      });
+      const all: EnemyKind[] = p.has('kinds') ? (p.get('kinds')!.split(',') as EnemyKind[]) : [...LANDS.flat(), ...(p.get('bosses') === '1' ? GUARDIANS : [])];
+      all.forEach((k, i) => {
+        const e = new EnemyView(3000 + i, k, 2.2);
+        e.setAura(false);
+        if (k === 'mimic') e.setMimicKind('drum');
+        const a = -Math.PI / 2 + (i - (all.length - 1) / 2) * 0.22;
+        const r = 12 + (i % 3) * 4.5;
+        const at = new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+        scene.add(e.group);
+        items.push({
+          obj: e.group,
+          label: p.get('labels') === '1' ? k : undefined,
+          update: (dt, t, beat) => {
+            const q = at.clone().multiplyScalar(1 - t * 0.002);
+            e.push(t, q.x, q.z);
+            e.update(dt, t, beat, () => 0, (x, z, y, out) => out.set(x, y, z), cam.quaternion);
+          },
+        });
+      });
+      cam.fov = num('fov', 42);
+      target = new THREE.Vector3(0, 3.2, -6);
+      dist = 27;
+      pitch = 0.46;
+      yaw = 0.0;
+      break;
+    }
     case 'silences': {
       // every pose side by side (and an emerging and a dissolving one)
       const list: { pose: SilencePose; emerge?: number; dissolve?: number }[] = [
@@ -286,6 +336,13 @@ export function gallery(app: HTMLElement, p: URLSearchParams) {
   dist = num('dist', dist);
   if (p.has('tx0')) target.set(num('tx0', 0), num('ty0', target.y), num('tz0', 0));
   const placeCam = (y: number) => {
+    if (show === 'field') {
+      // behind the colossus like the game camera (it walks toward -z)
+      cam.position.set(target.x + Math.sin(y) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + 6 + Math.cos(y) * Math.cos(pitch) * dist);
+      cam.lookAt(target);
+      cam.updateProjectionMatrix();
+      return;
+    }
     cam.position.set(target.x + Math.sin(y) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(y) * Math.cos(pitch) * dist);
     cam.lookAt(target);
     cam.updateProjectionMatrix();

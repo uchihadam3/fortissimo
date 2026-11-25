@@ -200,8 +200,8 @@ totalEmissiveRadiance += vColor.rgb * vGlowC * uGlowK * (1.0 - chStone) * (1.0 -
 totalEmissiveRadiance += uFlash;
 totalEmissiveRadiance += vec3(0.85, 0.8, 1.0) * uInk * uEye * 0.6;
 if (uStone > 0.001 && uStone < 0.999) {
-  float chE = 1.0 - abs(uStoneLine - vWPosC.y) / (uStoneBand * 2.2);
-  totalEmissiveRadiance += vec3(1.0, 0.78, 0.35) * max(chE, 0.0) * 1.6;
+  float chE = 1.0 - abs(uStoneLine - vWPosC.y) / (uStoneBand * 1.5);
+  totalEmissiveRadiance += vec3(1.0, 0.78, 0.35) * max(chE, 0.0) * 0.7;
 }
 totalEmissiveRadiance += vec3(0.2, 0.45, 0.8) * uSlow * 0.3;
 `;
@@ -324,6 +324,13 @@ export class Bins {
   has(part: string) {
     return this.map.has(part);
   }
+  /** move every geometry of part `from` into part `to` */
+  moveInto(from: string, to: string) {
+    const src = this.map.get(from);
+    if (!src) return;
+    for (const [mk, list] of src) this.add(to, mk, ...list);
+    this.map.delete(from);
+  }
   /** the meshes of one part (geometry moved so `origin` becomes 0,0,0) */
   meshes(part: string, origin?: THREE.Vector3, shadow = true): THREE.Mesh[] {
     const out: THREE.Mesh[] = [];
@@ -395,12 +402,12 @@ export function eyeParts(b: Bins, e: number, s: number, iris: Col, lid: Col, pre
   const lc = new THREE.Color(lid), ll = new THREE.Color(LINE);
   for (const side of [-1, 1]) {
     const x = side * s;
-    E.push(paint(at(scl(sph(e, 18, 14), 1, 1.15, 0.5), x, 0, 0), '#fbfaf5'));
-    E.push(paint(at(scl(sph(e * 0.66, 16, 12), 1, 1.1, 0.36), x, -e * 0.05, e * 0.33), iris));
-    E.push(paint(at(scl(sph(e * 0.4, 12, 10), 1, 1.1, 0.4), x, -e * 0.06, e * 0.47), pupil));
-    E.push(paint(at(scl(sph(e * 0.2, 10, 8), 1, 1, 0.5), x + e * 0.24, e * 0.3, e * 0.6), '#ffffff', 1));
-    E.push(paint(at(scl(sph(e * 0.1, 8, 6), 1, 1, 0.5), x - e * 0.22, -e * 0.3, e * 0.56), '#ffffff', 0.7));
-    L.push(paint(at(new THREE.SphereGeometry(e * 1.1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), x, 0, 0), (p) => (p.y < e * 0.16 ? ll : lc)));
+    E.push(paint(at(scl(sph(e, 14, 10), 1, 1.15, 0.5), x, 0, 0), '#fbfaf5'));
+    E.push(paint(at(scl(sph(e * 0.66, 12, 8), 1, 1.1, 0.36), x, -e * 0.05, e * 0.33), iris));
+    E.push(paint(at(scl(sph(e * 0.4, 10, 6), 1, 1.1, 0.4), x, -e * 0.06, e * 0.47), pupil));
+    E.push(paint(at(scl(sph(e * 0.2, 8, 6), 1, 1, 0.5), x + e * 0.24, e * 0.3, e * 0.6), '#ffffff', 1));
+    E.push(paint(at(scl(sph(e * 0.1, 6, 4), 1, 1, 0.5), x - e * 0.22, -e * 0.3, e * 0.56), '#ffffff', 0.7));
+    L.push(paint(at(new THREE.SphereGeometry(e * 1.1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), x, 0, 0), (p) => (p.y < e * 0.16 ? ll : lc)));
     H.push(paint(at(torus(e * 0.66, e * 0.15, 6, 14, Math.PI), x, -e * 0.15, e * 0.42), LINE));
     // > <
     const dx = -side;
@@ -568,10 +575,14 @@ export function bird(b: Bins, d: BirdDef, o: { curl?: boolean; curlCol?: Col; ta
 }
 
 /** Turn a bird's bins into the standard hierarchy under `parent`. */
-export function assembleBird(b: Bins, B: Bird, parent: THREE.Object3D, pre = ''): THREE.Group {
-  b.into(pre + 'body', parent);
+export function assembleBird(b: Bins, B: Bird, parent: THREE.Object3D, pre = '', faceInBody = false): THREE.Group {
   const hc = new THREE.Vector3(0, B.egg.cy, 0);
   const head = grp(pre + 'head', 0, B.egg.cy, 0);
+  if (faceInBody) {
+    // merge the face into the body bins (it never nods on its own)
+    b.moveInto(pre + 'face', pre + 'body');
+  }
+  b.into(pre + 'body', parent);
   parent.add(head);
   b.into(pre + 'face', head, hc);
   const ef = grp(pre + 'eyeFrame', 0, B.eyeY - B.egg.cy, B.eyeZ);
@@ -1149,7 +1160,7 @@ function buildTemplate(kind: TowerKind, L: number): THREE.Group {
           cb.add('body', 'd', paint(new THREE.LatheGeometry(prof, 20), (p) => (p.y < dd.leg + r * 0.18 ? new THREE.Color(GOLD) : new THREE.Color('#ff6fa8'))));
         }
         const chick = grp(`chick${i}`, xs[i], hs[i], i === 1 ? -0.02 : 0.02);
-        assembleBird(cb, B, chick);
+        assembleBird(cb, B, chick, '', true);
         root.add(chick);
       }
       if (L >= 2) {
@@ -1528,8 +1539,9 @@ export class MusicianView {
         e.eyes.scale.setScalar(P.eyeS);
       }
       if (e.lids) {
-        e.lids.visible = !alt;
-        e.lids.rotation.x = -1.75 + (inkEyes ? Math.min(l, 0.35) : l) * 3.2;
+        const ll = inkEyes ? Math.min(l, 0.35) : l;
+        e.lids.visible = !alt && ll > 0.03;
+        e.lids.rotation.x = -1.75 + ll * 3.2;
       }
       if (e.happy) e.happy.visible = hap && !squeeze && !dizzy;
       if (e.squeeze) e.squeeze.visible = squeeze;
