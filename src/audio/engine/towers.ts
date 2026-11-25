@@ -420,7 +420,7 @@ export class Towers {
       case 'harp': {
         const tones = chordTones(this.peek(t), 86, 96);
         this.note('tick', ch, t, 72 + rand(-2, 2), 0.2 * v, 0.1, {}, 'impact');
-        if (tones.length) this.note('harp', ch, t, tones[g.step % tones.length], 0.08 * v, 0.15, { release: 0.1 }, 'impact');
+        if (tones.length) this.note('harp', ch, t, tones[((g.step % tones.length) + tones.length) % tones.length], 0.08 * v, 0.15, { release: 0.1 }, 'impact');
         break;
       }
       case 'bass':
@@ -430,7 +430,7 @@ export class Towers {
       case 'crystal': {
         for (let k = 0; k < 4; k++) this.fx.burst(ch.input, t - COMP + k * 0.014 + rand(0, 0.008), { noise: 'white', type: 'highpass', f: rand(3500, 6500), a: 0.0006, d: rand(0.004, 0.012), g: rand(0.04, 0.08) * v, cat: 'impact' });
         const tones = chordTones(this.peek(t), 91, 100);
-        if (tones.length) this.note('glass', ch, t + 0.01, tones[g.step % tones.length], 0.05 * v, 0.3, { release: 0.3 }, 'impact');
+        if (tones.length) this.note('glass', ch, t + 0.01, tones[((g.step % tones.length) + tones.length) % tones.length], 0.05 * v, 0.3, { release: 0.3 }, 'impact');
         break;
       }
       case 'horn':

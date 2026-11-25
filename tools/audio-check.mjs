@@ -228,6 +228,18 @@ try {
     tryIt('playSong bad', () => a.playSong('nope'));
     for (const p of ['meadow', 'desert', 'ice', 'forge', 'citadel', 'menu', 'none', 'zzz']) tryIt('setAmbience ' + p, () => a.setAmbience(p, NaN));
     for (const c of ['intro:dawn', 'map:unlock', 'map:world', 'world:restored', 'ending:bow', 'bogus']) tryIt('cinematic ' + c, () => a.cinematic(c));
+    // v2: the band, movements, duets, plates, motifs, story moods
+    tryIt('setBand garbage', () => a.setBand(null));
+    tryIt('setBand {}', () => a.setBand({}));
+    tryIt('setBand odd', () => a.setBand({ sections: { strings: NaN, low: -4, bells: 'x' }, harmony: 99, duets: ['march', 'nope', 3] }));
+    tryIt('setBand ok', () => a.setBand({ sections: { strings: 2, percussion: 1, bells: 0, brass: 0, voices: 0, low: 1 }, harmony: 2, duets: ['groundwork'] }));
+    tryIt('movement', () => a.movement(NaN, -1, NaN));
+    tryIt('movement ok', () => a.movement(2, 5, a.now() + 1));
+    for (const d of ['march', 'groundwork', 'shimmer', 'fanfare', 'hymn', 'serenade', 'groove', 'thunder', 'nope']) tryIt('duet ' + d, () => a.duet(d, t, NaN));
+    tryIt('plateUnlock', () => a.plateUnlock(NaN, 7));
+    for (const k of ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass', 'nope']) tryIt('joinMotif ' + k, () => a.joinMotif(k));
+    for (const c of ['story:wonder', 'story:frozen', 'story:wake', 'story:join', 'story:threat', 'story:shard', 'story:voice', 'story:camp', 'story:memory', 'story:journey', 'story:dread', 'story:hush', 'story:comic', 'land:meadow', 'land:desert', 'land:ice', 'land:forge', 'land:citadel', 'land:nowhere']) tryIt('cinematic ' + c, () => a.cinematic(c));
+    for (const e of ['scorpion', 'whirl', 'echo', 'wolf', 'ember', 'slug', 'mimic', 'knight', 'conductor']) tryIt('enemyDeath ' + e, () => a.enemyDeath(e, t, 0.3));
     for (const u of ['uiHover', 'uiClick', 'uiBack', 'uiOpen', 'uiDeny', 'achievement', 'save', 'studioSting', 'titleReveal', 'victory', 'defeat']) tryIt(u, () => a[u]());
     tryIt('stopMusic', () => a.stopMusic(undefined));
     tryIt('songClock', () => a.songClock());

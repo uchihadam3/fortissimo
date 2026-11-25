@@ -361,6 +361,7 @@ export function playBuf(
   dur: number,
   o: BufNoteOpts = {},
 ): void {
+  if (!Number.isFinite(midi) || !Number.isFinite(t) || !Number.isFinite(dur)) return;
   const cat = o.cat ?? 'buf';
   if (core.voiceCount(cat) >= (o.cap ?? 72)) return;
   const z = bank.get(inst, midi);
@@ -451,6 +452,7 @@ export interface StackOpts {
 }
 
 export function oscStack(core: Core, ch: Channel, t: number, midi: number, vel: number, dur: number, o: StackOpts): void {
+  if (!Number.isFinite(midi) || !Number.isFinite(t) || !Number.isFinite(dur)) return;
   const cat = o.cat ?? 'rt';
   if (core.voiceCount(cat) >= (o.cap ?? 40)) return;
   const ctx = core.ctx;

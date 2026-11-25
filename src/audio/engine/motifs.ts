@@ -32,11 +32,7 @@ const PANS = [-0.6, -0.3, 0, 0.3, 0.6];
 
 export class Motifs {
   private readonly fx: Fx;
-  /** joinMotif: the music bus (it is part of the score) */
-  private readonly stage: Channel;
-  private readonly stageWide: Channel;
-  /** duets & plates: the battle (sfx) bus, panned */
-  private readonly world: Channel[];
+  private ch: { stage: Channel; wide: Channel; world: Channel[] } | null = null;
   private lastJoin = -1;
 
   constructor(
@@ -45,14 +41,32 @@ export class Motifs {
     private readonly director: Director,
   ) {
     this.fx = new Fx(core, bank);
-    this.stage = new Channel(core, core.stingDry, core.stingWet, { wet: 0.32, gain: 0.62, vibratoCents: 5 });
-    this.stageWide = new Channel(core, core.stingDry, core.stingWet, { wet: 0.5, gain: 0.5, vibratoCents: 4, pan: 0.15 });
-    this.world = PANS.map((pan) => new Channel(core, core.sfxDry, core.sfxWet, { pan, wet: 0.28, gain: 0.5 }));
+  }
+
+  /** the channels, made on first use (nothing to build at unlock) */
+  private get chans(): { stage: Channel; wide: Channel; world: Channel[] } {
+    if (!this.ch) {
+      const core = this.core;
+      this.ch = {
+        // joinMotif: the music bus (it is part of the score)
+        stage: new Channel(core, core.stingDry, core.stingWet, { wet: 0.32, gain: 0.62, vibratoCents: 5 }),
+        wide: new Channel(core, core.stingDry, core.stingWet, { wet: 0.5, gain: 0.5, vibratoCents: 4, pan: 0.15 }),
+        // duets & plates: the battle (sfx) bus, panned
+        world: PANS.map((pan) => new Channel(core, core.sfxDry, core.sfxWet, { pan, wet: 0.28, gain: 0.5 })),
+      };
+    }
+    return this.ch;
+  }
+  private get stage(): Channel {
+    return this.chans.stage;
+  }
+  private get stageWide(): Channel {
+    return this.chans.wide;
   }
 
   private at(pan: number): Channel {
     const p = clamp(Number.isFinite(pan) ? pan : 0, -1, 1);
-    return this.world[clamp(Math.round((p + 1) * 2), 0, 4)];
+    return this.chans.world[clamp(Math.round((p + 1) * 2), 0, 4)];
   }
 
   private key(t: number): Scale {

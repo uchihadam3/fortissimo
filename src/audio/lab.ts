@@ -6,14 +6,14 @@
  */
 import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
-import { SONGS, TOWERS, type EnemyKind, type TowerKind, type WorldId } from '../sim/defs';
+import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
 import { bandOf, defaultArmy, ENDING, ENDING2, INTRO, INTRO2, makeRig, measure, onsetTest, renderAmbience, renderCinema, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
 const PLACES: (WorldId | 'menu' | 'none')[] = ['meadow', 'desert', 'ice', 'forge', 'citadel', 'menu', 'none'];
-const ENEMIES: EnemyKind[] = ['blot', 'blotling', 'scurry', 'shell', 'moth', 'shield', 'bubble', 'phantom', 'muffler', 'mender', 'bossBlot', 'silence'];
+const ENEMIES: EnemyKind[] = ['blot', 'blotling', 'scurry', 'shell', 'moth', 'shield', 'bubble', 'phantom', 'muffler', 'mender', 'scorpion', 'whirl', 'echo', 'wolf', 'ember', 'slug', 'mimic', 'knight', 'conductor', 'bossBlot', 'silence'];
 
 // ───────────── meter (also used by the automated check) ─────────────
 const meter = { peak: 0, sum: 0, n: 0, nan: 0 };
@@ -251,6 +251,8 @@ const runSeq = (seq: [number, CinematicCue][]) => {
 const seqRow = row(ci, 'sequences');
 button(seqRow, 'INTRO (80 s)', () => runSeq(INTRO));
 button(seqRow, 'ENDING (95 s)', () => runSeq(ENDING));
+button(seqRow, 'INTRO v2 (100 s)', () => runSeq(INTRO2));
+button(seqRow, 'ENDING v2 (120 s)', () => runSeq(ENDING2));
 button(seqRow, "playSong('ending') (self-timed)", () => audio.playSong('ending'));
 button(seqRow, 'stop', () => {
   timers.forEach(clearTimeout);
@@ -259,6 +261,45 @@ button(seqRow, 'stop', () => {
 const cueRow = row(ci, 'cues');
 for (const [, cue] of [...INTRO, ...ENDING]) button(cueRow, cue, () => audio.cinematic(cue));
 for (const cue of ['world:restored', 'map:unlock', 'map:world'] as CinematicCue[]) button(cueRow, cue, () => audio.cinematic(cue));
+const landRow = row(ci, 'story in');
+const STORY: CinematicCue[] = ['story:wonder', 'story:frozen', 'story:wake', 'story:join', 'story:threat', 'story:shard', 'story:voice', 'story:camp', 'story:memory', 'story:journey', 'story:dread', 'story:hush', 'story:comic'];
+for (const w of ['meadow', 'desert', 'ice', 'forge', 'citadel'] as WorldId[]) button(landRow, `land:${w}`, () => audio.cinematic(`land:${w}` as CinematicCue));
+const storyRow = row(ci, 'moods');
+for (const cue of STORY) button(storyRow, cue.slice(6), () => audio.cinematic(cue));
+const motifRow = row(ci, 'joinMotif');
+for (const k of KINDS) button(motifRow, k, () => audio.joinMotif(k));
+
+// ───────────── the band (v2) ─────────────
+const bd = section('The band, movements, duets', 'setBand changes the arrangement at the next bar line; a movement brings a new plan (key, sections); intensity 0 for a bar turns the song into a breakdown.');
+const BANDS: Record<string, Partial<Record<Section, number>>> = {
+  'harp only': { strings: 1 },
+  '+ drum': { strings: 1, percussion: 1 },
+  '+ bells': { strings: 1, percussion: 1, bells: 1 },
+  '+ horn': { strings: 1, percussion: 1, bells: 1, brass: 1 },
+  '+ choir': { strings: 1, percussion: 1, bells: 1, brass: 1, voices: 1 },
+  'full band': { strings: 2, percussion: 2, bells: 2, brass: 1, voices: 1, low: 1 },
+};
+let duetsOn: DuetId[] = [];
+let lastBand: Partial<Record<Section, number>> = BANDS['full band'];
+const sendBand = () => audio.setBand(bandOf(lastBand, duetsOn));
+const bandRow = row(bd, 'band');
+for (const [name, secs] of Object.entries(BANDS)) button(bandRow, name, () => {
+  lastBand = secs;
+  sendBand();
+});
+const duetRow = row(bd, 'duets');
+for (const d of DUETS) button(duetRow, d.id, () => {
+  duetsOn = duetsOn.includes(d.id) ? duetsOn.filter((x) => x !== d.id) : [...duetsOn, d.id];
+  sendBand();
+  if (duetsOn.includes(d.id)) audio.duet(d.id, nextBar(), 0);
+});
+button(duetRow, 'no duets', () => {
+  duetsOn = [];
+  sendBand();
+});
+const movRow = row(bd, 'movement');
+for (let i = 0; i < 5; i++) button(movRow, `m${i + 1}/5`, () => audio.movement(i, 5, nextBar()));
+button(movRow, 'plate unlock', () => audio.plateUnlock(audio.now() + 0.05, 0.3));
 
 const ui = section('UI');
 const uiRow = row(ui, 'ui');
