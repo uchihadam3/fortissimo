@@ -81,7 +81,7 @@ export class ForgeTheme extends Battle {
     p.ch('odaiko', { gain: 0.3, wet: 0.2 });
     p.ch('taiko', { gain: 0.3, wet: 0.18, pan: -0.15 });
     p.ch('shime', { gain: 0.2, wet: 0.14, pan: 0.28 });
-    p.ch('anvil', { gain: 0.16, wet: 0.35, pan: 0.32 });
+    p.ch('anvil', { gain: 0.22, wet: 0.35, pan: 0.32 });
     p.ch('carillon', { gain: 0.26, wet: 0.5, pan: -0.2 });
     p.ch('brass', { gain: 0.32, wet: 0.22, pan: -0.05 });
     p.ch('bass', { gain: 0.4, wet: 0.04 });
@@ -108,7 +108,7 @@ export class ForgeTheme extends Battle {
       this.play(b, DRONE(380), 'drone', 0, d, 0.72, 4.2 * b.beats * b.spb);
       this.play(b, DRONE(380), 'drone', 0.05, d + 7, 0.44, 4.2 * b.beats * b.spb);
     }
-    this.chords(b, f, 'ls', STRINGS(0.2), 'lowstr', 45, 60, 3, brk ? 0.42 : I === 0 ? 0.46 : 0.38, 0.4);
+    this.chords(b, f, 'ls', STRINGS(0.45), 'lowstr', 47, 62, 3, brk ? 0.42 : I === 0 ? 0.46 : 0.38, 0.4);
     this.play(b, SUB(), 'bass', 0, this.root(f, 0, 31), brk ? 0.34 : 0.4, (brk ? 4 : 2) * b.spb);
     const sv = brk ? 0.32 : [0.38, 0.5, 0.56, 0.62][I];
     this.steps(b, sv, I < 3 ? [{ inst: 'taiko', ch: 'odaiko', midi: 31 }] : [{ inst: 'taiko', ch: 'odaiko', midi: 31 }, { inst: 'kick', ch: 'odaiko', v: 0.35 }]);
@@ -134,8 +134,8 @@ export class ForgeTheme extends Battle {
       const v = L.strings;
       if (brk) {
         if (f.i % 2 === 1) this.bassline(b, f, 'pizz', 'spicc', [[0, 0, 0.8, 0.4 * v], [1.5, 2, 0.4, 0.3 * v], [2, 0, 0.8, 0.36 * v]], 36);
-      } else if (I <= 1) this.ostinato(b, f, 'spicc', 'spicc', 45, 60, [0, -1, 1, -1, 0, -1, 2, -1], 0.4 * v, 0.4, [0, 4]);
-      else this.ostinato(b, f, 'spicc', 'spicc', 45, 60, [0, 1, 2, 1, 0, 1, 2, 1], 0.42 * v, 0.4, [0, 4]);
+      } else if (I <= 1) this.ostinato(b, f, 'spicc', 'spicc', 48, 64, [0, -1, 1, -1, 0, -1, 2, -1], 0.42 * v, 0.4, [0, 4]);
+      else this.ostinato(b, f, 'spicc', 'spicc', 48, 64, [0, 1, 2, 1, 0, 1, 2, 1], 0.44 * v, 0.4, [0, 4]);
     }
 
     // ── percussion: hammer blows between the steps ──
@@ -201,7 +201,7 @@ export class ForgeTheme extends Battle {
     }
 
     // ── harmony: a high violin line over the furnace; the horns sing the head at the climax ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.5), 'vln', 72, 84, 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.5), 'vln', 72, 84]], [[CELLO(), 'cello', 50, 62]], [[HORNLEAD(0.4), 'horn', 58, 70]], [[VIOLIN(0.6), 'vln', 74, 86]], [[VIOLIN(0.6), 'vln', 74, 86], [CELLO(), 'cello', 50, 62]]], 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 3 && L.h >= 4 && L.brass) this.tune(b, f, HORNLEAD(0.55), 'horn', 0.6, { bars: [0, 4] });
     if (L.h >= 5 && f.i === 0 && !b.build) b.p.hit('gong', 'carillon', this.T(b, 0, 0.001), I >= 2 ? 0.22 : 0.14);
     this.glory(b, f, L, I, null);

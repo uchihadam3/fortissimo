@@ -207,6 +207,8 @@ try {
     tryIt('deflect', () => a.deflect(NaN, NaN));
     tryIt('coin', () => a.coin(t, 0, -5));
     tryIt('heartHit', () => a.heartHit(t, NaN));
+    tryIt('heartHeal', () => a.heartHeal(NaN));
+    tryIt('heartHeal ok', () => a.heartHeal(t));
     tryIt('build', () => a.build(t, 2));
     tryIt('upgrade', () => a.upgrade(t, 0, 99));
     tryIt('sell', () => a.sell(t, -2));

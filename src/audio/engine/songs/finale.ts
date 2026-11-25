@@ -159,7 +159,10 @@ export class FinaleTheme extends Battle {
       const v = L.brass;
       if (brk) {
         if (f.i % 4 >= 2) this.chords(b, f, 'hp', { ...LOWBRASS(maj ? 0.5 : 0.3), attack: 1 }, 'brass', 48, 62, 3, 0.36 * v, 0.4);
-      } else if (I >= 2) this.stabs(b, f, 'br', 'brass', 'brass', 45, 60, 3, [0, 2.5], (I >= 3 ? 0.42 : 0.34) * v, 0.6);
+      } else if (I >= 2) {
+        this.stabs(b, f, 'br', 'brass', 'brass', 45, 60, 3, [0, 2.5], (I >= 3 ? 0.42 : 0.34) * v, 0.6);
+        if (I >= 3) this.chords(b, f, 'hch', LOWBRASS(maj ? 0.6 : 0.45), 'brass', 48, 62, 3, 0.44 * v, 0.3);
+      }
       else if (f.i % 4 === 0) this.chords(b, f, 'hsw', { ...LOWBRASS(0.45), attack: 1.2 }, 'brass', 48, 62, 3, 0.4 * v, 0.3);
     }
 
@@ -167,7 +170,7 @@ export class FinaleTheme extends Battle {
     if (L.voices) {
       const v = L.voices;
       if (brk) this.chords(b, f, 'cho', maj ? CHOIR('ah') : 'choiroo', 'choir', 55, 69, 3, (maj ? 0.4 : 0.18) * v, 0.5);
-      else if (I >= 2) this.chords(b, f, 'cho', I >= 3 ? 'choir' : 'choiroo', 'choir', 55, 70, I >= 3 ? 4 : 3, (I >= 3 ? 0.2 : 0.26) * v, 0.5);
+      else if (I >= 2) this.chords(b, f, 'cho', I >= 3 ? 'choir' : 'choiroo', 'choir', 55, 70, I >= 3 ? 4 : 3, (I >= 3 ? 0.26 : 0.26) * v, 0.5);
       else if (f.i % 2 === 0) this.chords(b, f, 'cho', 'choiroo', 'choir', 55, 67, 3, 0.18 * v, 0.6);
     }
 
@@ -175,7 +178,7 @@ export class FinaleTheme extends Battle {
     if (L.low && !brk && I >= 1) this.bassline(b, f, 'pizz', 'bass', [[0, 0, 0.6, 0.5 * L.low], [1, 3, 0.5, 0.34 * L.low], [2, 2, 0.6, 0.44 * L.low], [3, 3, 0.5, 0.34 * L.low]], 34);
 
     // ── harmony: harp glissandi in the major, a counter-line ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.5), 'violins', 74, 86, 0.24 + 0.04 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2 && !(I >= 3)) this.counters(b, f, [[[VIOLIN(0.5), 'violins', 74, 86]], [[CELLO(), 'cello', 50, 62]], [[VIOLIN(0.6), 'violins', 76, 88]], [[CELLO(), 'cello', 52, 64]], [[VIOLIN(0.7), 'violins', 76, 88], [CELLO(), 'cello', 50, 62]]], 0.24 + 0.04 * L.h, 4);
     if (maj && I >= 3 && (f.i === 3 || f.i === 7)) for (let k = 0; k < 12; k++) this.play(b, 'harp', 'harp', 2 + k / 6, this.k.deg(this.k.degreeOf(this.k.tonic) + k), 0.28, 1.2 * b.spb);
     this.glory(b, f, L, I, 'harp');
     this.duets(b, f, L, I);

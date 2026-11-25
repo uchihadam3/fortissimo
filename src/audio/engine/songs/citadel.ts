@@ -187,7 +187,7 @@ export class CitadelTheme extends Battle {
     }
 
     // ── harmony: violins; the choir sings the hymn at the climax ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.4), 'vln', 72, 84, 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.4), 'vln', 72, 84]], [[CELLO(), 'cello', 50, 62]], [[ORGAN(0.6), 'organlead', 62, 74]], [[VIOLIN(0.5), 'vln', 74, 86]], [[VIOLIN(0.5), 'vln', 74, 86], [CELLO(), 'cello', 50, 62]]], 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 3 && L.h >= 4 && L.voices) this.tune(b, f, 'choir', 'choirlead', 0.32, { shift: -12, bars: [0, 1, 4, 5] });
     if (L.h >= 5 && f.i === 0 && !b.build) b.p.hit('gong', 'bells', this.T(b, 0, 0.001), I >= 2 ? 0.2 : 0.12);
     this.glory(b, f, L, I, null);

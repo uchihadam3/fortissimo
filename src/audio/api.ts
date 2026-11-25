@@ -155,6 +155,11 @@ export interface AudioAPI {
   coin(t: number, pan: number, amount: number): void;
   /** An enemy reached the Heart. `livesLeft` 0..1. */
   heartHit(t: number, livesLeft: number): void;
+  /**
+   * The hymn duet heals the colossus (+1 life): a warm, rising, hopeful chime at t — the choir
+   * ('ah') rising through the chord with a bell and a shimmer of glass, ≈1.5 s, in the harmony of t.
+   */
+  heartHeal(t: number): void;
   build(t: number, pan: number): void;
   upgrade(t: number, pan: number, level: number): void;
   sell(t: number, pan: number): void;

@@ -8,11 +8,12 @@
  *               final plan, the middle ones bring the contrasting material.
  *   battle    — while creatures are on the field (intensity ≥ 1) the battle form of the plan plays;
  *               the towers carry the melody (the section's tune is their `guide`).
- *   break     — once the field has been calm (intensity 0) for a whole bar, the song turns into a
- *               BREAKDOWN: a composed 8-bar tune (the land's leitmotif, its answer, variations) that
- *               starts from its first bar, in the key of the movement. Every new breakdown takes the
- *               next tune of the rotation, so the breathers of a 9-minute level are all different.
- *               When the next wave comes, the battle resumes at the start of the next section.
+ *   break     — from the first calm bar (intensity 0) the song turns into a BREAKDOWN: a composed
+ *               8-bar tune (the land's leitmotif, its answer, variations) that starts from its first
+ *               bar, in the key of the movement — an 8-bar breather is exactly one tune. Every new
+ *               breakdown takes the next tune of the rotation, so the breathers of a 9-minute level are
+ *               all different. When the next wave comes, the battle resumes at the start of the next
+ *               section.
  *
  * Everything is a pure function of the bar index and the player's logs (intensity, movements, band)
  * — decisions about a bar are made from logs that are final when anyone asks about that bar — so
@@ -241,8 +242,10 @@ export abstract class AdaptiveSong extends Song {
       if (prev.mode === 'break' && !changed) {
         s.mode = 'break';
         s.brk = prev.brk + 1;
-      } else if (prev.calm >= 1 || changed) {
-        // a breakdown begins (in auto mode it may also carry the song to its next plan)
+      } else {
+        // the first calm bar already begins the breakdown: an 8-bar breather is one whole tune, and a
+        // short gap between waves is the tune's head — the leitmotif's call — before the battle resumes.
+        // (In auto mode a breakdown may also carry the song to its next plan.)
         s.mode = 'break';
         s.brk = 0;
         s.brkN = prev.brkN + 1;
@@ -256,9 +259,6 @@ export abstract class AdaptiveSong extends Song {
           }
         }
         s.resume = changed || prev.pos < 0 ? 0 : this.sectionEnd(s.plan, prev.pos) + 1;
-      } else {
-        s.mode = 'battle';
-        s.pos = changed ? 0 : prev.pos + 1;
       }
     } else {
       s.calm = 0;

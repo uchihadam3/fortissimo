@@ -227,7 +227,7 @@ export class MeadowTheme extends Battle {
     }
 
     // ── harmony: counter-melody, doublings ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.45), 'vln', 71, 83, 0.3 + 0.05 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.45), 'vln', 71, 83]], [[REED(), 'acc', 60, 72]], [[FIDDLE(), 'fid', 64, 76]], [[FLUTE(), 'lead', 76, 88]], [[VIOLIN(0.6), 'vln', 74, 86], [LOWBRASS(0.5), 'horns', 55, 67]]], 0.3 + 0.05 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 3 && L.h >= 4 && L.brass) this.tune(b, f, LOWBRASS(0.7), 'horns', 0.55, { shift: -12, bars: [0, 4] });
     this.glory(b, f, L, I, 'harp');
     this.duets(b, f, L, I);

@@ -191,7 +191,7 @@ if (!only || only === 'amb') {
 
 if (!only || only === 'sfx') {
   console.log('\n── stingers & sfx ──');
-  const list = [['studioSting', 7], ['titleReveal', 6], ['victory', 5], ['defeat', 7], ['stars', 4], ['newTower', 4], ['waveStart', 4], ['bossAppear', 6], ['ffReady', 2.5], ['ffUnleash', 5], ['build', 1.5], ['upgrade', 2], ['sell', 1.5], ['muted', 2], ['switchFlip', 1.2], ['heartHit', 1.5], ['countIn', 3], ['ui', 2]];
+  const list = [['studioSting', 7], ['titleReveal', 6], ['victory', 5], ['defeat', 7], ['stars', 4], ['newTower', 4], ['waveStart', 4], ['bossAppear', 6], ['ffReady', 2.5], ['ffUnleash', 5], ['build', 1.5], ['upgrade', 2], ['sell', 1.5], ['muted', 2], ['switchFlip', 1.2], ['heartHit', 1.5], ['heartHeal', 2.5], ['countIn', 3], ['ui', 2]];
   for (const [name, s] of list) {
     const r = await page.evaluate(([n, x, w]) => window.__lab.offline.renderSfx(n, x, w), [name, s, !!wavDir]);
     line(name, r.stats);

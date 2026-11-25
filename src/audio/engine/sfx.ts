@@ -388,6 +388,22 @@ export class Sfx {
     this.buf('crash', this.fan, tt + 0.75, 62, 0.3, 3);
   }
 
+  /** the colossus is healed (hymn duet): the choir rises through the chord, a bell, a shimmer of glass */
+  heartHeal(t: number): void {
+    const ch = this.fan;
+    const c = this.chordAt(t + 0.01);
+    this.core.duck(0.12, 1.2);
+    // a soft warm swell under it (strings on the chord, opening)
+    for (const m of chordTones(c, 53, 67).slice(0, 3)) this.fx.stack({ ...STRINGS(0.7), attack: 0.35, release: 0.9 }, ch, t, m, 0.42, 1.1);
+    // the choir rises through the chord, one voice after the other
+    const voices = chordTones(c, 60, 76).slice(0, 4);
+    voices.forEach((m, i) => this.buf('choir', ch, t + i * 0.11, m, 0.2 + 0.025 * i, 1.35 - i * 0.08, { release: 0.9 }));
+    // the bell rings the root; glass climbs above it
+    this.buf('tbell', ch, t + 0.02, bassNote(c, 60), 0.24, 2.2, { release: 1.2 });
+    chordTones(c, 81, 100).slice(0, 5).forEach((m, i) => this.buf('glass', ch, t + 0.28 + i * 0.075, m, 0.15 - i * 0.012, 1.1, { release: 0.9 }));
+    this.fx.burst(ch.input, t + 0.2, { noise: 'white', type: 'highpass', f: 5000, f1: 9000, a: 0.25, d: 0.9, g: 0.022 });
+  }
+
   heartHit(t: number, livesLeft: number): void {
     const s = 1 - clamp(Number.isFinite(livesLeft) ? livesLeft : 1, 0, 1);
     const ch = this.boom;

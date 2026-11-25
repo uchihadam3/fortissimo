@@ -236,7 +236,7 @@ export class DesertTheme extends Battle {
     }
 
     // ── harmony: a violin counter-line; the golden harp in glory ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.5), 'vln', 69, 81, 0.28 + 0.05 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.5), 'vln', 69, 81]], [[CELLO(), 'cello', 50, 62]], [[FLUTE(true), 'ney', 74, 86]], [[VIOLIN(0.6), 'vln', 72, 84]], [[VIOLIN(0.6), 'vln', 72, 84], [CELLO(), 'cello', 50, 62]]], 0.28 + 0.05 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 3 && L.h >= 4 && L.brass) this.tune(b, f, LOWBRASS(0.65), 'horns', 0.52, { shift: -12, bars: [0, 4] });
     if (L.h >= 5 && (f.i === 3 || f.i === 7)) {
       const tones = chordTones(this.cAt(f, 2), 57, 91);

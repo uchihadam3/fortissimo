@@ -182,7 +182,7 @@ export abstract class Battle extends AdaptiveSong {
     }
   }
 
-  private cnt: number | null = null;
+  private readonly cnt = new Map<string, number>();
   /**
    * A counter-melody of guide tones (the 3rd or 7th of each chord, moving by the smallest step) in
    * long notes — lush, and out of the towers' rhythmic way. `every` = beats per note.
@@ -191,7 +191,7 @@ export abstract class Battle extends AdaptiveSong {
     for (let beat = 0; beat < b.beats; beat += every) {
       const c = this.cAt(f, beat);
       const want = [c.pcs[1], c.pcs[3] ?? c.pcs[2], c.pcs[0]];
-      const prev = this.cnt ?? Math.round((lo + hi) / 2);
+      const prev = this.cnt.get(ch) ?? Math.round((lo + hi) / 2);
       let best = prev;
       let cost = Infinity;
       for (let m = lo; m <= hi; m++) {
@@ -203,9 +203,18 @@ export abstract class Battle extends AdaptiveSong {
           best = m;
         }
       }
-      this.cnt = best;
+      this.cnt.set(ch, best);
       this.play(b, inst, ch, beat, best, vel, every * b.spb * 0.98);
     }
+  }
+
+  /**
+   * Every movement brings its own counter-melody voice (the table is per land: [instrument,
+   * channel, low, high] per plan; the final plan usually doubles it).
+   */
+  protected counters(b: BarCtx, f: BarInfo, table: [Inst, string, number, number][][], vel: number, every: number): void {
+    const row = table[Math.min(this.st.plan, table.length - 1)] ?? table[0];
+    row.forEach(([inst, ch, lo, hi], i) => this.counter(b, f, inst, ch, lo, hi, vel * (i === 0 ? 1 : 0.8), every));
   }
 
   // ───────────────────────────── shared band layers ─────────────────────────────

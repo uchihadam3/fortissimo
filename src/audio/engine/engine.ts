@@ -323,6 +323,10 @@ const api: AudioAPI = {
     const tc = E.at(t);
     if (tc !== null) E.towers?.coin(tc, num(pan, 0), num(amount, 1));
   }),
+  heartHeal: guard('heartHeal', (t: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.sfx?.heartHeal(tc);
+  }),
   heartHit: guard('heartHit', (t: number, livesLeft: number) => {
     const tc = E.at(t);
     if (tc !== null) E.sfx?.heartHit(tc, num(livesLeft, 1));

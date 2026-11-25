@@ -190,7 +190,7 @@ export class IceTheme extends Battle {
     }
 
     // ── harmony: violins in harmonics, the organ in glory ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.8), 'vln', 76, 88, 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.8), 'vln', 76, 88]], [[ORGAN(0.4), 'organ', 60, 72]], [[VIOLIN(0.9), 'vln', 79, 91]], [[ORGAN(0.5), 'organ', 62, 74]], [[VIOLIN(0.8), 'vln', 76, 88], [ORGAN(0.4), 'organ', 60, 72]]], 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 2 && L.h >= 4 && f.i % 2 === 0) this.chords(b, f, 'org', ORGAN(0.4), 'organ', 52, 67, 3, 0.3, 0.3);
     this.glory(b, f, L, I, 'harp');
     this.duets(b, f, L, I);

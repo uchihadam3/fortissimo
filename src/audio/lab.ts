@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, ENDING2, INTRO, INTRO2, makeRig, measure, onsetTest, renderAmbience, renderCinema, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderCinema, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
+  offline: { renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;
@@ -206,6 +206,7 @@ button(ev, 'coin ×1', () => audio.coin(t(), 0, 1));
 button(ev, 'coin ×30', () => audio.coin(t(), 0, 30));
 button(ev, 'heart hit', () => audio.heartHit(t(), 0.8));
 button(ev, 'heart hit (low)', () => audio.heartHit(t(), 0.1));
+button(ev, 'heart heal (hymn)', () => audio.heartHeal(t()));
 button(ev, 'build', () => audio.build(t(), -0.4));
 button(ev, 'upgrade 1', () => audio.upgrade(t(), 0, 1));
 button(ev, 'upgrade 2', () => audio.upgrade(t(), 0, 2));

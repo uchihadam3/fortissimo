@@ -220,7 +220,7 @@ export class BossTheme extends Battle {
     if (L.low && drive && I >= 2) for (const beat of [1.5, 3.5]) this.play(b, SUB(), 'bass', beat, this.tone(this.cAt(f, beat), 28, 3), 0.3 * L.low, 0.35 * b.spb, undefined, 0.001);
 
     // ── harmony ──
-    if (!brk && I >= 1 && L.h >= 2) this.counter(b, f, VIOLIN(0.5), 'vln', 72, 84, 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
+    if (!brk && I >= 1 && L.h >= 2) this.counters(b, f, [[[VIOLIN(0.5), 'vln', 72, 84]], [[CELLO(), 'cello', 50, 62]], [[HORNLEAD(0.4), 'horn', 57, 69]], [[VIOLIN(0.6), 'vln', 74, 86]], [[VIOLIN(0.6), 'vln', 74, 86], [CELLO(), 'cello', 50, 62]]], 0.26 + 0.04 * L.h, I >= 3 ? 2 : 4);
     if (!brk && I >= 3 && L.h >= 4) this.tune(b, f, HORNLEAD(0.5), 'horn', 0.6, { bars: [0, 4] });
     this.glory(b, f, L, I, null);
     this.duets(b, f, L, I);

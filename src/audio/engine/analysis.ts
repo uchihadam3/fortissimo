@@ -555,6 +555,7 @@ export async function renderSfx(name: string, seconds: number, wav = false): Pro
     muted: () => { s.towerMuted(t + 0.1, 0, true); s.towerMuted(t + 1, 0, false); },
     switchFlip: () => s.switchFlip(t + 0.1, 0),
     heartHit: () => s.heartHit(t + 0.1, 0.2),
+    heartHeal: () => s.heartHeal(t + 0.1),
     countIn: () => { for (let k = 0; k < 4; k++) s.countIn(t + 0.1 + k * 0.6, k); },
     ui: () => { s.uiHover(); s.uiClick(); s.uiBack(); s.uiOpen(); s.uiDeny(); s.achievement(); s.save(); },
   };
