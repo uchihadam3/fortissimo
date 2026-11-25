@@ -110,6 +110,8 @@ export class JourneyView {
   private cineMix = 0;
   life = 0.26;
   lifeTarget = 0.26;
+  /** colour floor for lands already restored (set from the save: 0 grey … ~0.8 mostly coloured) */
+  restoredLife = 0;
   private waveR = -1;
   ffGlow = 0;
   private trail: { x: number; z: number }[] = [];
@@ -912,7 +914,8 @@ export class JourneyView {
       this.trail.push({ x: tpos.x, z: tpos.z });
       if (this.trail.length > 18) this.trail.shift();
     }
-    this.life = damp(this.life, this.lifeTarget, 1.2, dt);
+    // a land whose guardian was defeated remembers its colour: it never goes back to full grey
+    this.life = damp(this.life, Math.max(this.lifeTarget, this.restoredLife), 1.2, dt);
     worldColor.uWorldSat.value = this.life;
     const cs = this.colorScale;
     const src: { x: number; z: number; r: number; s: number }[] = [];
