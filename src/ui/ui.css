@@ -375,3 +375,13 @@
 .cine-overlay .card .ff-logo { transform: scale(.92); }
 .cine-overlay .card.title .ff-logo { animation: none; }
 .cine-overlay .the-end { font-family: var(--deco); font-size: 64px; color: #ffe9a8; text-shadow: 0 0 30px rgba(255,211,107,.7), 0 4px 0 #6a4310; margin-bottom: 18px; letter-spacing: .1em; }
+@media (max-width: 980px) {
+  #journey { top: calc(62px + var(--safe-t)); width: min(62vw, 520px); }
+}
+@media (max-height: 460px) {
+  #journey { top: calc(54px + var(--safe-t)); height: 36px; }
+  #journey .me, #journey .goal { width: 32px; height: 32px; }
+  #go { width: 92px; height: 92px; bottom: calc(18px + var(--safe-b)); }
+  #go .ico { inset: 24px 20px 24px 28px; }
+  .wave-pips span { width: 7px; height: 7px; }
+}

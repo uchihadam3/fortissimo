@@ -115,6 +115,7 @@ class Cine {
     // developer: ?cinet=30 starts the timeline at 30 s
     const jump = typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('cinet') ?? 0) : 0;
     this.startMs = performance.now() - jump * 1000;
+    (window as unknown as { __ready: boolean }).__ready = true;
   }
 
   at(t: number, fn: () => void) {

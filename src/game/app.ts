@@ -243,7 +243,7 @@ export class App {
     }
   }
 
-  async playLevel(id: string, mode: Mode) {
+  async playLevel(id: string, mode: Mode): Promise<void> {
     const entry = LEVEL_BY_ID.get(id);
     if (!entry || !this.save) return;
     await this.screens.fadeTo(1, 500);
@@ -270,7 +270,7 @@ export class App {
     await this.afterBattle(id, mode, r);
   }
 
-  private async playEndless(world: WorldId) {
+  private async playEndless(world: WorldId): Promise<void> {
     if (!this.save) return;
     await this.screens.fadeTo(1, 500);
     this.screens.clear();
@@ -291,18 +291,26 @@ export class App {
     rec.best = Math.max(rec.best ?? 0, waves);
     this.save.levels[key] = rec;
     this.persist();
-    if (r.outcome === 'quit') return this.openMap();
+    if (r.outcome === 'quit') {
+      const again = this.restartRequested;
+      this.restartRequested = null;
+      if (again) return this.playEndless(world);
+      return this.openMap();
+    }
     await this.screens.results({
       victory: r.outcome === 'victory', stars: 0, kills: r.kills, collected: r.collected, time: r.time, crown: false, endless: waves,
       retry: () => this.playEndless(world), map: () => this.openMap(),
     });
   }
 
-  private async afterBattle(id: string, mode: Mode, r: BattleResult) {
+  private async afterBattle(id: string, mode: Mode, r: BattleResult): Promise<void> {
     const save = this.save!;
     const entry = LEVEL_BY_ID.get(id)!;
     if (r.outcome === 'quit') {
       this.persist();
+      const again = this.restartRequested;
+      this.restartRequested = null;
+      if (again && LEVEL_BY_ID.has(again.id)) return this.playLevel(again.id, again.mode);
       await this.screens.fadeTo(1, 400);
       return this.openMap();
     }
@@ -344,31 +352,28 @@ export class App {
     });
   }
 
+  private restartRequested: { id: string; mode: Mode } | null = null;
+
   private openPause() {
     const b = this.battle;
     if (!b || b.isPaused) return;
     b.pause();
     audio.uiOpen();
+    this.showPauseMenu(b);
+  }
+
+  /** The pause menu (the battle is already paused). */
+  private showPauseMenu(b: JourneyBattle) {
+    if (this.battle !== b) return;
     this.screens.pause({
       resume: () => b.resume(),
       restart: () => {
-        const id = this.save?.current ?? 'm1';
-        b.quit();
-        this.disposeBattle();
-        this.playLevel(b.def.id.startsWith('bis') ? id : b.def.id, b.sim.mode);
-      },
-      options: () => this.screens.options(this.settings, (s) => this.changeSettings(s), () => this.openPauseAgain(b), true),
-      map: () => {
+        this.restartRequested = { id: b.def.id, mode: b.sim.mode };
         b.quit();
       },
+      options: () => this.screens.options(this.settings, (s) => this.changeSettings(s), () => this.showPauseMenu(b), true),
+      map: () => b.quit(),
     });
-  }
-
-  private openPauseAgain(b: JourneyBattle) {
-    // options closed: back to the pause menu
-    if (this.battle !== b) return;
-    (b as unknown as { paused: boolean }).paused = false;
-    this.openPause();
   }
 
   // ───────────────────────────── install ─────────────────────────────

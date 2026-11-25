@@ -20,6 +20,10 @@ Instalado, o FORTÍSSIMO abre em tela cheia como um app, funciona sem internet e
 cada envio para `main` publica uma versão nova e o jogo instalado a baixa na próxima vez que for aberto
 com internet. O progresso nunca se perde numa atualização.
 
+**Offline, sem instalar nada:** baixe o arquivo [`jogar/FORTISSIMO.html`](jogar/FORTISSIMO.html) e abra
+com dois cliques (Chrome, Edge ou Firefox recentes). O jogo inteiro está nesse único arquivo: código,
+música, sons, fontes e imagens.
+
 **Publicação:** o GitHub Pages precisa estar ligado uma vez (*Settings → Pages → Source: GitHub
 Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo automaticamente.
 
@@ -100,7 +104,8 @@ npm run build
 ```
 
 O build gera `dist/index.html`, um arquivo único com tudo dentro (código, fontes e imagens). Os arquivos
-de `public/` e o `sw.js` tornam a versão publicada instalável e autoatualizável.
+de `public/` e o `sw.js` tornam a versão publicada instalável e autoatualizável. `npm run offline` gera o
+build e atualiza a cópia offline em `jogar/FORTISSIMO.html`.
 
 ```bash
 npm run balance

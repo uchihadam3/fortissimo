@@ -30,7 +30,8 @@ async function boot() {
   ]).catch(() => {});
   const app = new App(container);
   window.__app = app;
-  window.__ready = true;
+  // (cinematic previews announce readiness when the scene is actually playing)
+  window.__ready = !p.has('cine');
   // the installed game: offline copy + automatic updates (hosted site only)
   let top = false;
   try {
