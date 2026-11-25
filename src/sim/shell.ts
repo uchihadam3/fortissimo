@@ -41,3 +41,18 @@ export const SLOTS: SlotLocal[] = SLOT_DEFS.map(([q, r], id) => {
 
 /** Reach: an enemy touching the shell rim bites. */
 export const SHELL_REACH = 4.6;
+
+/** Hex neighbours of every slot (axial adjacency of SLOT_DEFS): duet partners stand on adjacent plates. */
+export const SLOT_NEIGHBOURS: number[][] = SLOT_DEFS.map(([q, r]) => {
+  const out: number[] = [];
+  const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  for (const [dq, dr] of dirs) {
+    const j = SLOT_DEFS.findIndex(([q2, r2]) => q2 === q + dq && r2 === r + dr);
+    if (j >= 0) out.push(j);
+  }
+  return out.sort((a, b) => a - b);
+});
+
+export function slotsAdjacent(a: number, b: number): boolean {
+  return SLOT_NEIGHBOURS[a]?.includes(b) ?? false;
+}

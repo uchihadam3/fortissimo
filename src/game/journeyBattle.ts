@@ -5,15 +5,21 @@
  *   simTime  = songNow + LEAD − offset                (the simulation runs a little ahead…)
  *   viewTime = songNow − latency − offset             (…so the view shows what you hear)
  * `offset` grows by whole bars after a pause, which keeps the bar phase intact.
+ *
+ * Checkpoints (v2): the simulation records every player action with the sub-step it happened at.
+ * A fallen journey returns `checkpoint` in its result; `new JourneyBattle(…, { …opts, resume: checkpoint })`
+ * replays those actions headless up to the start of that movement's breather and plays on live
+ * from there (the song restarts on a downbeat that lines up with the checkpoint's bar).
  */
 import * as THREE from 'three';
 import { audio } from './sound';
-import { Journey, type JourneyDef, type Mode, type SimEvent } from '../sim/journey';
-import { ENEMIES, SONGS, TOWERS, type EnemyKind, type TowerKind } from '../sim/defs';
+import { Journey, type Checkpoint, type JourneyDef, type Mode, type SimEvent } from '../sim/journey';
+import { DUETS, SONGS, TOWERS, duetOf, type BandState, type EnemyKind, type TowerKind } from '../sim/defs';
+import { SLOT_NEIGHBOURS } from '../sim/shell';
 import type { Engine } from '../core/engine';
 import { JourneyView, type Pick } from '../view/journeyView';
 import { Hud } from '../ui/hud';
-import type { SongClock } from '../audio/api';
+import type { BandMix, SongClock } from '../audio/api';
 import { JourneyTutorial } from './journeyTutorial';
 import { ICON } from '../ui/icons';
 
@@ -26,6 +32,15 @@ export interface BattleResult {
   time: number;
   kills: number;
   collected: number;
+  /**
+   * After a defeat: where the journey can start again (the beginning of the breather before the
+   * movement where it fell). Null when it fell in the first movement (only a full restart).
+   * Pass it back as `BattleOptions.resume`.
+   */
+  checkpoint?: Checkpoint | null;
+  /** the movement it reached (0-based) and how many there are */
+  movement?: number;
+  movements?: number;
 }
 
 export interface BattleOptions {
@@ -34,9 +49,14 @@ export interface BattleOptions {
   seenEnemies: EnemyKind[];
   tutorials: boolean;
   onEnemySeen?: (k: EnemyKind) => void;
+  /** start again from a checkpoint (from a previous `BattleResult.checkpoint` of the same level and mode) */
+  resume?: Checkpoint;
 }
 
 type Sel = { type: 'slot'; id: number } | null;
+
+const bandMix = (b: BandState): BandMix => ({ sections: { ...b.sections }, harmony: b.harmony, duets: b.duets.map((d) => d.id) });
+const DUET_COLOR = new Map(DUETS.map((d) => [d.id, d.color]));
 
 export class JourneyBattle {
   readonly sim: Journey;
@@ -65,11 +85,25 @@ export class JourneyBattle {
   private incoming: { index: number; at: number; dirs: { dir: number; kinds: EnemyKind[] }[] }[] = [];
   private bossAnnounced = false;
   private detach: () => void = () => {};
+  /** plates that just lit up glow until this view time */
+  private plateGlow = new Map<number, number>();
+  /** creature kinds already announced on a movement banner */
+  private bannered = new Set<EnemyKind>();
+  /** started from a checkpoint */
+  readonly resumed: boolean;
 
   constructor(readonly engine: Engine, readonly def: JourneyDef, readonly opts: BattleOptions, uiRoot: HTMLElement) {
     const song = SONGS[def.song];
-    this.sim = new Journey(def, song.bpm, { mode: opts.mode });
+    this.resumed = !!opts.resume;
+    this.sim = opts.resume ? Journey.replay(def, song.bpm, opts.resume) : new Journey(def, song.bpm, { mode: opts.mode });
+    // the view builds a pad for every plate the journey will ever open; the locked ones stay hidden
+    // until their breather. INTEGRATION: JourneyView could build `sim.slotsMax` pads itself and show
+    // them on 'plate' events (then this swap can go).
+    const open = this.sim.slotsOpen;
+    this.sim.slotsOpen = this.sim.slotsMax;
     this.view = new JourneyView(engine, def, this.sim);
+    this.sim.slotsOpen = open;
+    this.view.pads.forEach((p, i) => (p.group.visible = i < open));
     engine.setScene(this.view.scene);
     engine.camera.far = 5000;
     engine.camera.fov = 42;
@@ -81,7 +115,7 @@ export class JourneyBattle {
     this.hud = new Hud(uiRoot);
     this.hud.show(true);
     this.hud.setGoal(ICON.bell);
-    this.clock = audio.playSong(def.song, { fade: 2.5 });
+    this.clock = audio.playSong(def.song, { fade: 2.5, restart: this.resumed });
     audio.setIntensity(0);
     audio.setAmbience(def.world, 0.8);
     this.done = new Promise((r) => (this.resolveEnd = r));
@@ -89,13 +123,36 @@ export class JourneyBattle {
     this.hud.onFF = () => this.unleash();
     this.hud.onGo = () => this.go();
     this.hud.onHoverTower = (k) => this.previewRange(k);
-    this.hud.showGo(true);
+    this.hud.showGo(!this.sim.started);
+    if (this.resumed) this.restore();
+    audio.setBand(bandMix(this.sim.band));
+    this.hud.setHarmony(this.sim.band.harmony);
+    this.view.setDuets(this.sim.band.duets);
     // the first land also gets gentle nudges: an idle player with notes to spend is shown the free plate
-    if (opts.tutorials && (def.tutorial?.length || def.world === 'meadow')) this.tutorial = new JourneyTutorial(this, def.tutorial ?? [], def.world === 'meadow');
+    if (opts.tutorials && (def.tutorial?.length || def.world === 'meadow')) {
+      this.tutorial = new JourneyTutorial(this, this.resumed ? [] : def.tutorial ?? [], def.world === 'meadow');
+    }
     this.removeUpdate = engine.onUpdate((dt, t) => this.update(dt, t));
     // developer handle for automated play-throughs
     if (import.meta.env.DEV) (window as unknown as { __battle: JourneyBattle }).__battle = this;
     this.detach = this.attachInput(engine.renderer.domElement);
+  }
+
+  /** a journey replayed from a checkpoint: the view catches up with the simulation */
+  private restore() {
+    const s = this.sim;
+    // the song starts again on a downbeat that lines up with the checkpoint's bar
+    this.offset = -s.time;
+    this.goSimTime = s.goTime ?? s.time;
+    for (const tw of s.towers) this.view.addTower(tw.id, tw.kind, tw.level, tw.slot);
+    const evs: SimEvent[] = [];
+    for (const e of s.enemies) if (e.alive) evs.push({ t: s.time, type: 'spawn', enemy: e });
+    for (const p of s.pickups) if (p.taken || p.lost) evs.push({ t: s.time, type: 'pickupLost', pickup: p });
+    for (const tw of s.towers) if (tw.muted) evs.push({ t: s.time, type: 'muted', tower: tw, muted: true, cause: tw.muteCause });
+    this.view.push(evs);
+    this.lastVt = s.time;
+    for (const e of s.enemies) if (e.alive && e.mimicKind) this.later(s.time, () => this.view.enemies.get(e.id)?.setMimicKind(e.mimicKind));
+    audio.movement(Math.max(0, s.movement), s.movements.length, this.ctx(s.time));
   }
 
   onPauseRequest: () => void = () => {};
@@ -112,6 +169,12 @@ export class JourneyBattle {
 
   get isPaused() {
     return this.paused;
+  }
+
+  /** run something when the view reaches sim time t (what you see is what you hear) */
+  private later(t: number, fn: () => void, extraMs = 0) {
+    const lag = Math.max(0, (t - this.lastVt) * 1000) + extraMs;
+    setTimeout(() => !this.disposed && fn(), lag);
   }
 
   // ───────────────────────────── input ─────────────────────────────
@@ -213,6 +276,8 @@ export class JourneyBattle {
       return;
     }
     if (p.type === 'slot') {
+      // plates still asleep cannot be touched
+      if (p.id >= this.sim.slotsOpen) return;
       if (this.sel?.id === p.id) {
         this.deselect();
         return;
@@ -223,18 +288,29 @@ export class JourneyBattle {
     }
   }
 
+  /** duet colours an instrument would form with the towers around a plate */
+  duetsAround(slot: number, kind: TowerKind): string[] {
+    const out: string[] = [];
+    for (const nb of SLOT_NEIGHBOURS[slot]) {
+      const t = this.sim.towerAt(nb);
+      const d = t ? duetOf(kind, t.kind) : null;
+      if (d) out.push(d.color);
+    }
+    return out;
+  }
+
   selectSlot(id: number) {
     this.deselect();
     this.sel = { type: 'slot', id };
     this.view.pads[id].state = 2;
     const opts = this.def.towers.map((k) => {
       const cost = TOWERS[k].levels[0].cost;
-      return { kind: k, cost, affordable: this.sim.coins >= cost, isNew: !this.opts.known.includes(k) };
+      return { kind: k, cost, affordable: this.sim.coins >= cost, isNew: !this.opts.known.includes(k), duets: this.duetsAround(id, k) };
     });
     const s = this.view.screen(this.view.slotWorld(id, 1));
     this.hud.openBuild(s.x, s.y, opts, (k) => this.build(id, k));
     audio.uiOpen();
-    this.tutorial?.notify('slotOpen');
+    this.tutorial?.notify('slotOpen', id);
   }
 
   selectTower(slot: number, id: number) {
@@ -248,7 +324,7 @@ export class JourneyBattle {
     const s = this.view.screen(this.view.slotWorld(slot, 2));
     this.hud.openTower(s.x, s.y, tw.level, up, up !== null && this.sim.coins >= up, this.sim.sellValue(tw), () => this.upgrade(id), () => this.sell(id));
     audio.uiOpen();
-    this.tutorial?.notify('towerOpen');
+    this.tutorial?.notify('towerOpen', slot);
   }
 
   deselect() {
@@ -302,7 +378,9 @@ export class JourneyBattle {
     if (!this.opts.known.includes(kind)) this.opts.known.push(kind);
     const s = this.view.screen(this.view.slotWorld(slot, 2));
     this.hud.floatNum(s.x, s.y, `-${cost}`);
-    this.tutorial?.notify('built');
+    this.tutorial?.notify('built', slot);
+    // the band changed right now (build happens between steps): its events are consumed at once
+    this.consume(this.sim.drain());
   }
 
   upgrade(id: number) {
@@ -321,7 +399,8 @@ export class JourneyBattle {
     audio.upgrade(audio.now(), 0, tw.level);
     const s = this.view.screen(this.view.slotWorld(tw.slot, 2.5));
     this.hud.floatNum(s.x, s.y, `-${c}`);
-    this.tutorial?.notify('upgraded');
+    this.tutorial?.notify('upgraded', tw.slot);
+    this.consume(this.sim.drain());
   }
 
   sell(id: number) {
@@ -333,6 +412,7 @@ export class JourneyBattle {
     audio.sell(audio.now(), 0);
     const s = this.view.screen(this.view.slotWorld(tw.slot, 1.5));
     this.hud.flyCoins(s.x, s.y, Math.min(6, Math.ceil(v / 30)));
+    this.consume(this.sim.drain());
   }
 
   private journeyTime(): number {
@@ -359,6 +439,11 @@ export class JourneyBattle {
     this.intensity = 3;
     audio.setIntensity(3);
     this.tutorial?.notify('ff');
+  }
+
+  /** where this journey could start again right now (null: only from the beginning) */
+  checkpoint(): Checkpoint | null {
+    return this.sim.checkpoint();
   }
 
   // ───────────────────────────── pause ─────────────────────────────
@@ -417,7 +502,7 @@ export class JourneyBattle {
     }
     this.updateHud(vt);
     this.tutorial?.update(dt);
-    if (!this.paused) this.sim.enemies = this.sim.enemies.filter((e) => e.alive);
+    // (the simulation drops its dead creatures itself, deterministically)
   }
 
   private consume(events: SimEvent[]) {
@@ -442,28 +527,25 @@ export class JourneyBattle {
         case 'death': {
           if (ev.bounty > 0 || ev.enemy.def.boss) audio.enemyDeath(ev.enemy.kind, at, this.view.pan(ev.enemy.x, ev.enemy.z));
           if (ev.bounty > 0) {
-            const lag = Math.max(0, (ev.t - this.lastVt) * 1000);
             const wp = new THREE.Vector3(ev.enemy.x, this.view.land.heightAt(ev.enemy.x, ev.enemy.z) + 1.5, ev.enemy.z);
             const bounty = ev.bounty;
-            setTimeout(() => {
-              if (this.disposed) return;
+            this.later(ev.t, () => {
               const s = this.view.screen(wp);
               if (!s.behind) this.hud.flyCoins(s.x, s.y, Math.min(4, Math.ceil(bounty / 6)));
-            }, lag);
+            });
             audio.coin(at + 0.12, this.view.pan(ev.enemy.x, ev.enemy.z), bounty);
           }
           break;
         }
-        case 'leak': {
+        case 'leak':
           audio.heartHit(at, this.sim.lives / this.sim.maxLives);
-          const lag = Math.max(0, (ev.t - this.lastVt) * 1000);
-          setTimeout(() => !this.disposed && this.hud.hurt(), lag);
+          this.later(ev.t, () => this.hud.hurt());
           break;
-        }
         case 'income':
           audio.coin(at, this.view.pan(ev.tower.x, ev.tower.z), ev.amount);
           break;
         case 'muted':
+          // mufflers, obelisks, frost, a slug's bite or a mimic's copy: the tower falls silent (and back)
           audio.towerMuted(at, this.view.pan(ev.tower.x, ev.tower.z), ev.muted);
           break;
         case 'waveWarn':
@@ -471,9 +553,8 @@ export class JourneyBattle {
           break;
         case 'waveStart': {
           audio.waveStart(at, ev.index, ev.total);
-          const kinds = [...new Set(this.def.waves[ev.index]?.groups.map((g) => g.kind) ?? [])];
-          const lag = Math.max(0, (ev.t - this.lastVt) * 1000);
-          setTimeout(() => !this.disposed && this.introduce(kinds), lag);
+          const kinds = [...new Set(this.sim.waves[ev.index]?.groups.map((g) => g.kind) ?? [])];
+          this.later(ev.t, () => this.introduce(kinds));
           break;
         }
         case 'spawn':
@@ -482,8 +563,7 @@ export class JourneyBattle {
             audio.bossAppear(at);
             this.intensity = 3;
             audio.setIntensity(3);
-            const lag = Math.max(0, (ev.t - this.lastVt) * 1000);
-            setTimeout(() => !this.disposed && this.introduce([ev.enemy.kind]), lag + 600);
+            this.later(ev.t, () => this.introduce([ev.enemy.kind]), 600);
           }
           break;
         case 'ffReady':
@@ -501,6 +581,85 @@ export class JourneyBattle {
           break;
         case 'defeat':
           this.finish('defeat', ev.t);
+          break;
+        // ── v2: the band, the movements, the bestiary ──
+        case 'band':
+          audio.setBand(bandMix(ev.band));
+          this.view.setDuets(ev.band.duets);
+          this.later(ev.t, () => this.hud.setHarmony(ev.band.harmony));
+          break;
+        case 'duet': {
+          if (!ev.formed) break;
+          const a = this.sim.towers.find((x) => x.id === ev.a), b = this.sim.towers.find((x) => x.id === ev.b);
+          const x = a && b ? (a.x + b.x) / 2 : this.sim.turtle.x, z = a && b ? (a.z + b.z) / 2 : this.sim.turtle.z;
+          audio.duet(ev.id, at, this.view.pan(x, z));
+          const color = DUET_COLOR.get(ev.id) ?? '#ffd36b';
+          this.later(ev.t, () => {
+            this.hud.duetFlash(color);
+            // a little flourish between the partners (INTEGRATION: the view draws the ribbon from setDuets)
+            for (const id of [ev.a, ev.b]) {
+              const tv = this.view.towers.get(id);
+              if (tv) this.view.fx.burst(tv.group.getWorldPosition(new THREE.Vector3()).setY(tv.group.getWorldPosition(new THREE.Vector3()).y + 1.6), color, 22, 2.2, 0.16, 0.8);
+            }
+          });
+          break;
+        }
+        case 'plate': {
+          const wp = this.view.slotWorld(ev.slot, 0.5);
+          audio.plateUnlock(at, this.view.pan(wp.x, wp.z));
+          this.later(ev.t, () => {
+            const pad = this.view.pads[ev.slot];
+            if (pad) pad.group.visible = true;
+            const p = this.view.slotWorld(ev.slot, 0.3);
+            this.view.fx.ring(p, 2.6, '#ffd36b', 0.9, 0.1);
+            this.view.fx.burst(p.clone().setY(p.y + 0.8), '#ffe9a8', 36, 3, 0.2, 1);
+            this.plateGlow.set(ev.slot, this.lastVt + 3.5);
+            this.tutorial?.notify('plate', ev.slot);
+          });
+          break;
+        }
+        case 'movement': {
+          audio.movement(ev.index, ev.total, at);
+          // the creatures this movement brings for the first time
+          const m = this.sim.movements[ev.index];
+          const next = this.sim.movements[ev.index + 1];
+          const kinds: EnemyKind[] = [];
+          for (const w of this.sim.waves) {
+            if (w.bar < m.bar || (next && w.bar >= next.bar - next.rest)) continue;
+            for (const g of w.groups) if (!kinds.includes(g.kind) && !this.bannered.has(g.kind)) kinds.push(g.kind);
+          }
+          for (const k of kinds) this.bannered.add(k);
+          this.later(ev.t, () => this.hud.movement(ev.index, kinds));
+          break;
+        }
+        case 'breather':
+          if (this.intensity > 0 && this.sim.aliveCount() < 4) {
+            this.intensity = 0;
+            audio.setIntensity(0);
+          }
+          break;
+        case 'mimic':
+          // INTEGRATION: the view could do this itself on the 'mimic' event (EnemyView.setMimicKind)
+          this.later(ev.t, () => this.view.enemies.get(ev.enemy.id)?.setMimicKind(ev.kind), 60);
+          break;
+        case 'disable':
+          this.later(ev.t, () => {
+            const tv = this.view.towers.get(ev.tower.id);
+            if (tv) this.view.fx.burst(tv.group.getWorldPosition(new THREE.Vector3()), '#ff6a1f', 30, 2.6, 0.2, 0.9);
+          });
+          break;
+        case 'burrow':
+          // INTEGRATION: the view could handle 'burrow' itself (dust, sinking)
+          this.later(ev.t, () => {
+            const v = this.view.enemies.get(ev.enemy.id);
+            if (v) v.burrowed = ev.on;
+          });
+          break;
+        case 'deflect':
+          audio.deflect(at, this.view.pan(ev.enemy.x, ev.enemy.z));
+          break;
+        case 'heartHeal':
+          this.later(ev.t, () => this.hud.healed());
           break;
       }
     }
@@ -534,26 +693,30 @@ export class JourneyBattle {
     const s = this.sim;
     this.hud.setLives(s.lives);
     this.hud.setCoins(s.coins);
-    // journey bar with wave markers
-    const marks = this.def.waves.map((w, i) => ({
-      at: Math.min(1, (w.bar * 4 * s.speed) / s.length),
-      kind: w.groups[0].kind,
-      done: i < s.wavesBegun(),
-    }));
-    if (this.def.boss) marks.push({ at: Math.min(1, (this.def.boss.bar * 4 * s.speed) / s.length), kind: this.def.boss.kind, done: !!s.bossAlive() || false });
-    this.hud.setJourney(this.view.turtleS / s.length, marks);
-    this.hud.setWave(s.wavesBegun(), s.wavesBegun() - 1, this.def.waves.length);
+    // journey bar: movements (breathers with their plate, bar lines), elites and the guardian
+    const per = (bar: number) => Math.min(1, (bar * 4 * s.speed) / s.length);
+    const jb = s.journeyBar ?? -1;
+    const marks: { at: number; kind: EnemyKind; done: boolean; elite?: boolean }[] = [];
+    s.waves.forEach((w, i) => {
+      for (const g of w.groups) if (g.elite) marks.push({ at: per(w.bar), kind: g.kind, done: i < s.wavesBegun(), elite: true });
+    });
+    if (this.def.boss) marks.push({ at: per(this.def.boss.bar), kind: this.def.boss.kind, done: !!s.bossAlive() });
+    const moves = s.movements.slice(1).map((m) => ({ rest: per(m.bar - m.rest), at: per(m.bar), done: jb >= m.bar }));
+    this.hud.setJourney(this.view.turtleS / s.length, marks, moves);
+    // the movements as pips
+    this.hud.setWave(Math.max(0, s.movement), s.started ? s.movement : -1, s.movements.length);
     // colour returns as the journey goes on
     if (!this.ended) this.view.lifeTarget = 0.26 + 0.4 * (this.view.turtleS / s.length) + (s.started ? 0.04 : 0);
     // FORTÍSSIMO
     const ffOn = !!this.def.ff;
     this.hud.setFF(s.ffDropT !== null ? 1 : s.ff, s.ffReady(), s.ffDropT !== null || vt < s.ffBoostUntil, ffOn);
     for (const tv of this.view.towers.values()) tv.boosted = vt < s.ffBoostUntil;
-    // music intensity
+    // music intensity (calm in the breathers)
     if (!this.ended) {
       const alive = s.aliveCount();
       let want: 0 | 1 | 2 | 3 = alive === 0 ? 0 : 1;
       if (alive > 12) want = 2;
+      if (s.inBreather() && alive < 4) want = 0;
       if (s.bossAlive() || vt < s.ffBoostUntil) want = 3;
       if (!s.started) want = 0;
       if (want !== this.intensity) {
@@ -561,10 +724,19 @@ export class JourneyBattle {
         audio.setIntensity(want);
       }
     }
-    // pads glow when you can afford something
+    // pads glow when you can afford something; plates still asleep stay hidden, new ones shine
     const cheapest = Math.min(...this.def.towers.map((k) => TOWERS[k].levels[0].cost));
     this.view.pads.forEach((p, i) => {
+      if (i >= s.slotsOpen) {
+        p.group.visible = false;
+        return;
+      }
       if (this.sel?.id === i) return;
+      const glow = this.plateGlow.get(i);
+      if (glow !== undefined && vt < glow && !p.occupied) {
+        p.state = 2;
+        return;
+      }
       p.state = s.coins >= cheapest ? 1 : 0;
     });
     // edge arrows toward incoming waves
@@ -598,7 +770,6 @@ export class JourneyBattle {
       const sp = this.view.screen(this.view.slotWorld(this.sel.id, this.view.towerOnSlot(this.sel.id) !== null ? 2 : 1));
       this.hud.place(sp.x, sp.y);
     }
-    void ENEMIES;
   }
 
   private finish(outcome: 'victory' | 'defeat', t: number) {
@@ -606,9 +777,8 @@ export class JourneyBattle {
     this.ended = true;
     this.deselect();
     this.hud.showGo(false);
-    const lag = Math.max(0, (t - this.lastVt) * 1000);
-    setTimeout(() => {
-      if (this.disposed) return;
+    const checkpoint = outcome === 'defeat' ? this.sim.checkpoint() : null;
+    this.later(t, () => {
       if (outcome === 'victory') {
         audio.victory();
         this.view.bloomWave();
@@ -621,9 +791,12 @@ export class JourneyBattle {
       }
       setTimeout(() => {
         if (this.disposed) return;
-        this.resolveEnd({ outcome, stars: this.sim.stars(), lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected });
+        this.resolveEnd({
+          outcome, stars: this.sim.stars(), lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected,
+          checkpoint, movement: Math.max(0, this.sim.movement), movements: this.sim.movements.length,
+        });
       }, outcome === 'victory' ? 5600 : 2600);
-    }, lag + 200);
+    }, 200);
   }
 
   /** Arrival: look at the landmark ringing, a shard of light flies home to the Heart. */
@@ -650,7 +823,7 @@ export class JourneyBattle {
   quit() {
     if (this.ended) return;
     this.ended = true;
-    this.resolveEnd({ outcome: 'quit', stars: 0, lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected });
+    this.resolveEnd({ outcome: 'quit', stars: 0, lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected, checkpoint: null, movement: Math.max(0, this.sim.movement), movements: this.sim.movements.length });
   }
 
   dispose() {

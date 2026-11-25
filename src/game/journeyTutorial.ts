@@ -1,16 +1,21 @@
 /**
  * Wordless tutorial for journeys: a white glove points at the one thing to do next, and disappears
  * as soon as the player does it. It never blocks the game.
+ *
+ * v2: in the first land, when a breather lights up a new plate of the shell, the glove points at
+ * it once (until the plate is opened, or for a few seconds).
  */
 import type { JourneyBattle } from './journeyBattle';
 import type { TutorialId } from '../sim/journey';
 import { TOWERS } from '../sim/defs';
 
-type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup';
+type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate';
 
 interface Step {
   where: () => { x: number; y: number } | null;
   until: Signal;
+  /** only this slot's signal counts */
+  slot?: number;
   when?: () => boolean;
   timeout?: number;
 }
@@ -21,6 +26,8 @@ export class JourneyTutorial {
   /** seconds since the player last built, upgraded or opened a plate */
   private idle = 0;
   private slotScreen: (i: number, y?: number) => { x: number; y: number } | null;
+  /** plates the glove already pointed at */
+  private plates = new Set<number>();
 
   constructor(private b: JourneyBattle, ids: TutorialId[], private nudges = false) {
     const sim = b.sim;
@@ -103,10 +110,18 @@ export class JourneyTutorial {
     }
   }
 
-  notify(sig: Signal) {
+  notify(sig: Signal, slot?: number) {
     if (sig === 'built' || sig === 'upgraded' || sig === 'slotOpen' || sig === 'towerOpen' || sig === 'go') this.idle = 0;
+    // a plate lit up: in the first land the glove shows it once (ahead of anything else)
+    if (sig === 'plate' && this.nudges && slot !== undefined && !this.plates.has(slot)) {
+      this.plates.add(slot);
+      const { hud, sim } = this.b;
+      this.steps.unshift({ where: () => (hud.radialOpen || sim.towerAt(slot) ? null : this.slotScreen(slot)), until: 'slotOpen', slot, timeout: 8 });
+      this.shown = 0;
+      return;
+    }
     const s = this.steps[0];
-    if (s && s.until === sig) {
+    if (s && s.until === sig && (s.slot === undefined || s.slot === slot)) {
       this.steps.shift();
       this.shown = 0;
       this.b.hud.hand(null);

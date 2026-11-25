@@ -95,6 +95,48 @@ export interface BandState {
 }
 export const STEPS_PER_BAR = 16;
 
+/** Harmony and duet numbers (tuned with tools/balance.ts). */
+export const BAND = {
+  /** every tower's damage × (1 + harmonyStep × harmony) */
+  harmonyStep: 0.12,
+  /** march: each drum hit makes its harp partners pluck one extra note */
+  marchShots: 1,
+  /** groundwork: drum blasts / bass drops make ground creatures stumble (stop) for this many beats */
+  stumbleBeats: 0.5,
+  stumbleBassBeats: 1,
+  stumbleBassArea: 2.6,
+  /** shimmer: crystal chains jump farther, one more time, and chill what they touch */
+  shimmerJump: 7.5,
+  shimmerExtraChain: 1,
+  shimmerSlow: 0.7,
+  shimmerSlowBeats: 2,
+  /** fanfare: horn waves wider and stronger */
+  fanfareWidth: 1.1,
+  fanfareDamage: 1.35,
+  /** hymn: reveal reaches farther; the colossus heals 1 life every `hymnEvery` bars (at most `hymnCap` per journey) */
+  hymnReveal: 6,
+  hymnEvery: 6,
+  hymnCap: 5,
+  /** serenade: harp notes become chords */
+  serenadeDamage: 1.3,
+  serenadeSplash: 0.45,
+  serenadeRadius: 1.8,
+  /** groove: shaker notes per bar × this */
+  grooveIncome: 1.5,
+  /** thunder: every bass drop also fires a chain of the crystal partner (its damage × this) */
+  thunderDamage: 2.2,
+};
+
+/** The duet a pair of instruments forms, if any. */
+export function duetOf(a: TowerKind, b: TowerKind): DuetDef | null {
+  for (const d of DUETS) if ((d.a === a && d.b === b) || (d.a === b && d.b === a)) return d;
+  return null;
+}
+
+export function emptySections(): Record<Section, number> {
+  return { strings: 0, percussion: 0, bells: 0, brass: 0, voices: 0, low: 0 };
+}
+
 // ───────────────────────────── towers ─────────────────────────────
 
 export type DamageType = 'pluck' | 'blast' | 'sonic' | 'arc' | 'bass' | 'bell';
@@ -152,17 +194,17 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
   bell: {
     kind: 'bell', damageType: 'bell', hitsAir: true, hitsGround: true, detects: true, color: '#8fd8ff',
     levels: [
-      { cost: 90, pattern: 'x...............', range: 9, damage: 4, slow: 0.55, slowBeats: 4, flight: 0 },
-      { cost: 90, pattern: 'x.......x.......', range: 10, damage: 7, slow: 0.48, slowBeats: 4, flight: 0 },
-      { cost: 150, pattern: 'x.......x.......', range: 11, damage: 12, slow: 0.38, slowBeats: 6, flight: 0 },
+      { cost: 90, pattern: 'x.......x.......', range: 10, damage: 3, slow: 0.6, slowBeats: 3, flight: 0 },
+      { cost: 90, pattern: 'x.......x.......', range: 11, damage: 5, slow: 0.55, slowBeats: 4, flight: 0 },
+      { cost: 150, pattern: 'x...x...x...x...', range: 12, damage: 6, slow: 0.5, slowBeats: 4, flight: 0 },
     ],
   },
   shaker: {
     kind: 'shaker', damageType: 'pluck', hitsAir: false, hitsGround: false, color: '#ffe066',
     levels: [
-      { cost: 60, pattern: '..x...x...x...x.', range: 0, damage: 0, income: 6, flight: 0 },
-      { cost: 90, pattern: '..x.x.x...x.x.x.', range: 0, damage: 0, income: 11, flight: 0 },
-      { cost: 140, pattern: '..xxx.x...xxx.x.', range: 0, damage: 0, income: 18, flight: 0 },
+      { cost: 60, pattern: '..x...x...x...x.', range: 0, damage: 0, income: 3, flight: 0 },
+      { cost: 90, pattern: '..x.x.x...x.x.x.', range: 0, damage: 0, income: 5, flight: 0 },
+      { cost: 140, pattern: '..xxx.x...xxx.x.', range: 0, damage: 0, income: 8, flight: 0 },
     ],
   },
   crystal: {
@@ -174,7 +216,7 @@ export const TOWERS: Record<TowerKind, TowerDef> = {
     ],
   },
   horn: {
-    kind: 'horn', damageType: 'sonic', hitsAir: true, hitsGround: true, color: '#ffb347',
+    kind: 'horn', damageType: 'sonic', hitsAir: false, hitsGround: true, color: '#ffb347',
     levels: [
       { cost: 150, pattern: 'x...............................', range: 16, damage: 70, area: 1.4, flight: 1 },
       { cost: 140, pattern: 'x...............x...............', range: 17, damage: 80, area: 1.6, flight: 1 },
@@ -250,28 +292,34 @@ export interface EnemyDef {
   aura?: { radius: number; speed: number };
 }
 
+// threat ≈ hp/34 × (speed + 0.7)/2.8 × armour/abilities: the work it takes to stop one, in Borrões
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
+  // meadow: sounds of the fields
   blot: { kind: 'blot', hp: 34, speed: 2.1, armor: 0, flying: false, bounty: 5, lives: 1, radius: 0.7, threat: 1 },
-  blotling: { kind: 'blotling', hp: 14, speed: 2.7, armor: 0, flying: false, bounty: 1, lives: 1, radius: 0.5, threat: 0.4 },
-  scurry: { kind: 'scurry', hp: 22, speed: 3.9, armor: 0, flying: false, bounty: 5, lives: 1, radius: 0.6, threat: 1.1 },
-  shell: { kind: 'shell', hp: 150, speed: 1.35, armor: 0.5, flying: false, bounty: 14, lives: 2, radius: 0.95, threat: 3.2 },
-  moth: { kind: 'moth', hp: 42, speed: 2.6, armor: 0, flying: true, bounty: 7, lives: 1, radius: 0.75, threat: 1.6 },
-  shield: { kind: 'shield', hp: 70, speed: 1.8, armor: 0.1, flying: false, bounty: 11, lives: 1, radius: 0.8, shield: 70, threat: 2.6 },
-  bubble: { kind: 'bubble', hp: 95, speed: 1.7, armor: 0, flying: false, bounty: 8, lives: 2, radius: 1.0, split: { kind: 'blotling', count: 4 }, threat: 3 },
-  phantom: { kind: 'phantom', hp: 60, speed: 2.4, armor: 0, flying: false, bounty: 10, lives: 1, radius: 0.7, camo: true, threat: 2.4 },
-  muffler: { kind: 'muffler', hp: 110, speed: 1.6, armor: 0.2, flying: false, bounty: 15, lives: 2, radius: 0.9, mute: 7.5, threat: 4 },
-  mender: { kind: 'mender', hp: 80, speed: 1.8, armor: 0, flying: false, bounty: 12, lives: 1, radius: 0.8, heal: 14, threat: 3 },
+  blotling: { kind: 'blotling', hp: 14, speed: 2.7, armor: 0, flying: false, bounty: 1, lives: 1, radius: 0.5, threat: 0.5 },
+  scurry: { kind: 'scurry', hp: 22, speed: 3.5, armor: 0, flying: false, bounty: 4, lives: 1, radius: 0.6, pack: true, threat: 1.1 },
+  bubble: { kind: 'bubble', hp: 95, speed: 1.7, armor: 0, flying: false, bounty: 9, lives: 2, radius: 1.0, split: { kind: 'blotling', count: 4 }, threat: 4 },
+  moth: { kind: 'moth', hp: 42, speed: 2.6, armor: 0, flying: true, bounty: 7, lives: 1, radius: 0.75, threat: 2.1 },
+  // dunes: echoes
+  scorpion: { kind: 'scorpion', hp: 120, speed: 1.8, armor: 0.45, flying: false, bounty: 17, lives: 2, radius: 0.9, burrow: { every: 4, for: 1 }, threat: 5.5 },
+  whirl: { kind: 'whirl', hp: 85, speed: 2.3, armor: 0, flying: false, bounty: 11, lives: 1, radius: 0.85, deflect: true, aura: { radius: 3.6, speed: 1.3 }, threat: 3.5 },
+  echo: { kind: 'echo', hp: 64, speed: 2.2, armor: 0, flying: false, bounty: 6, lives: 1, radius: 0.75, echo: 0.5, threat: 2.9 },
   obelisk: { kind: 'obelisk', hp: 320, speed: 0, armor: 0.2, flying: false, bounty: 30, lives: 0, radius: 1.2, mute: 11, threat: 0 },
-  // v2 bestiary: placeholder numbers, tuned by the gameplay pass
-  scorpion: { kind: 'scorpion', hp: 130, speed: 1.9, armor: 0.45, flying: false, bounty: 12, lives: 1, radius: 0.9, burrow: { every: 4, for: 1 }, threat: 3 },
-  whirl: { kind: 'whirl', hp: 90, speed: 2.4, armor: 0, flying: false, bounty: 10, lives: 1, radius: 0.85, deflect: true, aura: { radius: 3, speed: 1.25 }, threat: 3 },
-  echo: { kind: 'echo', hp: 70, speed: 2.2, armor: 0, flying: false, bounty: 8, lives: 1, radius: 0.75, echo: 0.5, threat: 2.4 },
-  wolf: { kind: 'wolf', hp: 40, speed: 4.4, armor: 0, flying: false, bounty: 4, lives: 1, radius: 0.7, pack: true, threat: 1.3 },
-  ember: { kind: 'ember', hp: 36, speed: 3.4, armor: 0, flying: true, bounty: 4, lives: 1, radius: 0.6, pack: true, threat: 1.3 },
-  slug: { kind: 'slug', hp: 420, speed: 1.0, armor: 0.25, flying: false, bounty: 28, lives: 3, radius: 1.3, disable: 4, threat: 7 },
-  mimic: { kind: 'mimic', hp: 160, speed: 1.9, armor: 0.1, flying: false, bounty: 18, lives: 2, radius: 0.85, mimic: true, threat: 6 },
-  knight: { kind: 'knight', hp: 260, speed: 1.4, armor: 0.6, flying: false, bounty: 24, lives: 2, radius: 1.0, shield: 80, steady: true, threat: 7 },
-  conductor: { kind: 'conductor', hp: 380, speed: 1.5, armor: 0.2, flying: false, bounty: 40, lives: 3, radius: 1.0, aura: { radius: 6, speed: 1.35 }, threat: 10 },
+  // peaks: cold
+  wolf: { kind: 'wolf', hp: 30, speed: 3.8, armor: 0, flying: false, bounty: 5, lives: 1, radius: 0.7, pack: true, threat: 1.6 },
+  shell: { kind: 'shell', hp: 150, speed: 1.35, armor: 0.5, flying: false, bounty: 16, lives: 2, radius: 0.95, threat: 5 },
+  phantom: { kind: 'phantom', hp: 60, speed: 2.4, armor: 0, flying: false, bounty: 9, lives: 1, radius: 0.7, camo: true, threat: 2.7 },
+  muffler: { kind: 'muffler', hp: 110, speed: 1.6, armor: 0.2, flying: false, bounty: 15, lives: 2, radius: 0.9, mute: 7.5, threat: 4.6 },
+  // forge: fire
+  ember: { kind: 'ember', hp: 26, speed: 3.1, armor: 0, flying: true, bounty: 5, lives: 1, radius: 0.6, pack: true, threat: 1.6 },
+  slug: { kind: 'slug', hp: 520, speed: 0.95, armor: 0.25, flying: false, bounty: 40, lives: 3, radius: 1.3, disable: 4, threat: 13 },
+  shield: { kind: 'shield', hp: 70, speed: 1.8, armor: 0.1, flying: false, bounty: 13, lives: 1, radius: 0.8, shield: 70, threat: 3.9 },
+  mender: { kind: 'mender', hp: 80, speed: 1.8, armor: 0, flying: false, bounty: 11, lives: 1, radius: 0.8, heal: 14, threat: 3.2 },
+  // citadel: the silence itself
+  mimic: { kind: 'mimic', hp: 150, speed: 1.9, armor: 0.1, flying: false, bounty: 20, lives: 2, radius: 0.85, mimic: true, threat: 6 },
+  knight: { kind: 'knight', hp: 280, speed: 1.35, armor: 0.6, flying: false, bounty: 40, lives: 2, radius: 1.0, shield: 80, steady: true, threat: 13 },
+  conductor: { kind: 'conductor', hp: 420, speed: 1.4, armor: 0.2, flying: false, bounty: 52, lives: 3, radius: 1.0, aura: { radius: 7, speed: 1.9 }, steady: true, threat: 16 },
+  // guardians
   bossBlot: { kind: 'bossBlot', hp: 2400, speed: 0.95, armor: 0.1, flying: false, bounty: 150, lives: 10, radius: 2.1, boss: true, threat: 40 },
   bossScarab: { kind: 'bossScarab', hp: 4200, speed: 1.05, armor: 0.45, flying: false, bounty: 200, lives: 10, radius: 2.2, boss: true, threat: 60 },
   bossMoth: { kind: 'bossMoth', hp: 4600, speed: 1.2, armor: 0.1, flying: true, bounty: 220, lives: 10, radius: 2.3, boss: true, threat: 70 },

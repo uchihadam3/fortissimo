@@ -4,20 +4,33 @@
  * notes of the song. Pure logic: deterministic and runnable headless for balancing.
  *
  * Time is song time in seconds (0 = first downbeat). Everything that matters happens on the grid of
- * 16th-note steps; between steps, enemies and the colossus move continuously.
+ * 16th-note steps; between steps the creatures and the colossus move in fixed sub-steps (SUB per
+ * 16th). The state therefore never depends on how often `advance` is called: the player's actions,
+ * recorded with the sub-step they happened at (`log`), replay to exactly the same journey. That is
+ * what checkpoints are made of (`checkpoint()`, `Journey.replay`).
+ *
+ * A journey is a symphony in movements (`def.movements`). Between two movements comes a breather:
+ * a few calm bars, a burst of golden notes along the road and one more plate of the shell lighting
+ * up, so the band grows during the journey.
  */
 import {
-  ENEMIES, TOWERS, SELL_REFUND, STEPS_PER_BAR, MAX_LIVES,
-  type EnemyDef, type EnemyKind, type TowerKind, type DamageType, type WorldId, type SongId,
+  ENEMIES, TOWERS, SELL_REFUND, STEPS_PER_BAR, MAX_LIVES, SECTION_OF, SECTIONS, TOWER_KINDS, BAND, duetOf, emptySections,
+  type EnemyDef, type EnemyKind, type TowerKind, type DamageType, type WorldId, type SongId, type BandState, type DuetId,
 } from './defs';
 import { JourneyPath } from './path';
-import { SLOTS, SHELL_REACH } from './shell';
+import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng } from '../core/rng';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
 export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides';
 export type LandmarkKind = 'bell' | 'chimes' | 'organ' | 'harp' | 'spire';
+
+/** sub-steps per 16th note (fixed integration grid) */
+export const SUB = 4;
+const BEATS_PER_BAR = 4;
+export const SUBS_PER_BAR = STEPS_PER_BAR * SUB;
+export const DEFAULT_SPEED = 0.42;
 
 export interface Feature {
   kind: FeatureKind;
@@ -40,12 +53,26 @@ export interface JGroup {
   /** beats after the wave starts */
   at?: number;
   hp?: number;
+  /** a mid-journey elite: tougher (use `hp`), richer, bites harder; marked on the journey bar */
+  elite?: boolean;
 }
 
 export interface JWave {
   /** bar of the journey (0 = the bar the colossus starts walking) */
   bar: number;
   groups: JGroup[];
+}
+
+/** One movement of a journey. */
+export interface JMovement {
+  /** journey bar at which the movement begins (its first downbeat) */
+  bar: number;
+  /** bars of breather before it (0 for the first): calm, golden notes and a new plate */
+  rest: number;
+  /** golden notes along the road during the breather before it */
+  notes?: number;
+  /** plates that light up when its breather begins (default 1; ignored for the first movement) */
+  plates?: number;
 }
 
 export interface JourneyDef {
@@ -57,15 +84,18 @@ export interface JourneyDef {
   bars: number;
   /** path units per beat */
   speed?: number;
+  /** plates open at the start (more light up at every breather) */
   slots: number;
   coins: number;
   lives?: number;
   towers: TowerKind[];
   waves: JWave[];
+  /** the movements (absent: one single movement) */
+  movements?: JMovement[];
   features: Feature[];
   pickups?: number;
   obelisks?: { s: number; side: number; dist?: number }[];
-  boss?: { kind: EnemyKind; bar: number };
+  boss?: { kind: EnemyKind; bar: number; hp?: number };
   tutorial?: TutorialId[];
   newTower?: TowerKind;
   ff?: boolean;
@@ -90,6 +120,8 @@ export interface Enemy {
   flying: boolean;
   slow: number;
   slowUntil: number;
+  /** groundwork: stopped (stumbling) until */
+  stunUntil: number;
   revealedUntil: number;
   alive: boolean;
   leaked: boolean;
@@ -103,7 +135,22 @@ export interface Enemy {
   /** knock-back velocity */
   kx: number;
   kz: number;
+  /** lives it takes if it bites */
+  lives: number;
+  bounty: number;
+  elite: boolean;
+  /** an echo that already came back once */
+  echoed: boolean;
+  /** Mimic: the instrument it copies (null: nothing to copy) */
+  mimicKind: TowerKind | null;
+  /** the last 16th step a bell tolled on it (bells do not stack) */
+  bellStep: number;
+  /** guardians: angle around the colossus they stalk at, and whether they charge */
+  orbit: number;
+  charging: boolean;
 }
+
+export type MuteCause = 'mute' | 'freeze' | 'disable' | 'mimic';
 
 export interface Tower {
   id: number;
@@ -113,14 +160,20 @@ export interface Tower {
   x: number;
   z: number;
   spent: number;
+  /** not playing (any cause); muted towers do not count in the band */
   muted: boolean;
+  muteCause: MuteCause | null;
   frozenUntil: number;
+  /** slug bite: silenced until */
+  disabledUntil: number;
   aim: number;
   buff: number;
   damage: number;
   kills: number;
   builtT: number;
   shots: number;
+  /** duets this tower plays in right now (partner tower) */
+  partners: { id: DuetId; tower: Tower }[];
 }
 
 export interface Shot {
@@ -138,6 +191,8 @@ export interface Shot {
   dirz: number;
   hits: number[];
   done: boolean;
+  /** a note played because of a duet (march) */
+  duet?: DuetId;
 }
 
 export interface Pickup {
@@ -148,6 +203,8 @@ export interface Pickup {
   value: number;
   taken: boolean;
   lost: boolean;
+  /** golden notes of a breather: the movement it leads into */
+  breather?: number;
 }
 
 export type SimEvent =
@@ -159,11 +216,11 @@ export type SimEvent =
   | { t: number; type: 'death'; enemy: Enemy; bounty: number }
   | { t: number; type: 'leak'; enemy: Enemy; lives: number }
   | { t: number; type: 'income'; tower: Tower; amount: number }
-  | { t: number; type: 'muted'; tower: Tower; muted: boolean }
+  | { t: number; type: 'muted'; tower: Tower; muted: boolean; cause: MuteCause | null }
   | { t: number; type: 'heal'; enemy: Enemy; targets: number[] }
   | { t: number; type: 'waveWarn'; index: number; dirs: { dir: number; kinds: EnemyKind[]; count: number }[]; at: number }
   | { t: number; type: 'waveStart'; index: number; total: number }
-  | { t: number; type: 'boss'; enemy: Enemy; action: 'summon' | 'burrow' | 'emerge' | 'freeze' | 'plates' | 'phase'; towers?: number[] }
+  | { t: number; type: 'boss'; enemy: Enemy; action: 'summon' | 'burrow' | 'emerge' | 'freeze' | 'plates' | 'phase' | 'charge'; towers?: number[] }
   | { t: number; type: 'ffDrop'; hits: number[] }
   | { t: number; type: 'ffReady' }
   | { t: number; type: 'collect'; pickup: Pickup }
@@ -172,7 +229,32 @@ export type SimEvent =
   | { t: number; type: 'halt'; on: boolean }
   | { t: number; type: 'arrive' }
   | { t: number; type: 'victory' }
-  | { t: number; type: 'defeat' };
+  | { t: number; type: 'defeat' }
+  // ── v2: the band, the movements, the bestiary ──
+  /** the band changed (sections, harmony or duets) */
+  | { t: number; type: 'band'; band: BandState }
+  /** a duet formed (or broke) between towers a and b */
+  | { t: number; type: 'duet'; id: DuetId; a: number; b: number; formed: boolean }
+  /** a plate of the shell lights up */
+  | { t: number; type: 'plate'; slot: number; open: number; max: number }
+  /** movement `index` of `total` begins (on its downbeat) */
+  | { t: number; type: 'movement'; index: number; total: number }
+  /** a breather begins (calm before movement `index`), lasting `bars` */
+  | { t: number; type: 'breather'; index: number; bars: number }
+  /** a Mimic copies an instrument: every tower of that kind falls silent while it lives */
+  | { t: number; type: 'mimic'; enemy: Enemy; kind: TowerKind | null; towers: number[] }
+  /** a Lava Slug's bite silences a tower until `until` */
+  | { t: number; type: 'disable'; enemy: Enemy; tower: Tower; until: number }
+  /** an Echo comes back (a 'spawn' of the returning echo comes with it) */
+  | { t: number; type: 'echo'; enemy: Enemy }
+  /** a burrower dives (on) or surfaces (off) */
+  | { t: number; type: 'burrow'; enemy: Enemy; on: boolean }
+  /** a single-target shot passed through a Whirl */
+  | { t: number; type: 'deflect'; enemy: Enemy; shot: Shot }
+  /** groundwork: creatures stumble */
+  | { t: number; type: 'stumble'; tower: Tower; hits: number[] }
+  /** hymn: the colossus heals */
+  | { t: number; type: 'heartHeal'; lives: number };
 
 export interface SimStats {
   kills: number;
@@ -183,20 +265,60 @@ export interface SimStats {
   pickups: number;
   damageByKind: Partial<Record<TowerKind, number>>;
   ffUses: number;
+  /** lives given back by the hymn */
+  heals: number;
+  /** duets formed during the journey */
+  duets: number;
+  /** highest harmony reached */
+  harmonyPeak: number;
 }
 
-const BEATS_PER_BAR = 4;
-export const DEFAULT_SPEED = 0.42;
+/** A player input, with the sub-step it happened at. */
+export type SimAction =
+  | { sub: number; a: 'build'; slot: number; kind: TowerKind }
+  | { sub: number; a: 'upgrade'; slot: number }
+  | { sub: number; a: 'sell'; slot: number }
+  | { sub: number; a: 'collect'; id: number }
+  | { sub: number; a: 'ff' }
+  | { sub: number; a: 'go' };
+
+/** Where a fallen journey can start again: the beginning of a movement's breather. */
+export interface Checkpoint {
+  /** level id and mode it belongs to */
+  id: string;
+  mode: Mode;
+  /** the movement it leads into (≥ 1) and how many there are */
+  movement: number;
+  total: number;
+  /** sub-step the live play resumes at (always on a bar line) */
+  sub: number;
+  /** the player's actions up to that point (replayed headless) */
+  actions: SimAction[];
+}
+
+interface SpawnReq {
+  t: number;
+  kind: EnemyKind;
+  angle: number;
+  dist: number;
+  hp: number;
+  wave: number;
+  elite: boolean;
+}
 
 export class Journey {
   readonly path: JourneyPath;
   readonly spb: number;
   readonly stepDur: number;
+  readonly subDur: number;
   readonly barDur: number;
   readonly speed: number;
   readonly length: number;
   time = 0;
+  /** next 16th step to process */
   step = 0;
+  /** sub-steps integrated so far (time = sub × subDur) */
+  sub = 0;
   coins: number;
   lives: number;
   readonly maxLives: number;
@@ -205,20 +327,35 @@ export class Journey {
   shots: Shot[] = [];
   pickups: Pickup[] = [];
   events: SimEvent[] = [];
-  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0 };
+  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0 };
   /** the colossus */
   turtle = { s: 0, x: 0, z: 0, dx: 0, dz: -1 };
   walking = false;
   halted = false;
   /** bar at which the walk began (null: still waiting for the player) */
   startBar: number | null = null;
+  /** sim time at which the player set off */
+  goTime: number | null = null;
   started = false;
   outcome: 'playing' | 'victory' | 'defeat' = 'playing';
   readonly waves: { bar: number; groups: JGroup[] }[];
+  readonly movements: JMovement[];
+  /** current movement (its breather included); -1 before the walk */
+  movement = -1;
+  /** plates open now / at the end of the journey */
+  slotsOpen: number;
+  readonly slotsMax: number;
+  /** the band on the shell (playing towers only) */
+  band: BandState = { sections: emptySections(), harmony: 0, duets: [] };
+  /** damage multiplier from harmony */
+  harmonyMul = 1;
+  /** the player's actions (replayed by checkpoints) */
+  readonly log: SimAction[] = [];
   /** waves whose warning / start has been emitted */
   private warned = new Set<number>();
   private begun = new Set<number>();
-  private spawnQueue: { t: number; kind: EnemyKind; angle: number; dist: number; hp: number; wave: number }[] = [];
+  private spawnQueue: SpawnReq[] = [];
+  private respawns: { t: number; kind: EnemyKind; x: number; z: number; hp: number; wave: number; elite: boolean }[] = [];
   ff = 0;
   ffNeed: number;
   ffDropT: number | null = null;
@@ -228,14 +365,18 @@ export class Journey {
   readonly hpScale: number;
   readonly mode: Mode;
   private rng: Rng;
-  readonly slotsOpen: number;
   private bossSpawned = false;
   private arrived = false;
   readonly stopS: number;
+  private bandDirty = false;
+  private anyDead = false;
+  /** the Silence steals an instrument for a while */
+  stolen: { kind: TowerKind; until: number } | null = null;
 
   constructor(readonly def: JourneyDef, bpm: number, opts: { mode?: Mode; path?: JourneyPath } = {}) {
     this.spb = 60 / bpm;
     this.stepDur = this.spb / 4;
+    this.subDur = this.stepDur / SUB;
     this.barDur = this.spb * BEATS_PER_BAR;
     this.speed = def.speed ?? DEFAULT_SPEED;
     this.length = def.bars * BEATS_PER_BAR * this.speed;
@@ -246,30 +387,72 @@ export class Journey {
     this.coins = Math.round(def.coins * (virt ? 0.9 : 1));
     this.maxLives = virt ? 10 : def.lives ?? MAX_LIVES;
     this.lives = this.maxLives;
+    this.movements = def.movements?.length ? def.movements.slice().sort((a, b) => a.bar - b.bar) : [{ bar: 0, rest: 0 }];
     this.slotsOpen = Math.min(SLOTS.length, def.slots);
+    let extra = 0;
+    for (let k = 1; k < this.movements.length; k++) extra += this.movements[k].plates ?? 1;
+    this.slotsMax = Math.min(SLOTS.length, def.slots + extra);
     this.waves = def.waves.slice().sort((a, b) => a.bar - b.bar);
     this.rng = new Rng((def.seed ?? 7) * 977 + 13);
     this.stopS = this.length - 16;
     let total = 0;
-    for (const w of def.waves) for (const g of w.groups) total += ENEMIES[g.kind].hp * (g.hp ?? 1) * g.count;
-    this.ffNeed = Math.max(400, Math.min(6000, total * 0.22)) * this.hpScale;
+    for (const w of def.waves) {
+      for (const g of w.groups) {
+        const d = ENEMIES[g.kind];
+        let hp = d.hp + (d.split ? ENEMIES[d.split.kind].hp * d.split.count : 0) + (d.echo ? d.hp * d.echo : 0);
+        hp *= g.hp ?? 1;
+        total += hp * g.count;
+      }
+    }
+    // FORTÍSSIMO fills about twice per movement
+    this.ffNeed = Math.max(400, Math.min(40000, (total * 0.5) / this.movements.length)) * this.hpScale;
     this.placeTurtle();
     // pickups along the way
     const n = def.pickups ?? Math.round(def.bars / 6);
     const pr = new Rng((def.seed ?? 7) * 31 + 5);
     for (let i = 0; i < n; i++) {
       const s = 18 + ((this.length - 30) * (i + pr.next() * 0.6)) / Math.max(1, n);
-      const p = this.path.at(s);
-      const side = pr.chance(0.5) ? 1 : -1;
-      const off = pr.range(6, 15) * side;
-      this.pickups.push({ id: this.nextId++, x: p.x - p.dz * off, z: p.z + p.dx * off, s, value: pr.int(8, 14), taken: false, lost: false });
+      this.addPickup(s, (pr.chance(0.5) ? 1 : -1) * pr.range(6, 15), pr.int(8, 14));
     }
+    // the golden notes of every breather, strewn along the road where the calm will be
+    const br = new Rng((def.seed ?? 7) * 53 + 11);
+    for (let k = 1; k < this.movements.length; k++) {
+      const m = this.movements[k];
+      const cnt = m.notes ?? 8;
+      const s0 = (m.bar - m.rest) * BEATS_PER_BAR * this.speed, s1 = m.bar * BEATS_PER_BAR * this.speed;
+      for (let i = 0; i < cnt; i++) {
+        const s = s0 + 4 + ((s1 - s0) * (i + br.next() * 0.7)) / cnt;
+        const side = i % 2 ? 1 : -1;
+        this.addPickup(s, side * br.range(5, 10), br.int(7, 11), k);
+      }
+    }
+    this.pickups.sort((a, b) => a.s - b.s);
     // obelisks of the Silence
     for (const o of def.obelisks ?? []) {
       const p = this.path.at(o.s);
       const off = (o.dist ?? 11) * o.side;
       this.addEnemy('obelisk', p.x - p.dz * off, p.z + p.dx * off, 1, -1, 0);
     }
+    // step 0 is processed right away, so player actions at sub-step 0 always come after it
+    this.advance(0);
+  }
+
+  private addPickup(s: number, off: number, value: number, breather?: number) {
+    const p = this.path.at(s);
+    this.pickups.push({ id: this.nextId++, x: p.x - p.dz * off, z: p.z + p.dx * off, s, value, taken: false, lost: false, breather });
+  }
+
+  /** Replays a checkpoint headless: the journey exactly as it was at the checkpoint (events drained). */
+  static replay(def: JourneyDef, bpm: number, cp: Checkpoint): Journey {
+    const j = new Journey(def, bpm, { mode: cp.mode });
+    for (const a of cp.actions) {
+      if (a.sub > cp.sub) break;
+      j.advanceToSub(a.sub);
+      j.apply(a);
+    }
+    j.advanceToSub(cp.sub);
+    j.drain();
+    return j;
   }
 
   // ───────────────────────────── queries ─────────────────────────────
@@ -333,10 +516,28 @@ export class Journey {
     return this.begun.size;
   }
 
+  /** the movement a journey bar belongs to (its breather counts as part of it) */
+  movementAt(jb: number): number {
+    let k = 0;
+    for (let i = 1; i < this.movements.length; i++) if (jb >= this.movements[i].bar - this.movements[i].rest) k = i;
+    return k;
+  }
+
+  /** is the journey in a breather right now? */
+  inBreather(): boolean {
+    const jb = this.journeyBar;
+    if (jb === null) return false;
+    for (let i = 1; i < this.movements.length; i++) {
+      const m = this.movements[i];
+      if (jb >= m.bar - m.rest && jb < m.bar) return true;
+    }
+    return false;
+  }
+
   // ───────────────────────────── player actions ─────────────────────────────
 
   canBuild(slot: number, kind: TowerKind): boolean {
-    return this.outcome === 'playing' && slot < this.slotsOpen && !this.towerAt(slot) && this.def.towers.includes(kind) && this.coins >= TOWERS[kind].levels[0].cost;
+    return this.outcome === 'playing' && slot >= 0 && slot < this.slotsOpen && !this.towerAt(slot) && this.def.towers.includes(kind) && this.coins >= TOWERS[kind].levels[0].cost;
   }
 
   build(slot: number, kind: TowerKind): Tower | null {
@@ -346,11 +547,14 @@ export class Journey {
     this.stats.spent += cost;
     const p = this.slotPos(slot);
     const t: Tower = {
-      id: this.nextId++, kind, level: 0, slot, x: p.x, z: p.z, spent: cost, muted: false, frozenUntil: 0,
-      aim: Math.atan2(this.turtle.dz, this.turtle.dx), buff: 1, damage: 0, kills: 0, builtT: this.time, shots: 0,
+      id: this.nextId++, kind, level: 0, slot, x: p.x, z: p.z, spent: cost, muted: false, muteCause: null, frozenUntil: 0, disabledUntil: 0,
+      aim: Math.atan2(this.turtle.dz, this.turtle.dx), buff: 1, damage: 0, kills: 0, builtT: this.time, shots: 0, partners: [],
     };
     this.towers.push(t);
-    this.recomputeBuffs();
+    this.log.push({ sub: this.sub, a: 'build', slot, kind });
+    // a Mimic (or the Silence) copying this instrument silences the newcomer too
+    this.updateMutes(this.time);
+    this.updateBand(this.time);
     return t;
   }
 
@@ -366,7 +570,8 @@ export class Journey {
     this.stats.spent += c;
     t.spent += c;
     t.level++;
-    this.recomputeBuffs();
+    this.log.push({ sub: this.sub, a: 'upgrade', slot: t.slot });
+    this.updateBand(this.time);
     return true;
   }
 
@@ -376,10 +581,12 @@ export class Journey {
   }
 
   sell(t: Tower): number {
+    if (this.outcome !== 'playing' || !this.towers.includes(t)) return 0;
     const v = this.sellValue(t);
     this.coins += v;
     this.towers = this.towers.filter((x) => x !== t);
-    this.recomputeBuffs();
+    this.log.push({ sub: this.sub, a: 'sell', slot: t.slot });
+    this.updateBand(this.time);
     return v;
   }
 
@@ -388,6 +595,8 @@ export class Journey {
     if (this.started || this.outcome !== 'playing') return false;
     this.started = true;
     this.startBar = this.bar + 1;
+    this.goTime = this.time;
+    this.log.push({ sub: this.sub, a: 'go' });
     return true;
   }
 
@@ -398,6 +607,7 @@ export class Journey {
     this.coins += p.value;
     this.stats.earned += p.value;
     this.stats.collected++;
+    this.log.push({ sub: this.sub, a: 'collect', id });
     this.emit({ t: this.time, type: 'collect', pickup: p });
     return p.value;
   }
@@ -417,7 +627,52 @@ export class Journey {
     this.ff = 0;
     this.ffWasReady = false;
     this.stats.ffUses++;
+    this.log.push({ sub: this.sub, a: 'ff' });
     return [start, drop];
+  }
+
+  /** Applies a recorded action (replays). */
+  apply(a: SimAction): boolean {
+    switch (a.a) {
+      case 'build':
+        return !!this.build(a.slot, a.kind);
+      case 'upgrade': {
+        const t = this.towerAt(a.slot);
+        return !!t && this.upgrade(t);
+      }
+      case 'sell': {
+        const t = this.towerAt(a.slot);
+        return !!t && this.sell(t) > 0;
+      }
+      case 'collect':
+        return this.collect(a.id) > 0;
+      case 'ff':
+        return !!this.unleash();
+      case 'go':
+        return this.begin();
+    }
+  }
+
+  // ───────────────────────────── checkpoints ─────────────────────────────
+
+  /** The start of every breather (movement ≥ 1) as sub-step indices; empty before the walk. */
+  checkpoints(): { movement: number; sub: number }[] {
+    if (this.startBar === null) return [];
+    const sb = this.startBar;
+    return this.movements.slice(1).map((m, i) => ({ movement: i + 1, sub: (sb + m.bar - m.rest) * SUBS_PER_BAR }));
+  }
+
+  /**
+   * Where to start again after falling now: the latest breather that began at least two bars ago
+   * (null: only a full restart).
+   */
+  checkpoint(): Checkpoint | null {
+    const margin = 2 * SUBS_PER_BAR;
+    let best: { movement: number; sub: number } | null = null;
+    for (const c of this.checkpoints()) if (c.sub <= this.sub - margin) best = c;
+    if (!best) return null;
+    const until = best.sub;
+    return { id: this.def.id, mode: this.mode, movement: best.movement, total: this.movements.length, sub: until, actions: this.log.filter((a) => a.sub <= until) };
   }
 
   // ───────────────────────────── simulation ─────────────────────────────
@@ -429,18 +684,22 @@ export class Journey {
     }
     let guard = 0;
     while (this.outcome === 'playing') {
-      const ts = this.stepTime(this.step);
-      if (ts > to + 1e-9) break;
-      this.integrate(ts - this.time);
-      this.time = ts;
-      this.processStep(this.step);
-      this.step++;
-      if (++guard > 100000) break;
+      if (this.sub === this.step * SUB) {
+        this.processStep(this.step);
+        this.step++;
+        continue;
+      }
+      const tn = (this.sub + 1) * this.subDur;
+      if (tn > to + 1e-9) break;
+      this.integrate(this.subDur);
+      this.sub++;
+      this.time = this.sub * this.subDur;
+      if (++guard > 20_000_000) break;
     }
-    if (this.outcome === 'playing' && to > this.time) {
-      this.integrate(to - this.time);
-      this.time = to;
-    }
+  }
+
+  advanceToSub(n: number): void {
+    this.advance(n * this.subDur);
   }
 
   private emit(ev: SimEvent) {
@@ -462,7 +721,6 @@ export class Journey {
   }
 
   private integrate(dt: number) {
-    if (dt <= 0) return;
     // the colossus walks once the walk began (and not before its first bar line)
     const walk = this.startBar !== null && this.time >= this.startBar * this.barDur - 1e-9 && !this.arrived;
     if (walk !== this.walking) this.walking = walk;
@@ -472,13 +730,21 @@ export class Journey {
       this.halted = mustHalt;
       this.emit({ t: this.time, type: 'halt', on: mustHalt });
     }
-    if (this.walking && !this.halted) {
-      this.turtle.s = Math.min(this.length, this.turtle.s + (this.speed / this.spb) * dt);
+    const colossusV = this.walking && !this.halted ? this.speed / this.spb : 0;
+    if (colossusV > 0) {
+      this.turtle.s = Math.min(this.length, this.turtle.s + colossusV * dt);
       this.placeTurtle();
     }
     const T = this.turtle;
-    // enemies run at the colossus
+    const heading = Math.atan2(T.dz, T.dx);
+    // auras: whirls push their neighbours on; a conductor drives them on every downbeat
+    const downbeat = Math.floor(this.time / this.spb + 1e-9) % BEATS_PER_BAR === 0;
     const n = this.enemies.length;
+    const auras: Enemy[] = [];
+    for (let i = 0; i < n; i++) {
+      const e = this.enemies[i];
+      if (e.alive && e.def.aura && !e.burrowed && (e.kind !== 'conductor' || downbeat)) auras.push(e);
+    }
     for (let i = 0; i < n; i++) {
       const e = this.enemies[i];
       if (!e.alive || e.structure) continue;
@@ -487,35 +753,59 @@ export class Journey {
         const part = Math.min(dt, e.slowUntil - this.time) / dt;
         mult = part * e.slow + (1 - part);
       }
-      if (e.burrowed) mult *= 1.6;
+      if (e.stunUntil > this.time) mult = 0;
+      if (auras.length) {
+        let am = 1;
+        for (const a of auras) {
+          if (a === e || a.flying !== e.flying) continue;
+          const r = a.def.aura!.radius;
+          if (this.dist2(a, e) <= r * r) am = Math.max(am, a.def.aura!.speed);
+        }
+        mult *= am;
+      }
+      if (e.burrowed && e.def.boss) mult *= 1.6;
       let vx = T.x - e.x, vz = T.z - e.z;
       const d = Math.hypot(vx, vz) || 1;
-      if (e.kind === 'silence' && d < 11) {
-        // it looms over the colossus at arm's length and drifts back as it walks
-        mult = -((this.speed / this.spb) * 1.1) / Math.max(0.01, e.speed) * Math.min(1, (11 - d) / 1.5);
-      }
       vx /= d;
       vz /= d;
-      // keep a little apart from neighbours
-      let sx = 0, sz = 0;
-      for (let j = 0; j < n; j++) {
-        if (j === i) continue;
-        const o = this.enemies[j];
-        if (!o.alive || o.structure || o.flying !== e.flying) continue;
-        const ox = e.x - o.x, oz = e.z - o.z;
-        const dd = ox * ox + oz * oz;
-        const min = (e.def.radius + o.def.radius) * 0.9;
-        if (dd < min * min && dd > 1e-6) {
-          const l = Math.sqrt(dd);
-          sx += (ox / l) * (min - l);
-          sz += (oz / l) * (min - l);
+      let sp = e.speed * mult;
+      // guardians stalk the colossus at arm's length, circling, until they charge
+      if (e.def.boss && !e.charging) {
+        const hold = this.holdDistance(e);
+        if (d < hold + 3) {
+          const age = (this.time - e.spawnT) / this.barDur;
+          const ang = heading + e.orbit + Math.sin(age * 0.35 + e.id) * 0.7;
+          const gx = T.x + Math.cos(ang) * hold, gz = T.z + Math.sin(ang) * hold;
+          let wx = gx - e.x, wz = gz - e.z;
+          const wl = Math.hypot(wx, wz);
+          const vmax = Math.max(e.speed * mult, colossusV * 1.4);
+          if (wl > 1e-6) {
+            const v = Math.min(vmax, wl / dt);
+            wx /= wl;
+            wz /= wl;
+            vx = wx;
+            vz = wz;
+            sp = v;
+          } else sp = 0;
         }
       }
-      const sp = e.speed * mult;
-      if (e.def.boss) {
-        // bosses are not pushed around
-        sx = 0;
-        sz = 0;
+      // keep a little apart from neighbours
+      let sx = 0, sz = 0;
+      if (!e.def.boss) {
+        for (let j = 0; j < n; j++) {
+          if (j === i) continue;
+          const o = this.enemies[j];
+          if (!o.alive || o.structure || o.flying !== e.flying) continue;
+          const ox = e.x - o.x, oz = e.z - o.z;
+          const min = (e.def.radius + o.def.radius) * 0.9;
+          if (Math.abs(ox) > min || Math.abs(oz) > min) continue;
+          const dd = ox * ox + oz * oz;
+          if (dd < min * min && dd > 1e-6) {
+            const l = Math.sqrt(dd);
+            sx += (ox / l) * (min - l);
+            sz += (oz / l) * (min - l);
+          }
+        }
       }
       e.x += (vx * sp + sx * 2 + e.kx) * dt;
       e.z += (vz * sp + sz * 2 + e.kz) * dt;
@@ -540,13 +830,36 @@ export class Journey {
     }
   }
 
+  /** how far a guardian stalks from the colossus' centre */
+  private holdDistance(e: Enemy): number {
+    return e.kind === 'silence' ? 12 : 9.5 + e.def.radius * 0.5;
+  }
+
   private leak(e: Enemy, t: number) {
     e.alive = false;
     e.leaked = true;
-    const lives = e.def.lives;
+    this.anyDead = true;
+    const lives = e.lives;
     this.lives = Math.max(0, this.lives - lives);
     this.stats.leaks += lives;
     this.emit({ t, type: 'leak', enemy: e, lives });
+    // a Lava Slug's bite puts out the nearest plate for a while
+    if (e.def.disable && this.towers.length) {
+      let best: Tower | null = null;
+      let bd = Infinity;
+      for (const tw of this.towers) {
+        if (tw.disabledUntil > t) continue;
+        const d = this.dist2(tw, e);
+        if (d < bd) {
+          bd = d;
+          best = tw;
+        }
+      }
+      if (best) {
+        best.disabledUntil = t + e.def.disable * this.barDur;
+        this.emit({ t, type: 'disable', enemy: e, tower: best, until: best.disabledUntil });
+      }
+    }
     if (this.lives <= 0 && this.outcome === 'playing') {
       this.outcome = 'defeat';
       this.emit({ t, type: 'defeat' });
@@ -559,7 +872,12 @@ export class Journey {
     while (this.spawnQueue.length && this.spawnQueue[0].t <= t + 1e-9) {
       const s = this.spawnQueue.shift()!;
       const T = this.turtle;
-      this.addEnemy(s.kind, T.x + Math.cos(s.angle) * s.dist, T.z + Math.sin(s.angle) * s.dist, s.hp, s.wave, t);
+      this.addEnemy(s.kind, T.x + Math.cos(s.angle) * s.dist, T.z + Math.sin(s.angle) * s.dist, s.hp, s.wave, t, s.elite);
+    }
+    while (this.respawns.length && this.respawns[0].t <= t + 1e-9) {
+      const r = this.respawns.shift()!;
+      const e = this.addEnemy(r.kind, r.x, r.z, r.hp, r.wave, t, r.elite, true);
+      this.emit({ t, type: 'echo', enemy: e });
     }
     // towers follow the shell
     const tmp = { x: 0, z: 0 };
@@ -570,17 +888,23 @@ export class Journey {
     }
     for (const s of this.shots) if (!s.done && s.impactT <= t + 1e-9) this.resolve(s, t);
     this.shots = this.shots.filter((s) => !s.done);
+    const hymn = this.band.duets.some((d) => d.id === 'hymn');
     for (const tw of this.towers) {
       if (tw.kind !== 'choir' || tw.muted) continue;
-      const r = TOWERS.choir.levels[tw.level].range + 6;
+      const r = TOWERS.choir.levels[tw.level].range + 6 + (hymn && tw.partners.some((p) => p.id === 'hymn') ? BAND.hymnReveal : 0);
       for (const e of this.enemies) if (e.alive && this.dist2(tw, e) <= r * r) e.revealedUntil = Math.max(e.revealedUntil, t + this.stepDur * 2);
     }
     this.updateMutes(t);
+    if (this.bandDirty) this.updateBand(t);
     for (const tw of this.towers) this.towerStep(tw, k, t);
     if (this.ffDropT !== null && t >= this.ffDropT - 1e-9) this.ffDrop(t);
     if (!this.ffWasReady && this.ff >= 1 && this.ffDropT === null) {
       this.ffWasReady = true;
       this.emit({ t, type: 'ffReady' });
+    }
+    if (this.anyDead) {
+      this.anyDead = false;
+      this.enemies = this.enemies.filter((e) => e.alive);
     }
     this.checkEnd(t);
   }
@@ -589,6 +913,15 @@ export class Journey {
     if (this.startBar !== null && bar === this.startBar) this.emit({ t, type: 'start' });
     const jb = this.startBar === null ? null : bar - this.startBar;
     if (jb !== null) {
+      // movements and breathers
+      this.movements.forEach((m, k) => {
+        if (k > 0 && jb === m.bar - m.rest) this.breather(k, t);
+        if (jb === m.bar) {
+          this.movement = k;
+          this.emit({ t, type: 'movement', index: k, total: this.movements.length });
+        }
+      });
+      if (jb === 0 && this.movement < 0) this.movement = 0;
       this.waves.forEach((w, i) => {
         if (!this.warned.has(i) && jb >= w.bar - 2) {
           this.warned.add(i);
@@ -610,14 +943,22 @@ export class Journey {
         this.bossSpawned = true;
         const T = this.turtle;
         const a = Math.atan2(T.dz, T.dx);
-        this.addEnemy(this.def.boss.kind, T.x + Math.cos(a) * 34, T.z + Math.sin(a) * 34, 1, -2, t);
+        const e = this.addEnemy(this.def.boss.kind, T.x + Math.cos(a) * 34, T.z + Math.sin(a) * 34, this.def.boss.hp ?? 1, -2, t);
+        e.orbit = 0;
+      }
+      // hymn: the colossus heals a little every few bars
+      if (this.walking && jb > 0 && jb % BAND.hymnEvery === 0 && this.lives < this.maxLives && this.stats.heals < BAND.hymnCap && this.band.duets.some((d) => d.id === 'hymn')) {
+        this.lives++;
+        this.stats.heals++;
+        this.emit({ t, type: 'heartHeal', lives: this.lives });
       }
     }
     // economy (only once the journey is under way)
     if (this.walking && this.outcome === 'playing') {
       for (const tw of this.towers) {
         if (tw.kind !== 'shaker' || tw.muted) continue;
-        const inc = TOWERS.shaker.levels[tw.level].income ?? 0;
+        let inc = TOWERS.shaker.levels[tw.level].income ?? 0;
+        if (tw.partners.some((p) => p.id === 'groove')) inc = Math.round(inc * BAND.grooveIncome);
         this.coins += inc;
         this.stats.earned += inc;
         this.emit({ t, type: 'income', tower: tw, amount: inc });
@@ -635,7 +976,31 @@ export class Journey {
       }
       if (targets.length) this.emit({ t, type: 'heal', enemy: e, targets });
     }
+    // burrowers dive one bar out of every few
+    for (const e of this.enemies) {
+      if (!e.alive || !e.def.burrow || e.def.boss) continue;
+      const age = bar - Math.floor(e.spawnT / this.barDur + 1e-9);
+      if (age < 1) continue;
+      const b = e.def.burrow;
+      const want = (age + e.id) % b.every >= b.every - b.for;
+      if (want !== e.burrowed) {
+        e.burrowed = want;
+        this.emit({ t, type: 'burrow', enemy: e, on: want });
+      }
+    }
     for (const e of this.enemies) if (e.alive && e.def.boss) this.bossBar(e, t);
+  }
+
+  /** a breather begins: calm before movement k, and one more plate of the shell lights up */
+  private breather(k: number, t: number) {
+    const m = this.movements[k];
+    this.movement = k;
+    this.emit({ t, type: 'breather', index: k, bars: m.rest });
+    const n = m.plates ?? 1;
+    for (let i = 0; i < n && this.slotsOpen < this.slotsMax; i++) {
+      const slot = this.slotsOpen++;
+      this.emit({ t, type: 'plate', slot, open: this.slotsOpen, max: this.slotsMax });
+    }
   }
 
   private startWave(i: number, t: number) {
@@ -649,33 +1014,112 @@ export class Journey {
         const st = t + ((g.at ?? 0) + k * g.every) * this.spb;
         const q = Math.round(st / this.stepDur) * this.stepDur;
         const ang = base + (this.rng.next() - 0.5) * spread;
-        this.spawnQueue.push({ t: q, kind: g.kind, angle: ang, dist: g.dist ?? 34, hp: g.hp ?? 1, wave: i });
+        this.spawnQueue.push({ t: q, kind: g.kind, angle: ang, dist: g.dist ?? (ENEMIES[g.kind].flying ? 37 : 34), hp: g.hp ?? 1, wave: i, elite: !!g.elite });
       }
     });
     this.spawnQueue.sort((a, b) => a.t - b.t);
     this.emit({ t, type: 'waveStart', index: i, total: this.waves.length });
   }
 
-  private addEnemy(kind: EnemyKind, x: number, z: number, hpMul: number, wave: number, t: number): Enemy {
+  private addEnemy(kind: EnemyKind, x: number, z: number, hpMul: number, wave: number, t: number, elite = false, echoed = false): Enemy {
     const def = ENEMIES[kind];
     const hp = def.hp * hpMul * this.hpScale;
     const e: Enemy = {
-      id: this.nextId++, kind, def, hp, maxHp: hp, shield: (def.shield ?? 0) * this.hpScale, maxShield: (def.shield ?? 0) * this.hpScale,
-      armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? 1.08 : 1), flying: def.flying, slow: 1, slowUntil: 0,
+      id: this.nextId++, kind, def, hp, maxHp: hp, shield: (def.shield ?? 0) * this.hpScale * (elite ? 2 : 1), maxShield: (def.shield ?? 0) * this.hpScale * (elite ? 2 : 1),
+      armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? 1.08 : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
       revealedUntil: 0, alive: true, leaked: false, spawnT: t, burrowed: false, invulnUntil: 0, phase: 0, hitT: -1, wave,
-      structure: kind === 'obelisk', kx: 0, kz: 0,
+      structure: kind === 'obelisk', kx: 0, kz: 0, lives: def.lives + (elite ? 1 : 0), bounty: Math.round(def.bounty * (elite ? 3 : echoed ? 0.5 : 1)),
+      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1,
     };
+    if (def.boss) {
+      const T = this.turtle;
+      e.orbit = Math.atan2(z - T.z, x - T.x) - Math.atan2(T.dz, T.dx);
+    }
     this.enemies.push(e);
     this.emit({ t, type: 'spawn', enemy: e });
+    if (def.mimic) this.copyInstrument(e, t);
     return e;
   }
 
-  // ───────────────────────────── towers ─────────────────────────────
+  /** The Mimic copies the most common instrument on the shell (not one another Mimic already took). */
+  private copyInstrument(e: Enemy, t: number) {
+    const kind = this.mostCommon(new Set(this.enemies.filter((o) => o.alive && o !== e && o.mimicKind).map((o) => o.mimicKind!)));
+    e.mimicKind = kind;
+    this.emit({ t, type: 'mimic', enemy: e, kind, towers: kind ? this.towers.filter((tw) => tw.kind === kind).map((tw) => tw.id) : [] });
+    this.updateMutes(t);
+  }
 
+  /** most common instrument on the shell (ties: more levels, then the catalogue order) */
+  private mostCommon(exclude: Set<TowerKind>): TowerKind | null {
+    let best: TowerKind | null = null;
+    let bn = 0, bl = 0;
+    for (const k of TOWER_KINDS) {
+      if (exclude.has(k)) continue;
+      let n = 0, l = 0;
+      for (const tw of this.towers) if (tw.kind === k) {
+        n++;
+        l += tw.level;
+      }
+      if (n > bn || (n === bn && n > 0 && l > bl)) {
+        best = k;
+        bn = n;
+        bl = l;
+      }
+    }
+    return best;
+  }
+
+  // ───────────────────────────── the band ─────────────────────────────
+
+  /** Sections, harmony and duets of the playing towers; emits what changed. */
+  private updateBand(t: number) {
+    this.bandDirty = false;
+    const sections = emptySections();
+    for (const tw of this.towers) if (!tw.muted) sections[SECTION_OF[tw.kind]]++;
+    const distinct = SECTIONS.filter((s) => sections[s] > 0).length;
+    const harmony = Math.max(0, distinct - 1);
+    const duets: { id: DuetId; a: number; b: number }[] = [];
+    for (const tw of this.towers) tw.partners = [];
+    for (let i = 0; i < this.towers.length; i++) {
+      const p = this.towers[i];
+      if (p.muted) continue;
+      for (let j = i + 1; j < this.towers.length; j++) {
+        const q = this.towers[j];
+        if (q.muted || !slotsAdjacent(p.slot, q.slot)) continue;
+        const d = duetOf(p.kind, q.kind);
+        if (!d) continue;
+        const [x, y] = p.kind === d.a ? [p, q] : [q, p];
+        duets.push({ id: d.id, a: x.id, b: y.id });
+        p.partners.push({ id: d.id, tower: q });
+        q.partners.push({ id: d.id, tower: p });
+      }
+    }
+    const prev = this.band;
+    const key = (d: { id: DuetId; a: number; b: number }) => `${d.id}:${d.a}:${d.b}`;
+    const before = new Set(prev.duets.map(key));
+    const after = new Set(duets.map(key));
+    let changed = harmony !== prev.harmony || SECTIONS.some((s) => sections[s] !== prev.sections[s]);
+    for (const d of prev.duets) if (!after.has(key(d))) {
+      changed = true;
+      this.emit({ t, type: 'duet', id: d.id, a: d.a, b: d.b, formed: false });
+    }
+    for (const d of duets) if (!before.has(key(d))) {
+      changed = true;
+      this.stats.duets++;
+      this.emit({ t, type: 'duet', id: d.id, a: d.a, b: d.b, formed: true });
+    }
+    this.band = { sections, harmony, duets };
+    this.harmonyMul = 1 + BAND.harmonyStep * harmony;
+    this.stats.harmonyPeak = Math.max(this.stats.harmonyPeak, harmony);
+    this.recomputeBuffs();
+    if (changed) this.emit({ t, type: 'band', band: { sections: { ...sections }, harmony, duets: duets.slice() } });
+  }
+
+  /** the choir lifts the towers around it (only while it sings) */
   private recomputeBuffs() {
     for (const tw of this.towers) tw.buff = 1;
     for (const c of this.towers) {
-      if (c.kind !== 'choir') continue;
+      if (c.kind !== 'choir' || c.muted) continue;
       const L = TOWERS.choir.levels[c.level];
       const a = SLOTS[c.slot];
       for (const tw of this.towers) {
@@ -688,23 +1132,37 @@ export class Journey {
 
   private updateMutes(t: number) {
     const mutes = this.enemies.filter((e) => e.alive && e.def.mute && !e.burrowed);
+    const copied = new Set<TowerKind>();
+    for (const e of this.enemies) if (e.alive && e.mimicKind) copied.add(e.mimicKind);
+    if (this.stolen && this.stolen.until > t) copied.add(this.stolen.kind);
     for (const tw of this.towers) {
-      let m = tw.frozenUntil > t;
-      if (!m) {
+      let cause: MuteCause | null = null;
+      if (tw.disabledUntil > t) cause = 'disable';
+      else if (copied.has(tw.kind)) cause = 'mimic';
+      else if (tw.frozenUntil > t) cause = 'freeze';
+      else {
         for (const e of mutes) {
           const r = e.def.mute!;
           if (this.dist2(tw, e) <= r * r) {
-            m = true;
+            cause = 'mute';
             break;
           }
         }
       }
-      if (m !== tw.muted) {
+      const m = cause !== null;
+      if (m !== tw.muted || cause !== tw.muteCause) {
+        const was = tw.muted;
         tw.muted = m;
-        this.emit({ t, type: 'muted', tower: tw, muted: m });
+        tw.muteCause = cause;
+        if (was !== m) {
+          this.bandDirty = true;
+          this.emit({ t, type: 'muted', tower: tw, muted: m, cause });
+        }
       }
     }
   }
+
+  // ───────────────────────────── towers ─────────────────────────────
 
   private rangeOf(tw: Tower): number {
     // the high plates see a little farther
@@ -720,14 +1178,19 @@ export class Journey {
     return this.dist2(tw, e) <= r * r;
   }
 
-  /** The most dangerous: closest to the shell. Structures only when nothing else is in range. */
-  private pickTarget(tw: Tower, t: number, range: number): Enemy | null {
+  /** single-target shots pass straight through a Whirl */
+  private deflects(kind: TowerKind, e: Enemy): boolean {
+    return !!e.def.deflect && (kind === 'harp' || kind === 'horn');
+  }
+
+  /** The most dangerous: closest to the shell. Structures (and what it cannot hurt) only when nothing else is in range. */
+  private pickTarget(tw: Tower, t: number, range: number, skip = -1): Enemy | null {
     let best: Enemy | null = null;
     let bestScore = Infinity;
     const T = this.turtle;
     for (const e of this.enemies) {
-      if (!this.targetable(tw, e, t, range)) continue;
-      const score = Math.hypot(T.x - e.x, T.z - e.z) + (e.structure ? 1000 : 0);
+      if (e.id === skip || !this.targetable(tw, e, t, range)) continue;
+      const score = Math.hypot(T.x - e.x, T.z - e.z) + (e.structure ? 1000 : 0) + (this.deflects(tw.kind, e) ? 500 : 0);
       if (score < bestScore) {
         bestScore = score;
         best = e;
@@ -736,14 +1199,22 @@ export class Journey {
     return best;
   }
 
+  private hasDuet(tw: Tower, id: DuetId): boolean {
+    for (const p of tw.partners) if (p.id === id && !p.tower.muted) return true;
+    return false;
+  }
+
+  private towerMul(tw: Tower, t: number): number {
+    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1);
+  }
+
   private towerStep(tw: Tower, k: number, t: number) {
     const def = TOWERS[tw.kind];
     const L = def.levels[tw.level];
     if (L.pattern[k % L.pattern.length] !== 'x') return;
     if (tw.muted) return;
-    const boost = t < this.ffBoostUntil ? 1.6 : 1;
-    const dmg = L.damage * tw.buff * boost;
-    const range = this.rangeOf(tw);
+    const dmg = L.damage * this.towerMul(tw, t);
+    let range = this.rangeOf(tw);
     switch (tw.kind) {
       case 'shaker':
         if (this.walking && this.aliveCount() + this.spawnQueue.length > 0) this.emit({ t, type: 'pulse', tower: tw, hits: [] });
@@ -752,6 +1223,8 @@ export class Journey {
         if (this.aliveCount() > 0) this.emit({ t, type: 'pulse', tower: tw, hits: [] });
         return;
       case 'bell': {
+        const hymn = this.hasDuet(tw, 'hymn');
+        if (hymn) range += 1.5;
         const hits: number[] = [];
         for (const e of this.enemies) {
           if (!e.alive || e.burrowed || e.structure) continue;
@@ -760,23 +1233,45 @@ export class Journey {
           hits.push(e.id);
         }
         if (!hits.length) return;
+        const beats = (L.slowBeats ?? 4) * (hymn ? 1.5 : 1);
         for (const id of hits) {
           const e = this.enemyById(id)!;
-          e.revealedUntil = Math.max(e.revealedUntil, t + (L.slowBeats ?? 4) * this.spb);
-          if (!e.def.boss || e.kind === 'bossBlot') {
+          e.revealedUntil = Math.max(e.revealedUntil, t + beats * this.spb);
+          if ((!e.def.boss || e.kind === 'bossBlot') && !e.def.steady) {
             const s = e.def.boss ? Math.min(0.85, (L.slow ?? 1) + 0.25) : L.slow ?? 1;
             e.slow = Math.min(e.slowUntil > t ? e.slow : 1, s);
-            e.slowUntil = Math.max(e.slowUntil, t + (L.slowBeats ?? 4) * this.spb);
+            e.slowUntil = Math.max(e.slowUntil, t + beats * this.spb);
           }
-          this.damage(e, dmg, 'bell', tw, t);
+          // bells ringing together sound as one: a creature takes one bell's toll per step
+          if (e.bellStep !== k) {
+            e.bellStep = k;
+            this.damage(e, dmg, 'bell', tw, t);
+          }
         }
         tw.shots++;
         this.emit({ t, type: 'pulse', tower: tw, hits });
         return;
       }
     }
+    if (!this.shoot(tw, t, dmg, range)) return;
+    // march: the drum's partners pluck along with every hit
+    if (tw.kind === 'drum') {
+      for (const p of tw.partners) {
+        if (p.id !== 'march' || p.tower.muted) continue;
+        const h = p.tower;
+        const HL = TOWERS.harp.levels[h.level];
+        for (let i = 0; i < BAND.marchShots; i++) this.shoot(h, t, HL.damage * this.towerMul(h, t), this.rangeOf(h), 'march');
+      }
+    }
+  }
+
+  /** a tower fires one shot at its best target (false: nothing to shoot at) */
+  private shoot(tw: Tower, t: number, dmg: number, range: number, duet?: DuetId): boolean {
+    const L = TOWERS[tw.kind].levels[tw.level];
     const target = this.pickTarget(tw, t, range);
-    if (!target) return;
+    if (!target) return false;
+    if (tw.kind === 'harp' && this.hasDuet(tw, 'serenade')) dmg *= BAND.serenadeDamage;
+    if (tw.kind === 'horn' && this.hasDuet(tw, 'fanfare')) dmg *= BAND.fanfareDamage;
     tw.aim = Math.atan2(target.z - tw.z, target.x - tw.x);
     tw.shots++;
     const flight = L.flight;
@@ -784,21 +1279,22 @@ export class Journey {
     const leadT = flight * this.stepDur;
     const T = this.turtle;
     let lx = target.x, lz = target.z;
-    if (!target.structure) {
+    if (!target.structure && !target.def.boss) {
       const dx = T.x - target.x, dz = T.z - target.z;
       const dl = Math.hypot(dx, dz) || 1;
-      const sp = target.speed * (target.slowUntil > t ? target.slow : 1);
+      const sp = target.stunUntil > t ? 0 : target.speed * (target.slowUntil > t ? target.slow : 1);
       lx += (dx / dl) * sp * leadT;
       lz += (dz / dl) * sp * leadT;
     }
     const shot: Shot = {
       id: this.nextId++, tower: tw, kind: tw.kind, level: tw.level, targetId: target.id,
       tx: lx, tz: lz, launchT: t, impactT: t + flight * this.stepDur, damage: dmg,
-      dirx: Math.cos(tw.aim), dirz: Math.sin(tw.aim), hits: [], done: false,
+      dirx: Math.cos(tw.aim), dirz: Math.sin(tw.aim), hits: [], done: false, duet,
     };
     this.shots.push(shot);
     this.emit({ t, type: 'fire', shot });
     if (flight === 0) this.resolve(shot, t);
+    return true;
   }
 
   private resolve(s: Shot, t: number) {
@@ -815,7 +1311,7 @@ export class Journey {
       for (const e of this.enemies) {
         if (!e.alive || e.burrowed) continue;
         const d = (e.x - s.tx) ** 2 + (e.z - s.tz) ** 2;
-        if (d < bd && (s.kind === 'drum' || this.targetable(tw, e, t, 999))) {
+        if (d < bd && (s.kind === 'drum' || (this.targetable(tw, e, t, 999) && !this.deflects(s.kind, e)))) {
           bd = d;
           target = e;
         }
@@ -826,15 +1322,55 @@ export class Journey {
       }
     }
     switch (s.kind) {
-      case 'harp':
-      case 'bass':
-        if (target && (s.kind !== 'bass' || !target.flying)) {
-          this.damage(target, s.damage, TOWERS[s.kind].damageType, tw, t);
-          s.hits.push(target.id);
+      case 'harp': {
+        if (!target) break;
+        if (this.deflects('harp', target)) {
+          this.emit({ t, type: 'deflect', enemy: target, shot: s });
+          break;
+        }
+        this.damage(target, s.damage, 'pluck', tw, t);
+        s.hits.push(target.id);
+        // serenade: the note rings as a chord on what stands next to it
+        if (this.hasDuet(tw, 'serenade')) {
+          const rr = BAND.serenadeRadius;
+          for (const e of this.enemies) {
+            if (e === target || !e.alive || e.burrowed || e.structure || this.deflects('harp', e) || !this.targetable(tw, e, t, 999)) continue;
+            if ((e.x - s.tx) ** 2 + (e.z - s.tz) ** 2 <= rr * rr) {
+              this.damage(e, s.damage * BAND.serenadeSplash, 'pluck', tw, t);
+              s.hits.push(e.id);
+            }
+          }
         }
         break;
+      }
+      case 'bass': {
+        if (!target || target.flying) break;
+        this.damage(target, s.damage, 'bass', tw, t);
+        s.hits.push(target.id);
+        if (this.hasDuet(tw, 'groundwork')) {
+          const hits: number[] = [];
+          const rr = BAND.stumbleBassArea;
+          for (const e of this.enemies) {
+            if (!e.alive || e.flying || e.burrowed || e.structure) continue;
+            if ((e.x - s.tx) ** 2 + (e.z - s.tz) ** 2 <= rr * rr && this.stumble(e, BAND.stumbleBassBeats, t)) hits.push(e.id);
+          }
+          if (hits.length) this.emit({ t, type: 'stumble', tower: tw, hits });
+        }
+        // thunder: the crystal partner answers every drop with a chain
+        for (const p of tw.partners) {
+          if (p.id !== 'thunder' || p.tower.muted) continue;
+          const c = p.tower;
+          const CL = TOWERS.crystal.levels[c.level];
+          const start = target.alive ? target : this.nearestAlive(s.tx, s.tz, 4, c, t);
+          if (start) this.chain(c, start, CL.damage * BAND.thunderDamage * this.towerMul(c, t), CL.chain ?? 3, 5, null, t, s.hits);
+          break;
+        }
+        break;
+      }
       case 'drum': {
         const r = L.area ?? 2.5;
+        const ground = this.hasDuet(tw, 'groundwork');
+        const stumbled: number[] = [];
         for (const e of this.enemies) {
           if (!e.alive || e.flying || e.burrowed) continue;
           const d2 = (e.x - s.tx) ** 2 + (e.z - s.tz) ** 2;
@@ -843,48 +1379,34 @@ export class Journey {
             const fall = 1 - (0.35 * Math.sqrt(d2)) / (rr + 0.01);
             this.damage(e, s.damage * fall, 'blast', tw, t);
             s.hits.push(e.id);
+            if (ground && e.alive && !e.structure && this.stumble(e, BAND.stumbleBeats, t)) stumbled.push(e.id);
           }
         }
+        if (stumbled.length) this.emit({ t, type: 'stumble', tower: tw, hits: stumbled });
         break;
       }
       case 'crystal': {
         if (!target) break;
-        const n = L.chain ?? 3;
-        let cur: Enemy = target;
-        let dmg = s.damage;
-        const hit = new Set<number>();
-        for (let i = 0; i < n; i++) {
-          hit.add(cur.id);
-          s.hits.push(cur.id);
-          this.damage(cur, dmg, 'arc', tw, t);
-          dmg *= 0.82;
-          let next: Enemy | null = null;
-          let bd = 5 * 5;
-          for (const e of this.enemies) {
-            if (!e.alive || hit.has(e.id) || e.burrowed) continue;
-            if (e.def.camo && e.revealedUntil < t) continue;
-            const d2 = (e.x - cur.x) ** 2 + (e.z - cur.z) ** 2;
-            if (d2 < bd) {
-              bd = d2;
-              next = e;
-            }
-          }
-          if (!next) break;
-          cur = next;
-        }
+        const shimmer = this.hasDuet(tw, 'shimmer');
+        const n = (L.chain ?? 3) + (shimmer ? BAND.shimmerExtraChain : 0);
+        this.chain(tw, target, s.damage, n, shimmer ? BAND.shimmerJump : 5, shimmer ? { slow: BAND.shimmerSlow, beats: BAND.shimmerSlowBeats } : null, t, s.hits);
         break;
       }
       case 'horn': {
         const len = this.rangeOf(tw) + 1;
-        const w = L.area ?? 1.4;
+        const w = (L.area ?? 1.4) + (this.hasDuet(tw, 'fanfare') ? BAND.fanfareWidth : 0);
         for (const e of this.enemies) {
-          if (!e.alive || e.burrowed) continue;
+          if (!e.alive || e.burrowed || e.flying) continue;
           if (e.def.camo && e.revealedUntil < t) continue;
           const rx = e.x - tw.x, rz = e.z - tw.z;
           const along = rx * s.dirx + rz * s.dirz;
           if (along < 0 || along > len) continue;
           const across = Math.abs(rx * s.dirz - rz * s.dirx);
           if (across <= w + e.def.radius * 0.5) {
+            if (this.deflects('horn', e)) {
+              this.emit({ t, type: 'deflect', enemy: e, shot: s });
+              continue;
+            }
             this.damage(e, s.damage, 'sonic', tw, t);
             s.hits.push(e.id);
           }
@@ -893,6 +1415,59 @@ export class Journey {
       }
     }
     this.emit({ t, type: 'impact', shot: s, hit: s.hits.length > 0 });
+  }
+
+  private nearestAlive(x: number, z: number, r: number, tw: Tower, t: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bd = r * r;
+    for (const e of this.enemies) {
+      if (!e.alive || e.burrowed || !this.targetable(tw, e, t, 999)) continue;
+      const d = (e.x - x) ** 2 + (e.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  /** a crystal arc jumping from one creature to the next */
+  private chain(tw: Tower, first: Enemy, damage: number, n: number, jump: number, chill: { slow: number; beats: number } | null, t: number, hits: number[]) {
+    let cur: Enemy = first;
+    let dmg = damage;
+    const hit = new Set<number>();
+    for (let i = 0; i < n; i++) {
+      hit.add(cur.id);
+      hits.push(cur.id);
+      if (chill && !cur.def.steady && !cur.def.boss) {
+        cur.slow = Math.min(cur.slowUntil > t ? cur.slow : 1, chill.slow);
+        cur.slowUntil = Math.max(cur.slowUntil, t + chill.beats * this.spb);
+      }
+      this.damage(cur, dmg, 'arc', tw, t);
+      dmg *= 0.75;
+      let next: Enemy | null = null;
+      let bd = jump * jump;
+      for (const e of this.enemies) {
+        if (!e.alive || hit.has(e.id) || e.burrowed) continue;
+        if (e.def.camo && e.revealedUntil < t) continue;
+        const d2 = (e.x - cur.x) ** 2 + (e.z - cur.z) ** 2;
+        if (d2 < bd) {
+          bd = d2;
+          next = e;
+        }
+      }
+      if (!next) break;
+      cur = next;
+    }
+  }
+
+  /** groundwork: a creature trips and stops for a moment (false: it does not) */
+  private stumble(e: Enemy, beats: number, t: number): boolean {
+    if (e.def.steady || e.flying) return false;
+    const dur = beats * this.spb * (e.def.boss ? 0.25 : 1);
+    if (e.stunUntil > t + dur * 0.5) return false;
+    e.stunUntil = Math.max(e.stunUntil, t + dur);
+    return true;
   }
 
   private findShield(e: Enemy): Enemy | null {
@@ -932,7 +1507,8 @@ export class Journey {
   private kill(e: Enemy, t: number, tw: Tower | null) {
     if (!e.alive) return;
     e.alive = false;
-    const bounty = e.def.bounty;
+    this.anyDead = true;
+    const bounty = e.bounty;
     this.coins += bounty;
     this.stats.earned += bounty;
     if (!e.structure) this.stats.kills++;
@@ -941,8 +1517,13 @@ export class Journey {
     if (e.def.split) {
       for (let i = 0; i < e.def.split.count; i++) {
         const a = (i / e.def.split.count) * Math.PI * 2;
-        this.addEnemy(e.def.split.kind, e.x + Math.cos(a) * 0.9, e.z + Math.sin(a) * 0.9, 1, -1, t);
+        this.addEnemy(e.def.split.kind, e.x + Math.cos(a) * 0.9, e.z + Math.sin(a) * 0.9, 1, e.wave, t);
       }
+    }
+    // an Echo comes back once, weaker, one bar later
+    if (e.def.echo && !e.echoed) {
+      this.respawns.push({ t: t + this.barDur, kind: e.kind, x: e.x, z: e.z, hp: e.def.echo * (e.maxHp / (e.def.hp * this.hpScale)), wave: e.wave, elite: e.elite });
+      this.respawns.sort((a, b) => a.t - b.t);
     }
     if (e.kind === 'silence') {
       for (const o of this.enemies) if (o.alive) {
@@ -950,6 +1531,7 @@ export class Journey {
         this.emit({ t, type: 'death', enemy: o, bounty: 0 });
       }
       this.spawnQueue.length = 0;
+      this.respawns.length = 0;
     }
   }
 
@@ -961,29 +1543,45 @@ export class Journey {
     for (const e of this.enemies) {
       if (!e.alive || e.burrowed) continue;
       const d = Math.hypot(e.x - T.x, e.z - T.z);
-      if (d > 19) continue;
+      if (d > 18) continue;
       hits.push(e.id);
-      const dmg = e.def.boss ? 250 + e.maxHp * 0.06 : 120 + e.maxHp * 0.25;
+      const dmg = e.def.boss ? 200 + e.maxHp * 0.04 : 70 + e.maxHp * 0.18;
       if (!e.def.boss && !e.structure) {
         const k = 9 * (1 - d / 22);
         e.kx += ((e.x - T.x) / (d || 1)) * k;
         e.kz += ((e.z - T.z) / (d || 1)) * k;
-        e.slow = 0.5;
-        e.slowUntil = Math.max(e.slowUntil, t + this.barDur);
+        if (!e.def.steady) {
+          e.slow = 0.5;
+          e.slowUntil = Math.max(e.slowUntil, t + this.barDur);
+        }
       }
       this.damage(e, dmg, 'bass', null, t);
     }
     this.emit({ t, type: 'ffDrop', hits });
   }
 
-  // ───────────────────────────── bosses ─────────────────────────────
+  // ───────────────────────────── guardians ─────────────────────────────
+
+  private summon(e: Enemy, kind: EnemyKind, n: number, t: number, hp = 1, spread = 1.4) {
+    for (let i = 0; i < n; i++) {
+      const a = e.orbit + Math.atan2(this.turtle.dz, this.turtle.dx) + Math.PI + (i - (n - 1) / 2) * 0.5;
+      // they come out of the guardian, on the colossus' side
+      const r = e.def.radius + 0.6;
+      this.addEnemy(kind, e.x + Math.cos(a) * r + (i - (n - 1) / 2) * spread * 0.3, e.z + Math.sin(a) * r, hp, -1, t);
+    }
+  }
 
   private bossBar(e: Enemy, t: number) {
     const age = Math.round((t - e.spawnT) / this.barDur);
+    // stalking ends when the colossus stops at the end of the road (or the guardian tires of waiting)
+    if (!e.charging && (this.halted || age >= 48)) {
+      e.charging = true;
+      this.emit({ t, type: 'boss', enemy: e, action: 'charge' });
+    }
     switch (e.kind) {
       case 'bossBlot':
         if (age > 0 && age % 2 === 0) {
-          for (let i = 0; i < 3; i++) this.addEnemy('blotling', e.x + (i - 1) * 1.2, e.z + 1.5, 1, -1, t);
+          this.summon(e, 'blotling', e.phase >= 2 ? 5 : 3, t);
           this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
         }
         break;
@@ -991,25 +1589,37 @@ export class Journey {
         if (e.burrowed) {
           e.burrowed = false;
           this.emit({ t, type: 'boss', enemy: e, action: 'emerge' });
-        } else if (age > 0 && age % 4 === 0) {
+        } else if (age > 0 && age % 4 === 0 && !e.charging) {
           e.burrowed = true;
           this.emit({ t, type: 'boss', enemy: e, action: 'burrow' });
+        } else if (age > 0 && age % 4 === 2) {
+          this.summon(e, e.phase >= 1 ? 'scorpion' : 'echo', 2, t, 0.8);
+          this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
         }
         break;
       case 'bossMoth':
         if (age > 0 && age % 4 === 2) {
           const near = this.towers
-            .filter((tw) => this.dist2(tw, e) <= 16 * 16)
+            .filter((tw) => this.dist2(tw, e) <= 18 * 18 && tw.frozenUntil <= t)
             .sort((a, b) => this.dist2(a, e) - this.dist2(b, e))
-            .slice(0, 2);
+            .slice(0, e.phase >= 2 ? 3 : 2);
           for (const tw of near) tw.frozenUntil = t + this.barDur * 2;
           if (near.length) this.emit({ t, type: 'boss', enemy: e, action: 'freeze', towers: near.map((x) => x.id) });
+        } else if (age > 0 && age % 3 === 0) {
+          this.summon(e, 'moth', e.phase >= 1 ? 4 : 3, t);
+          this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
+        }
+        break;
+      case 'bossGolem':
+        if (age > 0 && age % 3 === 0) {
+          this.summon(e, 'ember', 4 + e.phase, t);
+          this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
         }
         break;
       case 'silence':
         if (age > 0 && age % 4 === 0) {
-          for (let i = 0; i < 4; i++) this.addEnemy('phantom', e.x + (i - 1.5) * 2, e.z + 2, 1.3, -1, t);
-          for (let i = 0; i < 2; i++) this.addEnemy('moth', e.x + (i - 0.5) * 3, e.z - 2, 1.5, -1, t);
+          this.summon(e, 'phantom', 4, t, 1.3, 2);
+          this.summon(e, 'moth', 2, t, 1.5, 3);
           this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
         }
         break;
@@ -1024,8 +1634,14 @@ export class Journey {
         e.phase = plates;
         e.armor = [0.55, 0.4, 0.25, 0.1][plates];
         this.emit({ t, type: 'boss', enemy: e, action: 'plates' });
-        if (plates === 2) for (let i = 0; i < 3; i++) this.addEnemy('scurry', e.x + (i - 1) * 1.5, e.z, 1.2, -1, t);
+        if (plates === 1) this.summon(e, 'shield', 2, t, 1.2);
+        if (plates === 2) {
+          this.summon(e, 'mender', 1, t, 1.2);
+          this.summon(e, 'shield', 2, t, 1.2);
+        }
+        if (plates === 3) this.summon(e, 'slug', 1, t, 0.8);
       }
+      return;
     }
     if (e.kind === 'silence') {
       const phase = f > 0.66 ? 0 : f > 0.33 ? 1 : 2;
@@ -1037,16 +1653,37 @@ export class Journey {
           tw.frozenUntil = Math.max(tw.frozenUntil, t + this.barDur);
           hit.push(tw.id);
         }
+        // it steals the band's most common instrument for a while
+        const kind = this.mostCommon(new Set());
+        if (kind) this.stolen = { kind, until: t + this.barDur * 6 };
         this.emit({ t, type: 'boss', enemy: e, action: 'phase', towers: hit });
-        const kinds: EnemyKind[] = phase === 1 ? ['muffler', 'shield', 'shield'] : ['muffler', 'mender', 'shell', 'shell'];
+        // and calls its court from both flanks (kind, side)
+        const court: [EnemyKind, number][] = phase === 1
+          ? [['muffler', -1], ['muffler', 1], ['mimic', -1]]
+          : [['knight', -1], ['knight', 1], ['conductor', 1], ['mimic', -1]];
         const T = this.turtle;
         const heading = Math.atan2(T.dz, T.dx);
-        kinds.forEach((k, i) => {
-          for (const side of [-1, 1]) {
-            this.spawnQueue.push({ t: t + (i + 1) * this.spb * 2, kind: k, angle: heading + side * 1.6, dist: 30, hp: 1.3, wave: -1 });
-          }
+        court.forEach(([k, side], i) => {
+          this.spawnQueue.push({ t: t + (i + 1) * this.spb * 2, kind: k, angle: heading + side * 1.6, dist: 30, hp: 1.1, wave: -1, elite: false });
         });
         this.spawnQueue.sort((a, b) => a.t - b.t);
+        this.updateMutes(t);
+      }
+      return;
+    }
+    // the other guardians: a turn at two thirds and at one third of their song
+    const phase = f > 0.66 ? 0 : f > 0.33 ? 1 : 2;
+    if (phase > e.phase && e.hp > 0) {
+      e.phase = phase;
+      this.emit({ t, type: 'boss', enemy: e, action: 'phase' });
+      if (e.kind === 'bossBlot') {
+        if (phase === 1) this.summon(e, 'bubble', 2, t, 1, 3);
+        else this.summon(e, 'scurry', 6, t, 1, 2);
+      } else if (e.kind === 'bossScarab') {
+        this.summon(e, 'whirl', 2, t, 1, 3);
+        this.summon(e, 'scorpion', phase, t, 1, 3);
+      } else if (e.kind === 'bossMoth') {
+        this.summon(e, 'phantom', 3 + phase, t, 1, 3);
       }
     }
   }
@@ -1064,6 +1701,7 @@ export class Journey {
       }
     }
     this.spawnQueue.length = 0;
+    this.respawns.length = 0;
     this.outcome = 'victory';
     this.emit({ t, type: 'victory' });
   }
@@ -1074,6 +1712,14 @@ export class Journey {
     if (lost <= Math.floor(this.maxLives * 0.1)) return 3;
     if (lost <= Math.floor(this.maxLives * 0.5)) return 2;
     return 1;
+  }
+
+  /** A short fingerprint of the state (tests: replays must match the live journey exactly). */
+  fingerprint(): string {
+    const r = (v: number) => Math.round(v * 1e6) / 1e6;
+    const en = this.enemies.filter((e) => e.alive).map((e) => `${e.id}:${e.kind}:${r(e.x)},${r(e.z)}:${r(e.hp)}`).join('|');
+    const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}`).join('|');
+    return `t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
   }
 
   private dist2(a: { x: number; z: number }, b: { x: number; z: number }) {

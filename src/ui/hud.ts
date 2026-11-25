@@ -1,6 +1,7 @@
 /** Battle HUD: lives, notes (coins), waves, the FORTÍSSIMO button, wave calls, radial menus, cards. */
 import { ENEMIES, TOWERS, type EnemyKind, type TowerKind } from '../sim/defs';
 import { ICON, TOWER_ICON, enemyIcon } from './icons';
+import './harmony.css';
 
 const h = (html: string) => {
   const t = document.createElement('template');
@@ -13,6 +14,8 @@ export interface BuildOption {
   cost: number;
   affordable: boolean;
   isNew: boolean;
+  /** colours of the duets it would form with the chosen plate's neighbours (sparkles) */
+  duets?: string[];
 }
 
 export class Hud {
@@ -30,6 +33,8 @@ export class Hud {
   private bannerEl: HTMLElement;
   private handEl: HTMLElement;
   private countEl: HTMLElement;
+  private harmonyEl: HTMLElement;
+  private lastHarmony = -1;
   private lastCoins = -1;
   private lastLives = -1;
   radialOpen = false;
@@ -45,6 +50,7 @@ export class Hud {
         <div class="stat lives"><i>${ICON.heart}</i><b>20</b></div>
         <div class="stat coins"><i>${ICON.coin}</i><b>0</b></div>
         <div class="stat wave"><i>${ICON.wave}</i><div class="wave-pips"></div></div>
+        <div class="stat harmony"><div class="lights"><span></span><span></span><span></span><span></span><span></span></div></div>
       </div>
       <div class="hud-tr"><button class="round-btn pause" aria-label="pause">${ICON.pause}</button></div>
       <div id="floats"></div>
@@ -72,6 +78,7 @@ export class Hud {
     this.bannerEl = $('#banner');
     this.handEl = $('#hand');
     this.countEl = $('#countin');
+    this.harmonyEl = $('.stat.harmony');
     $('.pause').addEventListener('click', (e) => {
       e.stopPropagation();
       this.onPause();
@@ -149,19 +156,64 @@ export class Hud {
     this.ff.classList.toggle('live', live);
   }
 
+  // ───────── the band ─────────
+
+  /** harmony 0…5 as five little lights; they glow for a moment when it rises */
+  setHarmony(h: number) {
+    if (h === this.lastHarmony) return;
+    const rose = this.lastHarmony >= 0 && h > this.lastHarmony;
+    this.lastHarmony = h;
+    [...this.harmonyEl.querySelectorAll('.lights span')].forEach((s, i) => s.classList.toggle('on', i < h));
+    this.harmonyEl.classList.toggle('full', h >= 5);
+    if (rose) {
+      this.harmonyEl.classList.remove('rise');
+      void this.harmonyEl.offsetWidth;
+      this.harmonyEl.classList.add('rise');
+    }
+  }
+
+  /** a duet just formed: the harmony pill flashes in the duet's colour */
+  duetFlash(color: string) {
+    this.harmonyEl.style.setProperty('--duet', color);
+    this.harmonyEl.classList.remove('duet');
+    void this.harmonyEl.offsetWidth;
+    this.harmonyEl.classList.add('duet');
+  }
+
+  /** the colossus healed (hymn): the heart beats green */
+  healed() {
+    this.lives.classList.remove('healed');
+    void this.lives.offsetWidth;
+    this.lives.classList.add('healed');
+  }
+
   // ───────── journey ─────────
 
-  /** progress 0..1 and wave markers (position 0..1, kinds, done) */
-  setJourney(frac: number, marks: { at: number; kind: EnemyKind; done: boolean }[]) {
+  /**
+   * progress 0..1, markers (elites, guardians: position 0..1, kind, done) and the movements of the
+   * journey (where each breather begins and where its movement starts, 0..1)
+   */
+  setJourney(frac: number, marks: { at: number; kind: EnemyKind; done: boolean; elite?: boolean }[], moves: { rest: number; at: number; done: boolean }[] = []) {
     const j = this.root.querySelector('#journey') as HTMLElement;
     (j.querySelector('.fill') as HTMLElement).style.width = `${(frac * 100).toFixed(2)}%`;
     (j.querySelector('.me') as HTMLElement).style.left = `${(frac * 100).toFixed(2)}%`;
-    const key = marks.map((m) => `${m.at.toFixed(3)}${m.kind}${m.done ? 1 : 0}`).join('|');
+    const key = marks.map((m) => `${m.at.toFixed(3)}${m.kind}${m.done ? 1 : 0}`).join('|') + '/' + moves.map((m) => `${m.at.toFixed(3)}${m.done ? 1 : 0}`).join('|');
     const mk = j.querySelector('.marks') as HTMLElement;
     if (mk.dataset.k !== key) {
       mk.dataset.k = key;
-      mk.innerHTML = marks.map((m) => `<i class="${m.done ? 'done' : ''}" style="left:${(m.at * 100).toFixed(2)}%">${enemyIcon(m.kind)}</i>`).join('');
+      const pct = (v: number) => (v * 100).toFixed(2);
+      // breathers: a soft gold stretch with a little plate where it begins; movements: a bar line
+      const mv = moves
+        .map((m) => `<b class="rest ${m.done ? 'done' : ''}" style="left:${pct(m.rest)}%;width:${pct(Math.max(0.004, m.at - m.rest))}%"></b><b class="plate ${m.done ? 'done' : ''}" style="left:${pct(m.rest)}%"></b><b class="bar ${m.done ? 'done' : ''}" style="left:${pct(m.at)}%"></b>`)
+        .join('');
+      mk.innerHTML = mv + marks.map((m) => `<i class="${m.done ? 'done' : ''} ${m.elite ? 'elite' : ''}" style="left:${pct(m.at)}%">${enemyIcon(m.kind)}</i>`).join('');
     }
+  }
+
+  /** a movement begins: its numeral, and the creatures it brings */
+  movement(index: number, icons: EnemyKind[]) {
+    const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][index] ?? String(index + 1);
+    this.banner(roman, icons.slice(0, 4));
   }
 
   setGoal(svg: string) {
@@ -246,7 +298,9 @@ export class Hud {
     const R = n <= 1 ? 0 : n <= 4 ? 82 : 96;
     options.forEach((o, i) => {
       const a = n === 1 ? -Math.PI / 2 : -Math.PI / 2 + (i / n) * Math.PI * 2;
-      const b = h(`<button class="rb ${o.affordable ? '' : 'poor'} ${o.isNew ? 'new' : ''}" data-k="${o.kind}">${TOWER_ICON[o.kind]}<span class="price"><i>${ICON.coin}</i>${o.cost}</span></button>`) as HTMLButtonElement;
+      const duet = o.duets?.length ? `<span class="duet-spark" style="--duet:${o.duets[0]}"></span>` : '';
+      const b = h(`<button class="rb ${o.affordable ? '' : 'poor'} ${o.isNew ? 'new' : ''} ${o.duets?.length ? 'duet' : ''}" data-k="${o.kind}">${duet}${TOWER_ICON[o.kind]}<span class="price"><i>${ICON.coin}</i>${o.cost}</span></button>`) as HTMLButtonElement;
+      if (o.duets?.length) b.style.setProperty('--duet', o.duets[0]);
       b.style.left = `${Math.cos(a) * R}px`;
       b.style.top = `${Math.sin(a) * R}px`;
       b.style.transitionDelay = `${i * 0.03}s`;
@@ -367,14 +421,24 @@ export class Hud {
     if (kind.enemy) {
       const d = ENEMIES[kind.enemy];
       portrait = enemyIcon(kind.enemy);
-      if (d.flying) traits.push(ICON.wing);
-      if (d.speed >= 1.6) traits.push(ICON.speed);
-      if (d.armor >= 0.4) traits.push(ICON.armor);
-      if (d.shield) traits.push(ICON.shieldI);
+      // what makes it special first (the card shows four at most)
+      if (d.mimic) traits.push(ICON.mimic);
+      if (d.deflect) traits.push(ICON.deflect);
+      if (d.echo) traits.push(ICON.echo);
+      if (d.burrow) traits.push(ICON.burrow);
+      if (d.disable) traits.push(ICON.disable);
+      if (d.aura) traits.push(ICON.aura);
       if (d.split) traits.push(ICON.split);
       if (d.camo) traits.push(ICON.eyeOff);
       if (d.mute) traits.push(ICON.mute);
       if (d.heal) traits.push(ICON.healI);
+      if (d.shield) traits.push(ICON.shieldI);
+      if (d.pack) traits.push(ICON.pack);
+      if (d.steady) traits.push(ICON.steady);
+      if (d.flying) traits.push(ICON.wing);
+      if (d.armor >= 0.4) traits.push(ICON.armor);
+      if (d.speed >= 3) traits.push(ICON.speed);
+      traits = traits.slice(0, 4);
     } else if (kind.tower) {
       const d = TOWERS[kind.tower];
       portrait = TOWER_ICON[kind.tower];
