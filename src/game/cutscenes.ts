@@ -228,7 +228,7 @@ const CINE_CSS = `
 .cine-overlay .cine-chapter { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; opacity: 0; transition: opacity 1.6s ease; pointer-events: none; text-align: center; }
 .cine-overlay .cine-chapter.show { opacity: 1; }
 .cine-overlay .cine-chapter small { font-family: var(--serif, Georgia, serif); letter-spacing: .5em; text-transform: uppercase; font-size: clamp(12px, 1.6vw, 18px); color: rgba(255,247,230,.85); text-shadow: 0 2px 10px rgba(0,0,0,.8); }
-.cine-overlay .cine-chapter h1 { margin: 0; font-family: var(--deco, Georgia, serif); font-weight: 900; font-size: clamp(30px, 6vw, 78px); color: #ffe9a8; letter-spacing: .06em; text-shadow: 0 0 34px rgba(255,211,107,.55), 0 4px 0 #6a4310, 0 8px 30px rgba(0,0,0,.6); }
+.cine-overlay .cine-chapter h1 { margin: 0; max-width: 92vw; font-family: var(--deco, Georgia, serif); font-weight: 900; font-size: clamp(26px, 6vw, 78px); color: #ffe9a8; letter-spacing: .06em; text-shadow: 0 0 34px rgba(255,211,107,.55), 0 4px 0 #6a4310, 0 8px 30px rgba(0,0,0,.6); }
 .cine-overlay .cine-chapter i { display: block; width: min(420px, 60vw); height: 2px; background: linear-gradient(90deg, transparent, rgba(255,233,168,.9), transparent); }
 .cine-overlay .cine-place { position: absolute; left: calc(28px + var(--safe-l, 0px)); bottom: calc(9vh + 22px); font-family: var(--serif, Georgia, serif); font-size: clamp(16px, 2.2vw, 26px); color: rgba(255,247,230,.92); letter-spacing: .14em; text-shadow: 0 2px 12px rgba(0,0,0,.85); opacity: 0; transform: translateY(8px); transition: opacity 1.2s ease, transform 1.2s ease; pointer-events: none; }
 .cine-overlay .cine-place::before { content: ''; display: block; width: 46px; height: 2px; margin-bottom: 8px; background: rgba(255,211,107,.9); }
@@ -1090,7 +1090,10 @@ export class Cine {
     cam.lookAt(look);
     const roll = shot.roll[0] + (shot.roll[1] - shot.roll[0]) * ease.sine(k);
     if (roll) cam.rotateZ(roll);
-    const fov = shot.fov[0] + (shot.fov[1] - shot.fov[0]) * shot.ease(k);
+    let fov = shot.fov[0] + (shot.fov[1] - shot.fov[0]) * shot.ease(k);
+    // phones held upright: widen the (vertical) lens so the subjects framed for a wide screen still fit
+    const aspect = cam.aspect;
+    if (aspect < 1.25) fov = Math.min(100, fov * (1 + (1.25 - aspect) * 0.6));
     if (Math.abs(fov - this.lastFov) > 0.01) {
       cam.fov = fov;
       cam.updateProjectionMatrix();
@@ -1340,7 +1343,7 @@ function openingScript(app: App, c: Cine) {
   };
   c.add({ update: () => giant.lookAt(turtle.group.position) }, null);
   // its storm front: a wall of ink-smoke boiling up over the horizon
-  const storm = c.add(new InkStorm(175, 170, Math.PI * 0.8), null);
+  const storm = c.add(new InkStorm(255, 210, Math.PI * 0.7), null);
   v.scene.add(storm.mesh);
   c.add({ update: () => {
     storm.mesh.position.copy(turtle.group.position).setY(turtle.group.position.y - 6);
@@ -1774,7 +1777,7 @@ function endingScript(app: App, c: Cine) {
   voices.forEach((lm) => lm.setAwake(0));
   // ── 1. it falls
   c.cue(0.2, 'ending:fall');
-  c.shot(0, 5.2, { pos: [c.T(-10, 3, 15), c.T(-11, 4, 17)], look: [c.T(0, 62, -46), c.T(0, 30, -46)], fov: [52, 48], ease: ease.inOut });
+  c.shot(0, 5.2, { pos: [c.T(-12, 8, 26), c.T(-13, 9, 28)], look: [c.T(0, 40, -46), c.T(0, 26, -46)], fov: [56, 52], ease: ease.inOut });
   c.during(1.6, 3.4, (k) => (lift = -ease.in(k) * 6));
   c.during(1.4, 3.4, (k) => (sil.group.rotation.x = ease.in(k) * 0.3));
   c.at(3.4, () => {
@@ -1788,19 +1791,22 @@ function endingScript(app: App, c: Cine) {
   });
   // ── 2. it shrinks in a storm of ink
   c.shot(5.2, 11, { pos: [c.T(-14, 8, -6), c.T(-10, 3.4, -24)], look: [c.T(0, 14, -46), c.T(0, 1.4, -46)], fov: [44, 34] });
-  c.during(5.4, 10, (k) => {
+  c.during(5.4, 9.2, (k) => {
     size = 30 - ease.inOut(k) * 29.4;
     if (Math.random() < 0.5) fx.burst(far.clone().setY(far.y + size * 1.4), '#1d1a2b', 8, 3 + size * 0.2, 0.4 + size * 0.05, 1.4, false, -0.6);
   });
   c.cue(8, 'ending:alone');
   c.at(10, () => (sil.pose = 'small'));
-  // (cut) it kneels in the dust in front of the colossus
-  c.at(10.95, () => at.copy(spot));
+  // (cut) it kneels in the dust in front of the colossus, who looks down at it
+  c.at(10.95, () => {
+    at.copy(spot);
+    c.turtleLook = () => spot.clone().setY(spot.y + 0.8);
+  });
   // ── 3. small and alone, in the dust, under the colossus
   c.shot(11, 17, { pos: [c.T(1.8, 0.9, -21.5), c.T(1.4, 0.95, -21)], look: [c.T(0, 1.4, -17), c.T(0, 2.4, -14)], fov: 30 });
   // ── 4. the band leans over the edge to look
   for (const k of FULL_BAND) c.face(c.band.get(k)!, 16.5 + Math.random() * 0.6, 0.8, () => spot);
-  c.shot(17, 22, { pos: [c.T(0.6, 1.4, -15.2), c.T(0.4, 1.6, -15.6)], look: c.T(0, 6.2, -3), fov: 38 });
+  c.shot(17, 22, { pos: [c.T(-5.2, 1.5, -13.6), c.T(-5.0, 1.7, -14.0)], look: c.T(-0.6, 6.4, -2.6), fov: 40 });
   c.at(17.4, () => FULL_BAND.forEach((k) => (c.band.get(k)!.tilt = 0.25)));
   // ── 5. the Maestro jumps down… and trips on his tails
   const T_JUMP = 22;
@@ -1820,7 +1826,7 @@ function endingScript(app: App, c: Cine) {
     c.maestro.holder.lookAt(spot.x, c.maestro.holder.position.y, spot.z);
     c.mpose('raise');
   });
-  const rest = new RestGlyph('#fff4c8', 1.4);
+  const rest = new RestGlyph('#fff0c0', 0.8, 1.2);
   rest.opacity = 0;
   v.scene.add(rest.group);
   c.during(T_REST + 1.2, T_REST + 9, (k) => {
@@ -1833,7 +1839,9 @@ function endingScript(app: App, c: Cine) {
   c.at(T_REST + 6.6, () => (c.timeScale = 1));
   c.grade(T_REST + 1.2, 1, { saturation: 0.6, vignette: 0.6 });
   c.grade(T_REST + 6.4, 1.2, { saturation: 1, vignette: 0.3 });
-  c.shot(T_REST, T_REST + 8, { pos: [c.add3(() => spot, -4.2, 2.2, 3.2), c.add3(() => spot, -1.5, 2.6, 5.2), c.add3(() => spot, 2.8, 2.0, 4.0)], look: c.mix(() => spot.clone().setY(spot.y + 1.2), c.R(c.maestro, 0, 0.9, 0), 0.5), fov: 32, ease: ease.linear });
+  // bullet time: the camera circles the two of them while nothing else moves
+  const pair = () => spot.clone().lerp(c.maestro.world(new THREE.Vector3()), 0.5).setY(spot.y + 1.3);
+  c.shot(T_REST, T_REST + 8, { pos: [c.R(pair, -6.2, 1.6, -1.0), c.R(pair, -4.6, 2.2, 4.4), c.R(pair, 1.0, 2.6, 6.2), c.R(pair, 5.6, 2.0, 3.0)], look: pair, fov: 34, ease: ease.linear });
   // ── 7. the first breath: the little one lifts its head
   const T_BREATH = 36;
   c.at(T_BREATH, () => {
@@ -1854,25 +1862,25 @@ function endingScript(app: App, c: Cine) {
     sil.pose = 'reach';
     sil.reach(heart());
   });
-  c.shardFlight(T_GIFT + 1.2, 4.2, SHARD_COLORS[4], () => spot.clone().setY(spot.y + 1.8), () => turtle.facetWorld(4), 7, 1.1, () => {
+  const gift = c.shardFlight(T_GIFT + 1.2, 4.2, SHARD_COLORS[4], () => spot.clone().setY(spot.y + 1.8), () => turtle.facetWorld(4), 7, 1.1, () => {
     turtle.setShards(5);
     turtle.flashFacet(4);
     fx.flash(heart(), 3, '#ffd36b', 0.5);
   });
   c.shot(T_GIFT, T_GIFT + 2.4, { pos: c.add3(() => spot, -2.6, 1.6, 3.2), look: () => spot.clone().setY(spot.y + 1.8), fov: 34 });
-  c.shot(T_GIFT + 2.4, T_GIFT + 5.6, { pos: [c.T(-5, 4, -10), c.T(-6, 8.5, -6)], look: [c.T(0, 4, -12), c.Sh(0, 7.4, 0)], fov: 42 });
+  c.shot(T_GIFT + 2.4, T_GIFT + 5.6, { pos: [c.T(-5, 4, -10), c.T(-6, 8.5, -6)], look: () => (gift.group.visible ? gift.group.position.clone() : heart()), fov: 42 });
   // ── 9. the Heart is whole: a pillar of light, a wave of colour
   const T_WHOLE = 47.8;
   c.shot(T_WHOLE - 2.2, T_WHOLE + 2.4, { pos: [c.Sh(2.9, 7.5, -3.9), c.Sh(2.3, 7.7, -3.2)], look: c.Sh(0, 7.3, 0), fov: [32, 28] });
   c.at(T_WHOLE - 1.6, () => [0, 1, 2, 3].forEach((i) => turtle.flashFacet(i)));
   c.cue(T_WHOLE, 'ending:bloom');
-  c.flash(T_WHOLE, '#fff4d8', 0.9, 1.4);
+  c.flash(T_WHOLE, '#fff4d8', 0.6, 1.0);
   const pillar = glowSprite('#fff2c2', 1, 0);
   v.scene.add(pillar);
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 2.2, 160, 24, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2c2').multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
   v.scene.add(beam);
   c.at(T_WHOLE, () => {
-    turtle.heartGlow = 1.6;
+    turtle.heartGlow = 1.3;
     c.shake(0.9);
     fx.ring(turtle.group.position.clone().setY(turtle.group.position.y + 0.5), 90, '#ffd36b', 2.2, 0.04);
     fx.burst(heart(), '#ffe9a8', 120, 10, 0.3, 1.6);
@@ -1885,8 +1893,8 @@ function endingScript(app: App, c: Cine) {
     beam.position.copy(h).setY(h.y + 80);
     (beam.material as THREE.MeshBasicMaterial).opacity = Math.sin(Math.PI * Math.min(1, k * 1.2)) * 0.45;
     pillar.position.copy(h);
-    pillar.scale.setScalar(6 + Math.sin(k * 40) * 0.5);
-    (pillar.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.9;
+    pillar.scale.setScalar(3 + Math.sin(k * 40) * 0.3);
+    (pillar.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.55;
   });
   c.life(T_WHOLE, 7, 1.1);
   c.colour(T_WHOLE, 4, 1.6);
@@ -1909,6 +1917,7 @@ function endingScript(app: App, c: Cine) {
     });
     c.play('all');
     turtle.cheer();
+    c.turtleLook = null;
     // the little Silence rides along now, at the front with the Coralitos
     turtle.shell.attach(sil.group);
     size = 0.45;
@@ -1942,7 +1951,37 @@ function endingScript(app: App, c: Cine) {
   // ── 11. concert montage on the beat (with a sour chick)
   const B2 = c.spb * 2;
   const T_MONT = T_SONG + 6.5;
-  const T_VOICES = bandMontage(c, T_MONT, [['drum', 2], ['harp', 2], ['bell', 2], ['horn', 2], ['choir', 3], ['bass', 2], ['crystal', 2], ['shaker', 2]]);
+  const montList: [TowerKind, number][] = [['drum', 2], ['harp', 2], ['bell', 2], ['horn', 2], ['choir', 3], ['bass', 2], ['crystal', 2], ['shaker', 2]];
+  const T_VOICES = bandMontage(c, T_MONT, montList, false);
+  // each one shows off a signature move on its beat
+  let tm = T_MONT;
+  for (const [k, beats] of montList) {
+    const a = c.band.get(k)!;
+    const t0 = tm;
+    const d = beats * c.spb;
+    if (k === 'drum') {
+      c.hop(a, t0, 0.35, 0.6);
+      c.hop(a, t0 + 0.4, 0.5, 1.0);
+      c.during(t0 + 0.4, t0 + 0.9, (kk) => (a.spin = kk * Math.PI * 2));
+    } else if (k === 'harp' || k === 'crystal') {
+      c.during(t0, t0 + d * 0.8, (kk) => (a.spin = ease.inOut(kk) * Math.PI * 2));
+    } else if (k === 'bell') {
+      c.during(t0, t0 + d, (kk) => (a.roll = Math.sin(kk * Math.PI * 4) * 0.3));
+    } else if (k === 'horn') {
+      c.during(t0, t0 + d, (kk) => (a.tilt = -0.35 * Math.sin(kk * Math.PI)));
+    } else if (k === 'bass') {
+      c.hop(a, t0, 0.6, 0.8);
+      c.during(t0, t0 + 0.6, (kk) => (a.spin = kk * Math.PI * 2));
+    } else if (k === 'shaker') {
+      c.shiver(a, t0, t0 + d, 2.5);
+    } else c.hop(a, t0 + 0.04, 0.45, 0.45);
+    c.at(t0 + d, () => {
+      a.spin = 0;
+      a.roll = 0;
+      a.tilt = 0;
+    });
+    tm += d;
+  }
   // the sour note: one of the Coralitos sings off-key (and gets on with it, beaming)
   const choir = c.band.get('choir')!;
   const T_SOUR = T_MONT + 8 * c.spb + 0.5;

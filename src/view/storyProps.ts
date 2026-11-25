@@ -1077,22 +1077,22 @@ export class InkCoil {
 export class RestGlyph {
   readonly group = new THREE.Group();
   readonly mat: THREE.MeshBasicMaterial;
-  constructor(color = '#fff4c8', size = 1) {
+  constructor(color = '#fff4c8', size = 1, intensity = 2.2) {
     const s = size;
     const pts = [
       new THREE.Vector3(-0.12, 0.5, 0), new THREE.Vector3(0.14, 0.24, 0), new THREE.Vector3(-0.1, 0.04, 0), new THREE.Vector3(0.12, -0.18, 0),
       new THREE.Vector3(-0.08, -0.22, 0), new THREE.Vector3(-0.12, -0.36, 0), new THREE.Vector3(0.0, -0.5, 0),
     ].map((p) => p.multiplyScalar(s));
-    this.mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2), transparent: true, opacity: 1, toneMapped: false, depthWrite: false });
+    this.mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity), transparent: true, opacity: 1, toneMapped: false, depthWrite: false });
     const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.3), 48, 0.055 * s, 8, false);
     this.group.add(new THREE.Mesh(tube, this.mat));
-    const halo = glowSprite(color, 2.4 * s, 0.5);
+    const halo = glowSprite(color, 1.8 * s, 0.35);
     this.group.add(halo);
   }
   set opacity(a: number) {
     this.mat.opacity = a;
     this.group.visible = a > 0.01;
-    (this.group.children[1] as THREE.Sprite).material.opacity = a * 0.5;
+    (this.group.children[1] as THREE.Sprite).material.opacity = a * 0.35;
   }
 }
 
