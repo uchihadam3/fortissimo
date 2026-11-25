@@ -60,7 +60,7 @@ export class JourneyTutorial {
       for (const p of sim.pickups) {
         if (p.taken || p.lost) continue;
         const pv = view.pickups.get(p.id);
-        if (!pv) continue;
+        if (!pv || !pv.group.visible) continue;
         const wp = pv.group.position.clone();
         wp.y += 2;
         const s = view.screen(wp);

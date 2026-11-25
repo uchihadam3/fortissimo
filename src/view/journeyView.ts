@@ -75,6 +75,8 @@ export class JourneyView {
   readonly enemies = new Map<number, EnemyView>();
   readonly pads: SlotPad[] = [];
   readonly pickups = new Map<number, PickupView>();
+  /** golden notes waiting for their breather (pickup id → movement index) */
+  private hiddenNotes = new Map<number, number>();
   readonly landmark: Landmark;
   private mists: MistView[] = [];
   private queue: SimEvent[] = [];
@@ -179,6 +181,11 @@ export class JourneyView {
     for (const p of sim.pickups) {
       const pv = new PickupView(p.id, p.value);
       pv.group.position.set(p.x, this.land.heightAt(p.x, p.z), p.z);
+      // the golden notes of a breather appear when its calm begins (already there after a resume)
+      if (p.breather !== undefined && p.breather > sim.movement) {
+        pv.group.visible = false;
+        this.hiddenNotes.set(p.id, p.breather);
+      }
       this.scene.add(pv.group);
       this.pickups.set(p.id, pv);
     }
@@ -265,7 +272,7 @@ export class JourneyView {
     this.ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.engine.camera);
     const targets: THREE.Object3D[] = [];
     for (const p of this.pads) targets.push(p.hit);
-    for (const p of this.pickups.values()) if (!p.gone) targets.push(p.hit);
+    for (const p of this.pickups.values()) if (!p.gone && p.group.visible) targets.push(p.hit);
     const hits = this.ray.intersectObjects(targets, false);
     if (hits.length) {
       const o = hits[0].object;
@@ -544,7 +551,7 @@ export class JourneyView {
       case 'spawn': {
         let v = this.enemies.get(ev.enemy.id);
         if (!v) {
-          v = new EnemyView(ev.enemy.id, ev.enemy.kind, ENEMY_SCALE);
+          v = new EnemyView(ev.enemy.id, ev.enemy.kind, ENEMY_SCALE * (ev.enemy.elite ? 1.35 : 1));
           this.enemies.set(ev.enemy.id, v);
           this.scene.add(v.group);
           v.push(ev.t, ev.enemy.x, ev.enemy.z);
@@ -679,8 +686,69 @@ export class JourneyView {
         if (tv) this.fx.coinNote(tv.group.getWorldPosition(new THREE.Vector3()).setY(tv.group.getWorldPosition(new THREE.Vector3()).y + 2));
         break;
       }
-      case 'muted':
-        this.towers.get(ev.tower.id)?.setMuted(ev.muted);
+      case 'muted': {
+        const tv = this.towers.get(ev.tower.id);
+        if (!tv) break;
+        // a lava slug's bite knocks the musician out; other causes just silence it
+        if (ev.cause === 'disable' || (!ev.muted && tv.disabled)) tv.setDisabled(ev.muted);
+        else tv.setMuted(ev.muted);
+        break;
+      }
+      case 'disable': {
+        const tv = this.towers.get(ev.tower.id);
+        if (tv) {
+          const wp = tv.group.getWorldPosition(new THREE.Vector3());
+          this.fx.burst(wp.clone().setY(wp.y + 1.5), '#ff6a1f', 26, 3, 0.25, 0.7);
+          this.fx.dust(wp, '#5a4a40', 30);
+        }
+        break;
+      }
+      case 'echo': {
+        const v = this.enemies.get(ev.enemy.id);
+        const p = v ? this.enemyPos(v) : new THREE.Vector3(ev.enemy.x, this.land.heightAt(ev.enemy.x, ev.enemy.z) + 1, ev.enemy.z);
+        this.fx.ring(p.clone().setY(p.y - 0.8), 3.4, '#9fe6d4', 0.7, 0.05);
+        this.fx.burst(p, '#9fe6d4', 24, 2.6, 0.22, 0.7);
+        break;
+      }
+      case 'deflect': {
+        const v = this.enemies.get(ev.enemy.id);
+        if (v) {
+          const p = this.enemyPos(v);
+          this.fx.burst(p, '#f3e2b8', 12, 2.4, 0.14, 0.4);
+          this.fx.flash(p, 1.1, '#fff4d8', 0.15);
+        }
+        break;
+      }
+      case 'stumble':
+        for (const id of ev.hits) {
+          const v = this.enemies.get(id);
+          if (v) this.fx.dust(v.pos, this.look.land.dirt, 12);
+        }
+        break;
+      case 'heartHeal': {
+        const hp = this.turtle.group.position.clone();
+        hp.y += 7.5;
+        this.fx.burst(hp, '#7dff9a', 30, 3.2, 0.2, 0.8);
+        this.fx.ring(this.turtle.group.position.clone().setY(this.turtle.group.position.y + 0.4), 9, '#7dff9a', 0.8, 0.05);
+        break;
+      }
+      case 'plate': {
+        const wp = this.slotWorld(ev.slot, 0.6);
+        this.fx.ring(wp, 3.2, '#ffd36b', 0.8, 0.06);
+        this.fx.burst(wp.clone().setY(wp.y + 1), '#ffe9a8', 36, 3.4, 0.22, 0.9);
+        break;
+      }
+      case 'breather':
+        for (const [id, k] of this.hiddenNotes) {
+          if (k !== ev.index) continue;
+          const pv = this.pickups.get(id);
+          this.hiddenNotes.delete(id);
+          if (!pv || pv.gone) continue;
+          pv.group.visible = true;
+          const p = pv.group.position.clone();
+          p.y += 2;
+          this.fx.burst(p, '#ffd36b', 16, 2.2, 0.18, 0.7);
+        }
         break;
       case 'heal': {
         const v = this.enemies.get(ev.enemy.id);

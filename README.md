@@ -29,11 +29,21 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 
 ## Como se joga
 
-- **A viagem:** cada fase é uma jornada de 3 a 5 minutos até um marco no horizonte (um sino gigante,
-  uma harpa dourada, um órgão de cristal…). Toque em ▶ e a tartaruga parte, **um passo por batida**.
-  Chegou com vida, venceu.
-- **Construir:** toque numa placa brilhante do casco e escolha um instrumento no menu circular. Toque
-  numa torre para **evoluir** (3 níveis) ou **vender**.
+- **A viagem:** cada fase é uma jornada de 4 a 10 minutos até um marco no horizonte (um sino gigante,
+  uma harpa dourada, um órgão de cristal…), dividida em **movimentos**, como uma sinfonia. Toque em ▶ e a
+  tartaruga parte, **um passo por batida**. Chegou com vida, venceu.
+- **Respiros:** entre um movimento e outro a música acalma, aparecem notas douradas na estrada e **mais
+  uma placa do casco acende**: a banda cresce durante a fase.
+- **Montar a banda:** toque numa placa brilhante do casco e escolha um músico no menu circular. Cada torre
+  é um músico tocando o seu instrumento. Toque numa torre para **evoluir** (3 níveis) ou **vender**.
+- **Harmonia:** cada naipe diferente na banda (cordas, percussão, sinos, metais, vozes, graves) deixa a
+  música mais rica **e** todos os músicos mais fortes (luzinhas de harmonia no topo da tela).
+- **Duetos:** dois músicos certos lado a lado formam um dueto (um arco de luz os une): harpa + tambor
+  tocam juntos, sino + cristal congelam, tambor + grave fazem as criaturas tropeçarem, coral + sino curam
+  a tartaruga… No menu circular, o instrumento que formaria um dueto brilha.
+- **Desafio:** cada terra tem criaturas que exigem uma banda variada (as que voam, as blindadas, as
+  invisíveis, o redemoinho que desvia tiros, a Sombra que cala um instrumento inteiro…).
+- **Recomeçar do movimento:** perdeu? Dá para voltar do começo do movimento em que caiu.
 - **Os inimigos** saem da névoa cinza pela frente, pelos lados, por trás e pelo céu. Setas na borda da
   tela mostram de onde vem a próxima onda e quais criaturas.
 - **Notas douradas** flutuam pela paisagem: toque nelas para coletar antes que fiquem para trás.
@@ -77,7 +87,7 @@ mais difícil em cada terra e **O Abismo**, o desafio secreto depois do final:
 4. **Forja do Trovão**: grave e o Golem da Forja
 5. **Cidadela do Silêncio**: todos os instrumentos contra o próprio Silêncio
 
-Toda fase vencida libera o desafio **Virtuoso** (criaturas bem mais fortes, coroa dourada). Ao vencer o
+Toda fase vencida libera o desafio **Virtuoso** (metade das vidas e menos notas no começo; coroa dourada). Ao vencer o
 guardião de uma terra, abre o **Bis**, uma viagem sem fim para bater recorde.
 
 O jogo salva sozinho ao fim de cada jornada, em 3 espaços. Em **Carregar**, cada jornada pode ser
