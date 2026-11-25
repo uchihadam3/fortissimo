@@ -1,27 +1,32 @@
 /**
- * CREDITS — an upbeat, celebratory medley (≈2.6 min loop): fanfare intro · the leitmotif ·
- * the meadow, desert, ice, forge and citadel grooves (their own arrangement code, each carrying
- * its leitmotif variation) · the leitmotif's B part · a tutti finale → back to the leitmotif.
- * Every section ends on the dominant of the next key, so the modulations flow.
+ * CREDITS — an upbeat, celebratory medley (≈2.7 min loop): fanfare intro · the FORTÍSSIMO theme ·
+ * the meadow, the dunes, the peaks, the forge and the citadel (each land's own arrangement with the
+ * full band, and its leitmotif on its own voice) · the theme's B part · a tutti finale → back to the
+ * theme. Every section ends on the dominant of the next key, so the modulations flow.
  */
 import { SONGS } from '../../../sim/defs';
 import { Form, LEIT_A, LEIT_A_RICH_CHORDS, LEIT_B, LEIT_B_RICH_CHORDS, LEIT_HEAD, lineNotes, type BarInfo, type Line } from '../compose';
-import type { BarCtx, Player } from '../music';
+import { FULL_BAND, type BarCtx, type Player } from '../music';
 import { CHOIR, FLUTE, HORNLEAD, LOWBRASS, OBOE, ORGAN, STRINGS, SUB, VIOLIN, type BufInst } from '../synth';
 import { MODES, note, Scale } from '../theory';
 import { type Inst, Song } from './base';
-import { Battle, CitadelTheme, CITADEL_PHRASE, DesertTheme, DESERT_PHRASE, ForgeTheme, FORGE_PHRASE, IceTheme, ICE_PHRASE, MeadowTheme, MEADOW_PHRASE } from './legacy';
+import type { Battle } from './battle';
+import { CitadelTheme, SECTIONS as CIT } from './citadel';
+import { DesertTheme, SECTIONS as DES } from './desert';
+import { ForgeTheme, SECTIONS as FOR } from './forge';
+import { IceTheme, SECTIONS as ICE } from './ice';
+import { MeadowTheme, SECTIONS as MEA } from './meadow';
 
 interface Guest {
   song: Battle;
-  I: number;
   line: Line;
-  tonic: number;
   scale: Scale;
   lead: { inst: Inst; ch: string; vel: number; shift?: number; legato?: number }[];
 }
 
+const A = (list: { name: string; bars: (string | string[])[]; tune?: Line }[]) => list.find((s) => s.name === 'A')!;
 const withLast = (line: Line, last: [number | null, number][]): Line => [...line.slice(0, 7), last];
+const lastChord = (bars: (string | string[])[], c: string | string[]): (string | string[])[] => [...bars.slice(0, 7), c];
 
 export class CreditsTheme extends Song {
   readonly bpm: number = SONGS.credits.bpm;
@@ -35,11 +40,11 @@ export class CreditsTheme extends Song {
     [
       { name: 'intro', bars: ['F', 'Bb/F', 'F', 'C7'] },
       { name: 'theme', bars: [...LEIT_A_RICH_CHORDS.slice(0, 7), ['F', 'D7']] },
-      { name: 'meadowS', bars: ['G', 'D/F#', 'Em', 'C', 'G', 'C', ['Am7', 'D'], 'D7'] },
-      { name: 'desertS', bars: ['D', 'D', 'Eb', 'D', 'Cm', 'Gm', 'Eb', ['D', 'B7']] },
-      { name: 'iceS', bars: ['Em9', 'Cmaj7', 'G', 'D', 'Em9', 'Cmaj7', 'Am7', 'G7'] },
-      { name: 'forgeS', bars: ['Cm', 'Cm', 'Ab', 'Bb', 'Cm', 'Fm', 'G', ['G', 'A7']] },
-      { name: 'citadelS', bars: ['Dm', 'Dm', 'C', 'G', 'Dm', 'F', 'G', 'A'] },
+      { name: 'meadowS', bars: lastChord(A(MEA).bars, 'D7') },
+      { name: 'desertS', bars: lastChord(A(DES).bars, ['D', 'B7']) },
+      { name: 'iceS', bars: lastChord(A(ICE).bars, 'G7') },
+      { name: 'forgeS', bars: lastChord(A(FOR).bars, ['Cm', 'A7']) },
+      { name: 'citadelS', bars: A(CIT).bars },
       { name: 'themeB', bars: LEIT_B_RICH_CHORDS },
       { name: 'finaleS', bars: LEIT_A_RICH_CHORDS },
     ],
@@ -54,12 +59,13 @@ export class CreditsTheme extends Song {
     const ice = new IceTheme();
     const forge = new ForgeTheme();
     const citadel = new CitadelTheme();
+    for (const s of [meadow, desert, ice, forge, citadel]) s.fixedBand = FULL_BAND;
     this.guests = {
-      meadowS: { song: meadow, I: 2, line: withLast(MEADOW_PHRASE, [[6, 2], [4, 2]]), tonic: note('G4'), scale: meadow.key, lead: [{ inst: FLUTE(), ch: 'flute', vel: 0.85, shift: 7 }, { inst: VIOLIN(0.7), ch: 'violins', vel: 0.5 }] },
-      desertS: { song: desert, I: 2, line: withLast(DESERT_PHRASE, [[2, 1.5], [1, 0.5], [null, 2]]), tonic: note('D5'), scale: desert.key, lead: [{ inst: FLUTE(true), ch: 'ney', vel: 0.85 }] },
-      iceS: { song: ice, I: 2, line: ICE_PHRASE, tonic: note('E5'), scale: ice.key, lead: [{ inst: 'celesta', ch: 'celesta', vel: 0.62, legato: 1.3 }, { inst: 'glass', ch: 'glass', vel: 0.24, shift: 7 }] },
-      forgeS: { song: forge, I: 2, line: withLast(FORGE_PHRASE, [[-0.5, 2], [null, 2]]), tonic: note('C4'), scale: forge.key, lead: [{ inst: HORNLEAD(0.55), ch: 'horn', vel: 0.95 }, { inst: HORNLEAD(0.35), ch: 'horn2', vel: 0.55, shift: -7 }] },
-      citadelS: { song: citadel, I: 2, line: CITADEL_PHRASE, tonic: note('D4'), scale: citadel.key, lead: [{ inst: ORGAN(0.85), ch: 'organ', vel: 0.85 }, { inst: CHOIR('ah'), ch: 'choir', vel: 0.4, shift: -7 }] },
+      meadowS: { song: meadow, line: withLast(A(MEA).tune!, [[6, 2], [4, 2]]), scale: meadow.key, lead: [{ inst: FLUTE(), ch: 'flute', vel: 0.85, shift: 12 }, { inst: VIOLIN(0.7), ch: 'violins', vel: 0.5 }] },
+      desertS: { song: desert, line: withLast(A(DES).tune!, [[2, 1.5], [1, 0.5], [null, 2]]), scale: desert.key, lead: [{ inst: FLUTE(true), ch: 'ney', vel: 0.85, shift: 12 }] },
+      iceS: { song: ice, line: withLast(A(ICE).tune!, [[4, 2], [null, 2]]), scale: ice.key, lead: [{ inst: 'celesta', ch: 'celesta', vel: 0.3, shift: 12, legato: 1.3 }, { inst: 'glass', ch: 'glass', vel: 0.12, shift: 19 }] },
+      forgeS: { song: forge, line: withLast(A(FOR).tune!, [[7, 2], [null, 2]]), scale: forge.key, lead: [{ inst: HORNLEAD(0.55), ch: 'horn', vel: 0.95 }, { inst: HORNLEAD(0.35), ch: 'horn2', vel: 0.55, shift: -12 }] },
+      citadelS: { song: citadel, line: A(CIT).tune!, scale: citadel.key, lead: [{ inst: ORGAN(0.85), ch: 'organ', vel: 0.85 }, { inst: CHOIR('ah'), ch: 'choir', vel: 0.4, shift: -12 }] },
     };
     const warm: [BufInst, number, number][] = [['pizz', 29, 62], ['harp', 48, 89], ['timp', 39, 53], ['snare', 60, 60], ['taiko', 30, 36], ['tamb', 60, 60], ['crash', 60, 60], ['brass', 41, 65]];
     for (const g of Object.values(this.guests)) warm.push(...g.song.warm);
@@ -107,13 +113,13 @@ export class CreditsTheme extends Song {
         g.song.setup(p);
         p.levelScale = 1;
       }
-      g.song.guest({ ...b, I: g.I, Iprev: g.I, drop: 0, build: false }, f);
+      g.song.guest({ ...b, I: 2, Iprev: 2, drop: 0, build: false }, { ...f, sec: 'A' });
     } finally {
       p.prefix = '';
     }
     const bar = g.line[f.i];
     if (!bar) return;
-    for (const l of g.lead) this.notes(b, lineNotes(g.scale, g.tonic, this.beats, [bar], { vel: 0.72, shift: l.shift ?? 0 }), l.inst, l.ch, l.vel, l.legato ?? 0.95);
+    for (const l of g.lead) this.notes(b, lineNotes(g.scale, g.scale.tonic, this.beats, [bar], { vel: 0.72, shift: l.shift ?? 0 }), l.inst, l.ch, l.vel, l.legato ?? 0.95);
   }
 
   private orchestra(b: BarCtx, f: BarInfo): void {
@@ -143,15 +149,15 @@ export class CreditsTheme extends Song {
     const notes = (shift: number) => lineNotes(this.key, F4, this.beats, [bar], { vel: 0.72, shift });
     if (s === 'theme') {
       this.notes(b, notes(0), HORNLEAD(0.65), 'horn', 0.95, 0.96);
-      this.notes(b, notes(-7), HORNLEAD(0.4), 'horn2', 0.5, 0.96);
+      this.notes(b, notes(-12), HORNLEAD(0.4), 'horn2', 0.5, 0.96);
       if (f.last) [[2, note('D5')], [2.5, note('E5')], [3, note('F#5')]].forEach(([beat, m]) => this.play(b, FLUTE(), 'flute', beat, m, 0.6, 0.45 * b.spb));
     } else if (s === 'themeB') {
       this.notes(b, notes(0), OBOE(), 'oboe', 0.85, 0.97);
-      if (f.i >= 4) this.notes(b, notes(7), VIOLIN(0.7), 'violins', 0.55, 0.97);
+      if (f.i >= 4) this.notes(b, notes(12), VIOLIN(0.7), 'violins', 0.55, 0.97);
     } else {
       this.notes(b, notes(0), HORNLEAD(0.85), 'horn', 1, 0.97);
-      this.notes(b, notes(-7), HORNLEAD(0.45), 'horn2', 0.6, 0.97);
-      this.notes(b, notes(7), VIOLIN(0.9), 'violins', 0.65, 0.97);
+      this.notes(b, notes(-12), HORNLEAD(0.45), 'horn2', 0.6, 0.97);
+      this.notes(b, notes(12), VIOLIN(0.9), 'violins', 0.65, 0.97);
     }
 
     // accompaniment
@@ -166,7 +172,7 @@ export class CreditsTheme extends Song {
       this.play(b, SUB(), 'bass', 0, this.root(f, 0, 29), 0.42, b.beats * b.spb);
       this.ostinato(b, f, 'harp', 'harp', 57, 81, [0, 1, 2, 3, 4, 3, 2, 1], 0.36, 1.0, [0, 4]);
       this.drum(b, 'snare', 'kit', 'x..ox.o.x..ox.oo', 0.32);
-      this.drum(b, 'taiko', 'timp', 'x.......x.......', 0.36, 33);
+      this.drum(b, 'taiko', 'timp', 'x...x...x...x...', 0.3, 33);
       this.drum(b, 'tamb', 'perc', 'x.o.x.o.x.o.x.o.', 0.38);
       if (f.i === 0 || f.i === 4 || big) this.play(b, 'timp', 'timp', 0, this.root(f, 0, 41), 0.5, 3, undefined, 0.002);
     }

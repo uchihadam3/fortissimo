@@ -62,7 +62,7 @@ export const MEADOW_H: Line = [
   [[1, 3], [null, 1]],
 ];
 
-const SECTIONS: SecDef[] = [
+export const SECTIONS: SecDef[] = [
   { name: 'A', bars: ['G', 'C', 'G', 'D', 'G', 'Am7', ['Am7', 'D'], 'G'], tune: MEADOW_A },
   { name: 'B', bars: ['Em', 'C', 'G', 'D', 'Em', 'C', 'Am', 'D'], tune: MEADOW_B },
   { name: 'C', bars: ['C', 'D', 'Bm7', 'Em', 'Am7', 'D', ['G', 'G/B'], ['C', 'D']], tune: MEADOW_C },

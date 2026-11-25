@@ -50,7 +50,7 @@ export const FORGE_C: Line = [
   [[0, 4]],
 ];
 
-const SECTIONS: SecDef[] = [
+export const SECTIONS: SecDef[] = [
   { name: 'A', bars: ['Cm', 'Ab', 'Bb', 'G', 'Cm', 'Fm', ['Ab', 'G'], 'Cm'], tune: FORGE_A },
   { name: 'B', bars: ['Ab', 'Bb', 'Cm', 'Cm', 'Fm', 'Ab', 'G', 'G'], tune: FORGE_B },
   { name: 'C', bars: ['Cm', 'Db', 'Cm', 'Fm', 'Cm', 'Db', 'Bbm', 'C'], tune: FORGE_C, mode: MODES.phrygian },

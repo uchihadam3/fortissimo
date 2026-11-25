@@ -115,7 +115,7 @@ if (!only || only === 'songs') {
 
 if (!only || only === 'cine') {
   console.log('\n── cinematics ──');
-  for (const which of ['intro', 'ending', 'restored', 'ending-song']) {
+  for (const which of ['intro', 'ending', 'intro2', 'ending2', 'restored', 'ending-song']) {
     if (quick && which === 'ending-song') continue;
     const r = await page.evaluate(([w, wv]) => window.__lab.offline.renderCinema(w, wv), [which, !!wavDir]);
     line(which, r.stats, r.restBarDb !== undefined ? `rest-bar peak ${r.restBarDb} dBFS` : '');
@@ -124,6 +124,39 @@ if (!only || only === 'cine') {
     if (r.restBarDb !== undefined && r.restBarDb > -80) problems.push(`${which}: the rest bar is not silent (${r.restBarDb} dBFS)`);
     save(`cine-${which}`, r.wav);
   }
+}
+
+if (!only || only === 'moods') {
+  console.log('\n── story moods and land openings (each sustains; consonance vs. its own harmony) ──');
+  const worlds = ['meadow', 'desert', 'ice', 'forge', 'citadel'];
+  const story = ['wonder', 'frozen', 'wake', 'join', 'threat', 'shard', 'voice', 'camp', 'memory', 'journey', 'dread', 'hush', 'comic'];
+  const list = [...story.map((m, i) => [`story:${m}`, worlds[i % worlds.length]]), ...worlds.map((w) => [`land:${w}`, w])];
+  if (!quick) for (const w of worlds) list.push(['story:voice', w], ['story:wonder', w]);
+  for (const [cue, w] of list) {
+    const r = await page.evaluate(([c, ww, wv]) => window.__lab.offline.renderCue(c, ww, 24, { wav: wv }), [cue, w, !!wavDir]);
+    line(`${cue}@${w}`.slice(0, 22), r.stats, `chord ${(r.inChord * 100).toFixed(0)}% scale ${(r.inScale * 100).toFixed(0)}%`);
+    check(`${cue}@${w}`, r.stats, { clicks: 2, silence: cue === 'story:hush' ? 30 : 2 });
+    if (cue !== 'story:hush' && r.inScale < 0.75) problems.push(`${cue}@${w}: ${(r.inScale * 100).toFixed(0)}% on its scale`);
+    save(`mood-${cue.replace(':', '-')}-${w}`, r.wav);
+  }
+}
+
+if (!only || only === 'motifs') {
+  console.log('\n── joinMotif (over story:join), duet flourishes, new creatures ──');
+  for (const w of quick ? ['meadow'] : ['meadow', 'desert', 'citadel']) {
+    const m = await page.evaluate(([ww, wv]) => window.__lab.offline.renderMotifs(ww, 'story:join', wv), [w, !!wavDir]);
+    line(`motifs@${w}`, m.stats, m.each.map((e) => `${e.kind} ${f1(e.lufs)}`).join(' '));
+    check(`motifs@${w}`, m.stats, { clicks: 2 });
+    save(`motifs-${w}`, m.wav);
+  }
+  const d = await page.evaluate((wv) => window.__lab.offline.renderDuets('meadow', wv), !!wavDir);
+  line('duets@meadow', d.stats, d.each.map((e) => `${e.id} ${f1(e.lufs)}`).join(' '));
+  check('duets', d.stats, { clicks: 2 });
+  save('duets', d.wav);
+  const x = await page.evaluate((wv) => window.__lab.offline.renderDeaths('desert', wv), !!wavDir);
+  line('deaths@desert', x.stats);
+  check('deaths', x.stats, { clicks: 3 });
+  save('deaths', x.wav);
 }
 
 if (!only || only === 'stress') {

@@ -51,7 +51,7 @@ export const ICE_C: Line = [
   [[6, 4]],
 ];
 
-const SECTIONS: SecDef[] = [
+export const SECTIONS: SecDef[] = [
   { name: 'A', bars: ['Emaj9', 'F#/E', 'Emaj9', 'F#/E', 'C#m9', 'G#m7', 'F#', ['Bsus4', 'B']], tune: ICE_A },
   { name: 'B', bars: ['C#m9', 'F#9', 'C#m9', 'F#9', 'G#m7', 'E/G#', 'F#/A#', 'B'], tune: ICE_B },
   { name: 'C', bars: ['Emaj7', 'F#/E', 'D#m7', 'G#m7', 'C#m7', 'F#7sus4', 'Bsus4', 'B'], tune: ICE_C },

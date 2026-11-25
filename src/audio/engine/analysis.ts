@@ -3,7 +3,7 @@
  * sequences and battle stress tests through an OfflineAudioContext, scheduling incrementally like
  * the real-time engine (suspend every 50 ms), and measures the result.
  */
-import { SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type SongId, type TowerKind } from '../../sim/defs';
+import { SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type SongId, type TowerKind, type WorldId } from '../../sim/defs';
 import type { BandMix, CinematicCue } from '../api';
 import { Ambience, type Place } from './ambience';
 import { Cinema } from './cinema';
@@ -333,6 +333,9 @@ export async function renderSong(song: SongId, intensity: number | [number, numb
 
 export const INTRO: [number, CinematicCue][] = [[0, 'intro:dawn'], [8, 'intro:festival'], [24, 'intro:approach'], [36, 'intro:shatter'], [38, 'intro:grey'], [54, 'intro:hope'], [70, 'intro:title']];
 export const ENDING: [number, CinematicCue][] = [[0, 'ending:fall'], [6, 'ending:alone'], [26, 'ending:rest'], [36, 'ending:bloom'], [74, 'ending:bow']];
+/** the v2 cutscenes are re-timed (≈100 s opening, ≈120 s ending): the moods must sustain through any timing */
+export const INTRO2: [number, CinematicCue][] = [[0, 'intro:dawn'], [11, 'intro:festival'], [34, 'intro:approach'], [47, 'intro:shatter'], [49.5, 'intro:grey'], [67, 'intro:hope'], [88, 'intro:title']];
+export const ENDING2: [number, CinematicCue][] = [[0, 'ending:fall'], [9, 'ending:alone'], [36, 'ending:rest'], [47, 'ending:bloom'], [104, 'ending:bow']];
 
 export interface CineRender {
   stats: Stats;
@@ -343,9 +346,9 @@ export interface CineRender {
   wav?: string;
 }
 
-export async function renderCinema(which: 'intro' | 'ending' | 'restored' | 'ending-song', wav = false): Promise<CineRender> {
-  const plan = which === 'intro' ? INTRO : which === 'ending' ? ENDING : which === 'restored' ? ([[0.2, 'world:restored']] as [number, CinematicCue][]) : [];
-  const seconds = which === 'intro' ? 82 : which === 'ending' || which === 'ending-song' ? 92 : 14;
+export async function renderCinema(which: 'intro' | 'ending' | 'intro2' | 'ending2' | 'restored' | 'ending-song', wav = false): Promise<CineRender> {
+  const plan = which === 'intro' ? INTRO : which === 'ending' ? ENDING : which === 'intro2' ? INTRO2 : which === 'ending2' ? ENDING2 : which === 'restored' ? ([[0.2, 'world:restored']] as [number, CinematicCue][]) : [];
+  const seconds = which === 'intro' ? 82 : which === 'intro2' ? 102 : which === 'ending2' ? 124 : which === 'ending' || which === 'ending-song' ? 92 : 14;
   const rig = makeRig(seconds);
   const off = 0.2;
   if (which === 'restored') {
@@ -368,11 +371,12 @@ export async function renderCinema(which: 'intro' | 'ending' | 'restored' | 'end
     segments[cue] = Math.round(db(m / Math.max(1, b - a)) * 10) / 10;
   }
   let restBarDb: number | undefined;
-  if (which === 'ending' || which === 'ending-song') {
+  if (which === 'ending' || which === 'ending-song' || which === 'ending2') {
     // the bar of silence: from rest + 0.75 s to rest + 0.7 + bar − 0.05
     const bar = (60 / 84) * 4;
-    const a = Math.floor((off + 26 + 0.03 + 0.75) * r.buf.sampleRate);
-    const b = Math.floor((off + 26 + 0.03 + 0.7 + bar - 0.05) * r.buf.sampleRate);
+    const restAt = (plan.find(([, c]) => c === 'ending:rest') ?? [26])[0];
+    const a = Math.floor((off + restAt + 0.03 + 0.75) * r.buf.sampleRate);
+    const b = Math.floor((off + restAt + 0.03 + 0.7 + bar - 0.05) * r.buf.sampleRate);
     const L = r.buf.getChannelData(0);
     let m = 0;
     let pk = 0;
@@ -860,4 +864,97 @@ export function standardJourney(full = false): { bars: number; events: JourneyEv
     { name: 'end calm', from: 97, to: 104 },
   ];
   return { bars: 104, events, segments };
+}
+
+
+// ───────────────────────────── moods, motifs, duets ─────────────────────────────
+
+export interface CueRender {
+  stats: Stats;
+  inChord: number;
+  inScale: number;
+  octaves: number[];
+  wav?: string;
+}
+
+/**
+ * One cinematic cue in a land for `seconds` (moods sustain: the render shows whether they keep
+ * evolving); optionally a joinMotif `joinAt` seconds in. Consonance is measured against the mood's
+ * own harmony.
+ */
+export async function renderCue(cue: CinematicCue, world: WorldId | null, seconds: number, o: { join?: TowerKind; joinAt?: number; wav?: boolean } = {}): Promise<CueRender> {
+  const rig = makeRig(seconds);
+  rig.director.world = world;
+  rig.at(0.2, () => rig.cine.cue(cue), 0);
+  if (o.join) rig.at(o.joinAt ?? 4, () => rig.motifs.join(o.join!), 0);
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  stats.started = rig.core.started;
+  const p = rig.director.current ?? rig.director.last;
+  let h = { inChord: 0, inScale: 0 };
+  if (p) {
+    const b0 = Math.max(0, p.barAt(1));
+    const b1 = Math.max(b0 + 1, p.barAt(seconds - 0.5));
+    h = harmonyCheck(r.buf, p, b0, b1);
+  }
+  return { stats, inChord: h.inChord, inScale: h.inScale, octaves: octaves(r.buf, 0.5, r.buf.duration), wav: o.wav ? wavBase64(r.buf) : undefined };
+}
+
+/** every musician's motif over a mood (default story:join), one after the other */
+export async function renderMotifs(world: WorldId | null = null, cue: CinematicCue = 'story:join', wav = false): Promise<{ stats: Stats; each: { kind: TowerKind; lufs: number; peakDb: number }[]; wav?: string }> {
+  const kinds: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
+  const gap = 7;
+  const seconds = 1.5 + kinds.length * gap;
+  const rig = makeRig(seconds);
+  rig.director.world = world;
+  rig.at(0.2, () => rig.cine.cue(cue), 0);
+  kinds.forEach((k, i) => rig.at(1.5 + i * gap, () => rig.motifs.join(k), 0));
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  const each = kinds.map((kind, i) => {
+    const m = measureRange(r.buf, 1.5 + i * gap, 1.5 + i * gap + 5);
+    return { kind, lufs: Math.round(m.lufs * 10) / 10, peakDb: Math.round(m.peakDb * 10) / 10 };
+  });
+  return { stats, each, wav: wav ? wavBase64(r.buf) : undefined };
+}
+
+/** every duet flourish and a plate chime over a battle song at intensity 1 */
+export async function renderDuets(song: SongId = 'meadow', wav = false): Promise<{ stats: Stats; each: { id: string; lufs: number; peakDb: number }[]; wav?: string }> {
+  const ids: (DuetId | 'plate')[] = ['march', 'groundwork', 'shimmer', 'fanfare', 'hymn', 'serenade', 'groove', 'thunder', 'plate'];
+  const spb = 60 / SONGS[song].bpm;
+  const bar = 4 * spb;
+  const seconds = 1 + ids.length * 2 * bar + 1;
+  const rig = makeRig(seconds);
+  const p = rig.director.play(song, 0.2, 0.05, 1);
+  if (!p) throw new Error('no song');
+  ids.forEach((id, i) => {
+    const t = p.barStart(1 + i * 2);
+    rig.at(t, () => (id === 'plate' ? rig.motifs.plateUnlock(t, 0.3) : rig.motifs.duet(id, t, -0.3)), 0.12);
+  });
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  const each = ids.map((id, i) => {
+    const a = p.barStart(1 + i * 2);
+    const m = measureRange(r.buf, a, a + bar);
+    return { id, lufs: Math.round(m.lufs * 10) / 10, peakDb: Math.round(m.peakDb * 10) / 10 };
+  });
+  return { stats, each, wav: wav ? wavBase64(r.buf) : undefined };
+}
+
+/** every new creature's death sound over a song (towers silent) */
+export async function renderDeaths(song: SongId = 'desert', wav = false): Promise<{ stats: Stats; wav?: string }> {
+  const kinds: EnemyKind[] = ['scorpion', 'whirl', 'echo', 'wolf', 'ember', 'slug', 'mimic', 'knight', 'conductor', 'blot', 'obelisk', 'bossScarab'];
+  const seconds = 2 + kinds.length * 1.2 + 3;
+  const rig = makeRig(seconds);
+  const p = rig.director.play(song, 0.2, 0.05, 1);
+  if (!p) throw new Error('no song');
+  kinds.forEach((k, i) => {
+    const t = 1 + i * 1.2;
+    rig.at(t, () => rig.towers.enemyDeath(k, t, ((i % 5) - 2) / 2, (tt) => rig.sfx.bossDeath(tt)), 0.1);
+  });
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  return { stats, wav: wav ? wavBase64(r.buf) : undefined };
 }

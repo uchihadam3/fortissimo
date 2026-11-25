@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { SONGS, TOWERS, type EnemyKind, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, INTRO, makeRig, measure, onsetTest, renderAmbience, renderCinema, renderJourney, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, INTRO, INTRO2, makeRig, measure, onsetTest, renderAmbience, renderCinema, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING },
+  offline: { renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;

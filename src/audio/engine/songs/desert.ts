@@ -62,7 +62,7 @@ export const DESERT_N: Line = [
   [[7, 3], [null, 1]],
 ];
 
-const SECTIONS: SecDef[] = [
+export const SECTIONS: SecDef[] = [
   { name: 'A', bars: ['D', 'D', 'Eb', 'D', 'Cm6', 'Gm', 'Eb', 'D'], tune: DESERT_A },
   { name: 'B', bars: ['Gm', 'Cm', 'D', 'D', 'Gm', 'Eb', ['Cm', 'D'], 'D'], tune: DESERT_B },
   { name: 'C', bars: ['Eb', 'D', 'Eb', 'D', 'Cm', 'Bb', 'Eb', 'D'], tune: DESERT_C },

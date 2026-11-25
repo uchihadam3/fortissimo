@@ -558,9 +558,9 @@ export class Director {
   }
 
   /** Start a track whose beat 0 is at context time t0; the previous one fades over `fade`. */
-  play(id: TrackId, t0: number, fade: number, intensity = 0): Player | null {
+  play(id: TrackId, t0: number, fade: number, intensity = 0, fadeFrom?: number): Player | null {
     const f = Math.max(0.02, fade);
-    if (this.current) this.current.stop(f);
+    if (this.current) this.current.stop(f, fadeFrom !== undefined && fadeFrom > this.core.now ? fadeFrom : undefined);
     this.current = null;
     let theme: Theme | null = null;
     try {

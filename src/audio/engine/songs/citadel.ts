@@ -49,7 +49,7 @@ export const CITADEL_C: Line = [
   [[6.5, 4]],
 ];
 
-const SECTIONS: SecDef[] = [
+export const SECTIONS: SecDef[] = [
   { name: 'A', bars: ['Dm', 'Dm/C', 'C', 'A', 'Dm', 'Gm', 'A7', 'Dm'], tune: CITADEL_A },
   { name: 'B', bars: ['Bb', 'C', 'Dm', 'Eb/G', 'Gm', 'Eb', 'A7', 'Dm'], tune: CITADEL_B },
   { name: 'C', bars: ['Dm', 'Dm/C#', 'Dm/C', 'Dm/B', 'Bb', 'Gm6', 'A7sus4', 'A7'], tune: CITADEL_C },
