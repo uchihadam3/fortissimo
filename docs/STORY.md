@@ -269,13 +269,14 @@ de música, e nenhuma tartaruga.
     batendo palmas (a palma derruba o Maestro), a mariposa-aurora voando em círculos — ela pousa no nariz da
     tartaruga, que fica vesga… e **espirra**.
 11. **A noite**: fogos de artifício de notas saindo do casco; o **manto do Silêncio vira as estrelas**.
-12. **O mundo floresce**: a câmera sobe, a cor corre pela Cidadela inteira.
+12. **Amanhece e o mundo floresce**: o sol volta, a câmera sobe, a cor corre pela Cidadela inteira.
 13. **A reverência**: o Maestro se curva, a banda se curva, a tartaruga abaixa a cabeça… e o pequeno Silêncio se
     curva **atrasado**, sozinho.
-14. **Os créditos do elenco**, alegres: cada personagem em close fazendo a sua graça, com o nome (Vovó Tuba,
-    o Maestro, Lira, Bumbo, Dona Badalo, Chocalho, Cristalina, Trompa, os Coralitos, Grave, o Silêncio — "o
+14. **Os créditos do elenco**, alegres: cada personagem em close fazendo a sua graça, com o nome e um apelido
+    (Vovó Tuba, o Maestro, Lira, Bumbo "tambor · e sustos", Dona Badalo, Chocalho "nunca para quieto",
+    Cristalina, Trompa, os Coralitos "quase sempre afinados", Grave "fala pouco, toca fundo", o Silêncio — "o
     respiro entre as notas").
-15. Os créditos rolam sobre a tartaruga andando sob as estrelas novas. **Fim**.
+15. Os créditos rolam sobre a tartaruga andando na manhã nova. **Fim**.
 
 ## O Abismo (segredo, depois do final)
 

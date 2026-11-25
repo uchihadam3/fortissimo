@@ -1922,7 +1922,7 @@ function endingScript(app: App, c: Cine) {
   c.shot(T_WHOLE - 2.2, T_WHOLE + 2.4, { pos: [c.Sh(2.9, 7.5, -3.9), c.Sh(2.3, 7.7, -3.2)], look: c.Sh(0, 7.3, 0), fov: [32, 28] });
   c.at(T_WHOLE - 1.6, () => [0, 1, 2, 3].forEach((i) => turtle.flashFacet(i)));
   c.cue(T_WHOLE, 'ending:bloom');
-  c.flash(T_WHOLE, '#fff4d8', 0.6, 1.0);
+  c.flash(T_WHOLE, '#fff4d8', 0.32, 0.8);
   const pillar = glowSprite('#fff2c2', 1, 0);
   v.scene.add(pillar);
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.9, 160, 20, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2c2').multiplyScalar(1.4), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
@@ -2137,7 +2137,7 @@ function endingScript(app: App, c: Cine) {
   c.at(T_SNEEZE + 3.4, () => {
     turtle.hurt();
     c.shake(0.7);
-    fx.burst(nose().add(tmpV.set(0, 0, -0.6)), '#ffffff', 50, 6, 0.3, 0.9);
+    fx.burst(nose().add(tmpV.set(0, 0, -0.6)), '#e8f4ff', 22, 5, 0.18, 0.8);
     moth.flap = 1.4;
     c.turtleLook = null;
   });
@@ -2166,6 +2166,9 @@ function endingScript(app: App, c: Cine) {
   c.fog(T_NIGHT, 5, '#2a2450', 0.0035);
   // the petals thin out so the night belongs to the fireworks and the new stars
   c.during(T_NIGHT, T_NIGHT + 4, (k) => (petals.alpha = 0.85 * (1 - k * 0.8)));
+  // a darker exposure and a calmer glow, so the night reads as night and the fireworks pop
+  c.exposure(T_NIGHT, 4, 0.78);
+  c.bloom(T_NIGHT, 3, 0.28);
   const fireworks: NoteFirework[] = [];
   for (let i = 0; i < 9; i++) {
     const t0 = T_NIGHT + 1 + i * 0.9;
@@ -2196,6 +2199,8 @@ function endingScript(app: App, c: Cine) {
   // …and a new day breaks over it
   c.sky(T_BLOOM, 6, { top: '#2a3f8a', horizon: '#f6b0a0', glow: '#ffc58a', stars: 0.35, aurora: 0.25 });
   c.light(T_BLOOM, 6, 2.5, 1.0, '#ffd8b0');
+  c.exposure(T_BLOOM, 5, 1.05);
+  c.bloom(T_BLOOM, 4, 0.4);
   c.fog(T_BLOOM, 4, '#a898c0', 0.0022);
   c.shot(T_BLOOM, T_BLOOM + 7, { pos: [c.T(-16, 12, 18), c.T(-40, 48, 64)], look: [c.T(0, 5, -4), c.T(0, 2, -30)], fov: [44, 52], ease: ease.inOut });
   c.walk(T_BLOOM, 0.6, 2);
@@ -2252,7 +2257,7 @@ function endingScript(app: App, c: Cine) {
     c.castName(t0 + 0.3, t0 + CAST_D - 0.3, m.name, m.role, i % 2 === 1);
     m.act?.(t0);
   });
-  // ── 18. the credits roll over the colossus walking on under the new stars
+  // ── 18. the credits roll over the colossus walking on into the new morning
   const T_ROLL = T_CAST + cast.length * CAST_D;
   c.walk(T_ROLL, 0.8, 2);
   const lines: [string, string][] = [

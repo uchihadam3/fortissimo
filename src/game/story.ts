@@ -569,7 +569,7 @@ const CHAPTERS: Record<WorldId, (app: App) => Promise<unknown>> = {
       } }, null);
       c.during(6, 8, (k) => (beamMat.opacity = k * 0.5));
       c.at(6, () => [0, 1, 2, 3].forEach((i) => v.turtle.flashFacet(i)));
-      c.shot(5, 9, { pos: [c.Sh(2.2, 7.4, 2.4), c.Sh(1.6, 7.6, 2.0)], look: c.Sh(0, 7.4, 0), fov: 30 });
+      c.shot(5, 9, { pos: [c.Sh(3.6, 8.0, 3.8), c.Sh(3.0, 8.2, 3.2)], look: c.Sh(0, 7.2, 0), fov: 36 });
       // 3. up the stairs, toward the Needle
       c.cue(9, 'story:dread');
       c.shot(9, 15, { pos: [c.T(6, 9, 14), c.T(4, 12, 20)], look: [c.T(0, 8, -20), () => v.landmark.top(new THREE.Vector3())], fov: [44, 40] });
@@ -792,7 +792,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       const pr = c.add(new CrystalPrison());
       pr.group.position.copy(spot);
       // big enough to hold her (the crystals stand in a ring around her)
-      pr.group.scale.setScalar(1.7);
+      pr.group.scale.setScalar(1.35);
       // asleep inside the grey crystal
       const cri = c.musician('crystal', spot.clone().setY(spot.y + 0.1), { pose: 'sleep' });
       cri.holder.lookAt(v.turtle.group.position.x, cri.holder.position.y, v.turtle.group.position.z);
@@ -1317,7 +1317,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.placeName(0.8, 4.4, placeOf('f3', lang));
       c.shot(5, 9.6, { pos: [c.R(() => anvilAt, -8, 3, -8), c.R(() => anvilAt, -7, 3.4, -6)], look: () => anvilAt.clone().setY(anvilAt.y + 5), fov: 40 });
       c.cue(9.6, 'story:threat');
-      c.shot(9.6, 14, { pos: [c.T(1.0, 7.1, -1.9), c.T(0.9, 7.3, -2.3)], look: () => golemAt.clone().setY(golemAt.y + 6), fov: [22, 16] });
+      c.shot(9.6, 14, { pos: [c.T(1.0, 7.1, -1.9), c.T(0.9, 7.3, -2.3)], look: () => golemAt.clone().setY(golemAt.y + 6), fov: [34, 27] });
       c.end(14);
     });
   },
@@ -1350,7 +1350,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
         v.fx.dust(golemAt.clone().setY(golemAt.y + 0.5), '#5a4a42', 90);
         c.pose('all', 'scared');
       });
-      c.shot(4.4, 8.4, { pos: [() => golemAt.clone().add(new THREE.Vector3(-5, 1.2, -9).applyAxisAngle(new THREE.Vector3(0, 1, 0), golem.yaw)), () => golemAt.clone().add(new THREE.Vector3(-4, 1.0, -7.4).applyAxisAngle(new THREE.Vector3(0, 1, 0), golem.yaw))], look: () => golemAt.clone().setY(golemAt.y + 7), fov: 46 });
+      c.shot(4.4, 8.4, { pos: [() => golemAt.clone().add(new THREE.Vector3(-9, 1.8, -17).applyAxisAngle(new THREE.Vector3(0, 1, 0), golem.yaw)), () => golemAt.clone().add(new THREE.Vector3(-8, 1.5, -15).applyAxisAngle(new THREE.Vector3(0, 1, 0), golem.yaw))], look: () => golemAt.clone().setY(golemAt.y + 7), fov: 46 });
       c.shot(8.4, 12, { pos: [c.Sh(2.6, 6.2, -5), c.Sh(2.2, 6.4, -4.6)], look: c.mix(c.Sh(0, 6, -1), () => golemAt.clone().setY(golemAt.y + 8), 0.5), fov: 42, shake: 0.1 });
       c.end(12);
     });

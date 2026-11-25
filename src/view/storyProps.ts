@@ -447,7 +447,7 @@ export class CrystalPrison {
   /** 0 grey … 1 glowing lilac (about to break) */
   charge = 0;
   constructor() {
-    this.mat = new THREE.MeshStandardMaterial({ color: '#8f8aa3', roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.72, flatShading: true, emissive: new THREE.Color('#c58bff'), emissiveIntensity: 0, depthWrite: false });
+    this.mat = new THREE.MeshStandardMaterial({ color: '#8f8aa3', roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.5, flatShading: true, emissive: new THREE.Color('#c58bff'), emissiveIntensity: 0, depthWrite: false });
     const rng = new Rng(9);
     for (let i = 0; i < 11; i++) {
       const a = (i / 11) * Math.PI * 2 + rng.range(-0.2, 0.2);
