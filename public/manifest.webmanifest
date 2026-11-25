@@ -1,0 +1,20 @@
+{
+  "name": "FORTÍSSIMO",
+  "short_name": "FORTÍSSIMO",
+  "description": "Um tower defense musical em 3D: uma tartaruga colossal carrega uma orquestra pelo mundo, e a sua defesa toca a música. Uchihadam Production.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0b0912",
+  "theme_color": "#0b0912",
+  "lang": "pt-BR",
+  "categories": ["games", "entertainment", "music"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

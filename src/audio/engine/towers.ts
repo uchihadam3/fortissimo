@@ -1,0 +1,411 @@
+/**
+ * Tower voices, impacts, enemy deaths, coins, deflects — the sounds that ARE notes of the song.
+ *
+ *  - Every pitch comes from the song's harmony at the exact time `t` (Director.chordAt), which
+ *    is a pure function of the bar index, so towers are always consonant with the backing.
+ *  - Mix safety with 20+ towers: per-kind caps per 16th step, a global cap per step, velocity that
+ *    falls with the number of towers of a kind heard in the last bar, shared pan buses (a voice is
+ *    just source + gain), compressed panning for low sounds, and a glue compressor on the bus.
+ *  - Sounds start exactly at `t` (no humanisation) so they sit on the grid.
+ */
+import type { EnemyKind, TowerKind } from '../../sim/defs';
+import type { Core } from './core';
+import { Fx } from './fx';
+import type { Director } from './music';
+import { BufferBank, Channel, type BufInst, playBuf } from './synth';
+import { bassNote, chord, chordTones, type Chord, pcOf, voiceLead } from './theory';
+import { clamp, rand } from './util';
+
+type WetClass = 0 | 1 | 2;
+
+interface KindCfg {
+  cap: number;
+  base: number;
+  wet: WetClass;
+  panMul: number;
+}
+
+const KIND: Record<TowerKind, KindCfg> = {
+  harp: { cap: 3, base: 0.6, wet: 1, panMul: 1 },
+  drum: { cap: 2, base: 0.21, wet: 0, panMul: 0.35 },
+  bell: { cap: 2, base: 0.14, wet: 2, panMul: 0.8 },
+  shaker: { cap: 1, base: 0.24, wet: 1, panMul: 1 },
+  crystal: { cap: 3, base: 0.36, wet: 1, panMul: 1 },
+  horn: { cap: 3, base: 0.38, wet: 1, panMul: 0.6 },
+  choir: { cap: 1, base: 0.135, wet: 2, panMul: 0.5 },
+  bass: { cap: 1, base: 0.26, wet: 0, panMul: 0.2 },
+};
+
+const BUS_PANS = [-0.65, -0.32, 0, 0.32, 0.65];
+const WETS = [0.07, 0.2, 0.42];
+/** at most this many tower voices start on one 16th step */
+const STEP_CAP = 10;
+/** the tower bus compressor delays its signal by its 6 ms look-ahead: towers start that much earlier
+ *  so they leave the mix exactly together with the music (which skips that compressor) */
+const COMP = 0.006;
+
+const pingpong = (i: number, n: number): number => {
+  if (n <= 1) return 0;
+  const p = 2 * n - 2;
+  const k = ((i % p) + p) % p;
+  return k < n ? k : p - k;
+};
+
+export class Towers {
+  private readonly fx: Fx;
+  private readonly buses: Channel[][];
+  private readonly stepCounts = new Map<string, number>();
+  private readonly lastByVoice: Record<string, Map<number, number>> = {};
+  private readonly crystal = new Map<number, { step: number; idx: number }>();
+  private readonly choirStep = new Map<number, { notes: number[]; extra: number }>();
+  private deathBar = -1;
+  private deathIdx = 0;
+  private coinBar = -1;
+  private coinIdx = 0;
+  private lastCoin = -1;
+  private coinAcc = 0;
+  private lastDeflect = -1;
+  private prune = 0;
+  /** when set, every tower voice start time is recorded (grid checks) */
+  debugLog: { kind: string; t: number }[] | null = null;
+
+  constructor(
+    private readonly core: Core,
+    private readonly bank: BufferBank,
+    private readonly director: Director,
+  ) {
+    this.fx = new Fx(core, bank);
+    this.buses = WETS.map((wet) => BUS_PANS.map((pan) => new Channel(core, core.towerBus, core.sfxWet, { pan, wet, gain: 1 })));
+    // tower instruments first (they are the melody of every battle)
+    bank.warm('harp', 55, 96, 3);
+    bank.warm('taiko', 30, 46, 3);
+    bank.warm('tbell', 55, 80, 3);
+    bank.warm('shaker', 60, 60, 3);
+    bank.warm('zap', 70, 93, 3);
+    bank.warm('brass', 45, 75, 3);
+    bank.warm('choir', 53, 76, 4);
+    bank.warm('choiroo', 53, 76, 4);
+    bank.warm('boom', 26, 42, 3);
+    bank.warm('celesta', 74, 98, 4);
+    bank.warm('glass', 76, 98, 4);
+    bank.warm('tick', 60, 60, 4);
+    bank.warm('kick', 60, 60, 4);
+    bank.warm('anvil', 84, 96, 5);
+  }
+
+  // ───────────────────────────── grid & harmony ─────────────────────────────
+
+  private grid(t: number): { step: number; stepInBar: number; barDur: number; spb: number; bar: number } {
+    const p = this.director.ref;
+    if (!p) {
+      const spb = 0.6;
+      const step = Math.round(t / (spb / 4));
+      return { step, stepInBar: ((step % 16) + 16) % 16, barDur: spb * 4, spb, bar: Math.floor(step / 16) };
+    }
+    const sd = p.spb / 4;
+    const step = Math.round((t - p.t0) / sd);
+    const spbar = p.theme.beats * 4;
+    return { step, stepInBar: ((step % spbar) + spbar) % spbar, barDur: p.barDur, spb: p.spb, bar: Math.floor(step / spbar) };
+  }
+
+  private chordAt(t: number): Chord {
+    return this.director.chordAt(t) ?? chord(this.fallbackKey());
+  }
+
+  private fallbackKey(): string {
+    return 'C';
+  }
+
+  /** time until the harmony no longer contains `midi` (max `maxBeats` beats) */
+  private holdFor(t: number, midi: number, spb: number, maxBeats: number): number {
+    const pc = pcOf(midi);
+    for (let k = 1; k <= maxBeats; k++) {
+      const c = this.chordAt(t + k * spb - 0.001);
+      if (!c.pcs.includes(pc)) return Math.max(spb * 0.9, k * spb - 0.03);
+    }
+    return maxBeats * spb;
+  }
+
+  /** claims a slot on this 16th step for `kind`; returns its order (0 = first) or −1 if full */
+  private claim(kind: string, step: number, cap: number): number {
+    const key = `${kind}:${step}`;
+    const all = `*:${step}`;
+    const n = this.stepCounts.get(key) ?? 0;
+    const tot = this.stepCounts.get(all) ?? 0;
+    if (n >= cap || tot >= STEP_CAP) return -1;
+    this.stepCounts.set(key, n + 1);
+    this.stepCounts.set(all, tot + 1);
+    if (++this.prune > 400) {
+      this.prune = 0;
+      for (const k of this.stepCounts.keys()) {
+        const s = Number(k.slice(k.indexOf(':') + 1));
+        if (s < step - 256) this.stepCounts.delete(k);
+      }
+    }
+    return n;
+  }
+
+  /** all towers heard recently (any kind) → a gentle global factor so 30 towers ≈ a few dB above 5 */
+  private readonly all = new Map<string, number>();
+  private globalDensity(kind: string, voice: number, t: number, barDur: number): number {
+    this.all.set(`${kind}:${voice}`, t);
+    let n = 0;
+    for (const [k, tt] of this.all) {
+      if (tt > t - barDur * 1.25) n++;
+      else if (tt < t - barDur * 8) this.all.delete(k);
+    }
+    return 1 / Math.sqrt(1 + 0.07 * Math.max(0, n - 1));
+  }
+
+  /** overall level of tower voices: calibrated so that one tower of each kind ≈ the backing's loudness */
+  trim = 0.66;
+
+  /** velocity factor from how many towers of this kind were heard during the last bar */
+  private density(kind: TowerKind, voice: number, t: number, barDur: number): number {
+    let m = this.lastByVoice[kind];
+    if (!m) m = this.lastByVoice[kind] = new Map();
+    m.set(voice, t);
+    let n = 0;
+    for (const [v, tt] of m) {
+      if (tt > t - barDur * 1.25) n++;
+      else if (tt < t - barDur * 8) m.delete(v);
+    }
+    return 1 / Math.sqrt(1 + 0.35 * Math.max(0, n - 1));
+  }
+
+  private bus(wet: WetClass, pan: number, mul: number): Channel {
+    const p = clamp((Number.isFinite(pan) ? pan : 0) * mul, -1, 1);
+    const i = clamp(Math.round((p + 1) * 2), 0, 4);
+    return this.buses[wet][i];
+  }
+
+  private note(inst: BufInst, ch: Channel, t: number, midi: number, vel: number, dur: number, o: { release?: number; lp?: number; cap?: number; cat?: string; bend?: number; bendTime?: number } = {}, kind = 'tower'): void {
+    if (!(vel > 0.001)) return;
+    playBuf(this.core, this.bank, inst, ch.input, t - COMP, midi, vel, dur, { cat: o.cat ?? 'tower', cap: o.cap ?? 110, release: o.release, lp: o.lp, bend: o.bend, bendTime: o.bendTime });
+    if (this.debugLog && this.debugLog.length < 20000) this.debugLog.push({ kind, t });
+  }
+
+  // ───────────────────────────── tower shots ─────────────────────────────
+
+  shot(kind: TowerKind, level: number, t: number, pan: number, voice: number): void {
+    const cfg = KIND[kind];
+    if (!cfg) return;
+    const lv = clamp(Math.round(Number.isFinite(level) ? level : 0), 0, 2);
+    const v = Math.abs(Math.round(Number.isFinite(voice) ? voice : 0));
+    const g = this.grid(t);
+    const order = this.claim(kind, g.step, cfg.cap);
+    if (order < 0 && kind !== 'choir') return;
+    const dens = this.density(kind, v, t, g.barDur) * this.globalDensity(kind, v, t, g.barDur);
+    const vel = this.trim * cfg.base * dens * (order <= 0 ? 1 : order === 1 ? 0.8 : 0.66) * (1 + 0.08 * lv);
+    const ch = this.bus(cfg.wet, pan, cfg.panMul);
+    const c = this.chordAt(t);
+    const accent = g.stepInBar === 0 ? 1.08 : g.stepInBar % 4 === 0 ? 1 : 0.9;
+    switch (kind) {
+      case 'harp': {
+        const regs: [number, number][] = [[62, 79], [67, 84], [57, 74]];
+        const [lo, hi] = regs[v % 3];
+        const pcs = c.pcs.slice(0, 4);
+        const tones = chordTones(c, lo, hi).filter((m) => pcs.includes(pcOf(m)));
+        if (!tones.length) return;
+        const pos = Math.floor(g.stepInBar / 2) + v * 2;
+        const m = tones[pingpong(pos, tones.length)];
+        const dur = Math.min(1.3 * g.spb, this.holdFor(t, m, g.spb, 2));
+        const lp = lv === 0 ? 3000 : lv === 1 ? 4600 : undefined;
+        this.note('harp', ch, t, m, vel * accent, dur, { release: 0.35, lp }, kind);
+        if (lv === 2 && m + 12 <= 93) this.note('harp', ch, t, m + 12, vel * 0.4, dur * 0.8, { release: 0.3 }, kind);
+        break;
+      }
+      case 'drum': {
+        const p = this.director.ref;
+        const tonic = p ? p.theme.key.tonicPc : 0;
+        let r = 33;
+        while (pcOf(r) !== tonic) r++;
+        const m = v % 2 === 0 ? r : r - 5;
+        this.note('taiko', ch, t, m, vel * accent, 2, { release: 0.6 }, kind);
+        if (lv >= 1) this.note('tom', ch, t, m + 12, vel * 0.22 * lv, 0.4, { release: 0.2 }, kind);
+        break;
+      }
+      case 'bell': {
+        const which = [0, 2, 1][v % 3];
+        const pc = c.pcs[Math.min(which, c.pcs.length - 1)];
+        let m = 60;
+        while (pcOf(m) !== pc) m++;
+        if (m > 74) m -= 12;
+        const dur = this.holdFor(t, m, g.spb, 10);
+        this.note('tbell', ch, t, m, vel * accent, dur, { release: 1.2, cap: 110 }, kind);
+        if (lv >= 1) this.note('glass', ch, t, m + 24, vel * (lv === 2 ? 0.16 : 0.09), Math.min(dur, 3), { release: 1 }, kind);
+        break;
+      }
+      case 'shaker': {
+        const off = g.stepInBar % 4 === 2;
+        const n = order < 0 ? 0 : 1;
+        if (!n) return;
+        this.note('shaker', ch, t, 60 + (off ? 0 : 1.2) + rand(-0.15, 0.15), vel * (off ? 1 : 0.62), 0.2, { release: 0.05 }, kind);
+        break;
+      }
+      case 'crystal': {
+        const st = this.crystal.get(v);
+        const idx = st && g.step - st.step <= 4 && g.step > st.step ? st.idx + 1 : 0;
+        this.crystal.set(v, { step: g.step, idx });
+        const tones = chordTones(c, 72, 91);
+        if (!tones.length) return;
+        // each burst climbs the chord from a voice-dependent starting tone
+        const start = (v % 2) + (g.stepInBar >= 8 ? 1 : 0);
+        const m = tones[Math.min(start + idx, tones.length - 1)];
+        this.note('zap', ch, t, m, vel * accent, 0.5, { release: 0.25, lp: lv === 0 ? 6000 : undefined }, kind);
+        if (lv === 2) this.note('zap', ch, t, m + 12 <= 99 ? m + 12 : m, vel * 0.25, 0.3, { release: 0.2 }, kind);
+        break;
+      }
+      case 'horn': {
+        const root = bassNote(c, 48);
+        const fifthPc = c.pcs[Math.min(2, c.pcs.length - 1)];
+        let fifth = root + 1;
+        while (pcOf(fifth) !== fifthPc) fifth++;
+        const pick = order <= 0 ? v % 2 : order;
+        const m = pick === 0 ? root : pick === 1 ? fifth : root + 12;
+        const dur = Math.min(1.6 * g.spb, this.holdFor(t, m, g.spb, 2));
+        this.note('brass', ch, t, m, vel * accent, dur, { release: 0.28 }, kind);
+        if (lv === 2) this.note('brass', ch, t, m + 12, vel * 0.42, dur * 0.85, { release: 0.25 }, kind);
+        break;
+      }
+      case 'choir': {
+        const inst: BufInst = v % 2 === 0 ? 'choir' : 'choiroo';
+        const span = lv === 2 ? 2 : 4;
+        const dur = Math.min(span * g.spb, this.holdFor(t, bassNote(c, 55), g.spb, span) + 0.05);
+        const prev = this.choirStep.get(g.step);
+        if (prev) {
+          // another choir tower on the same step: widen the chord (at most two extra voices)
+          if (prev.extra >= 2) return;
+          prev.extra++;
+          const top = Math.max(...prev.notes);
+          const up = chordTones(c, top + 1, top + 9)[0];
+          if (up === undefined) return;
+          prev.notes.push(up);
+          this.note(inst, ch, t, up, vel * 0.55, dur, { release: 0.7, cap: 110 }, kind);
+          return;
+        }
+        const notes = voiceLead(this.lastChoir, c, 55, 72, 3);
+        this.lastChoir = notes;
+        this.choirStep.set(g.step, { notes: [...notes], extra: 0 });
+        if (this.choirStep.size > 64) for (const k of this.choirStep.keys()) if (k < g.step - 64) this.choirStep.delete(k);
+        notes.forEach((m, i) => this.note(inst, ch, t, m, vel * (i === 0 ? 1 : 0.85), dur, { release: 0.7, cap: 110 }, kind));
+        break;
+      }
+      case 'bass': {
+        const m = bassNote(c, 28);
+        this.note('boom', ch, t, m, vel * accent, 2.2, { release: 0.5 }, kind);
+        if (lv >= 1) this.note('boom', ch, t, m + 12, vel * 0.18 * lv, 1, { release: 0.3 }, kind);
+        break;
+      }
+    }
+  }
+  private lastChoir: number[] | null = null;
+  private impacts: number[] = [];
+
+  // ───────────────────────────── impacts ─────────────────────────────
+
+  impact(kind: TowerKind, t: number, pan: number, strength: number): void {
+    const s = clamp(Number.isFinite(strength) ? strength : 0.5, 0, 1.5);
+    if (kind === 'bell' || kind === 'choir' || kind === 'shaker') return;
+    const g = this.grid(t);
+    const cap = kind === 'bass' || kind === 'horn' ? 1 : 2;
+    const order = this.claim(`imp-${kind}`, g.step, cap);
+    if (order < 0) return;
+    // impacts thin out as they get dense (they are not towers: separate bookkeeping)
+    this.impacts = this.impacts.filter((x) => x > t - g.barDur);
+    this.impacts.push(t);
+    const dens = 1 / Math.sqrt(1 + 0.04 * Math.max(0, this.impacts.length - 4));
+    const ch = this.bus(kind === 'drum' || kind === 'bass' ? 0 : 1, pan, KIND[kind].panMul);
+    const v = this.trim * 1.25 * (0.4 + 0.6 * s) * (order === 0 ? 1 : 0.7) * dens;
+    switch (kind) {
+      case 'drum':
+        this.note('taiko', ch, t, 29, 0.42 * v, 1.2, { release: 0.4, lp: 900 }, 'impact');
+        this.fx.burst(ch.input, t - COMP, { noise: 'pink', type: 'lowpass', f: 700, f1: 200, d: 0.14, g: 0.12 * v, cat: 'impact' });
+        break;
+      case 'harp': {
+        const tones = chordTones(this.chordAt(t), 86, 96);
+        this.note('tick', ch, t, 72 + rand(-2, 2), 0.2 * v, 0.1, {}, 'impact');
+        if (tones.length) this.note('harp', ch, t, tones[g.step % tones.length], 0.08 * v, 0.15, { release: 0.1 }, 'impact');
+        break;
+      }
+      case 'bass':
+        this.note('kick', ch, t, 48, 0.5 * v, 0.8, { release: 0.3 }, 'impact');
+        this.fx.burst(ch.input, t - COMP, { noise: 'brown', type: 'lowpass', f: 260, d: 0.2, g: 0.35 * v, cat: 'impact' });
+        break;
+      case 'crystal': {
+        for (let k = 0; k < 4; k++) this.fx.burst(ch.input, t - COMP + k * 0.014 + rand(0, 0.008), { noise: 'white', type: 'highpass', f: rand(3500, 6500), a: 0.0006, d: rand(0.004, 0.012), g: rand(0.04, 0.08) * v, cat: 'impact' });
+        const tones = chordTones(this.chordAt(t), 91, 100);
+        if (tones.length) this.note('glass', ch, t + 0.01, tones[g.step % tones.length], 0.05 * v, 0.3, { release: 0.3 }, 'impact');
+        break;
+      }
+      case 'horn':
+        this.fx.burst(ch.input, t - COMP, { noise: 'pink', f: 700, f1: 2400, q: 0.9, a: 0.03, d: 0.16, g: 0.05 * v, cat: 'impact' });
+        break;
+    }
+  }
+
+  // ───────────────────────────── enemies ─────────────────────────────
+
+  enemyDeath(kind: EnemyKind, t: number, pan: number, bossHook: (t: number) => void): void {
+    const boss = kind === 'bossBlot' || kind === 'bossScarab' || kind === 'bossMoth' || kind === 'bossGolem' || kind === 'silence';
+    if (boss) {
+      bossHook(t);
+      return;
+    }
+    const g = this.grid(t);
+    const order = this.claim('death', g.step, 3);
+    const ch = this.bus(1, pan, 0.9);
+    // the pop
+    const pop: Record<string, [number, number]> = { blotling: [520, 1500], shell: [170, 480], bubble: [210, 720], scurry: [380, 1200], moth: [600, 1600] };
+    const [f0, f1] = pop[kind] ?? [300, 950];
+    if (order < 0 && this.core.voiceCount('pop') > 8) return;
+    this.fx.tone(ch.input, t - COMP, { f: f0, f1, a: 0.002, d: kind === 'bubble' ? 0.07 : 0.035, g: 0.065, cat: 'pop' });
+    this.fx.burst(ch.input, t - COMP, { noise: 'white', f: kind === 'shell' ? 900 : 2200, q: 1.2, d: 0.025, g: 0.028, cat: 'pop' });
+    if (kind === 'shell') this.note('wood', ch, t, 50, 0.17, 0.2, {}, 'death');
+    if (kind === 'shield') this.note('anvil', ch, t, 88, 0.035, 0.3, { release: 0.3 }, 'death');
+    if (order < 0) return;
+    // the released note: climbs the chord with every defeat in the bar
+    if (g.bar !== this.deathBar) {
+      this.deathBar = g.bar;
+      this.deathIdx = 0;
+    }
+    const tones = chordTones(this.chordAt(t), kind === 'blotling' ? 84 : 76, kind === 'blotling' ? 96 : 91);
+    if (!tones.length) return;
+    const m = tones[this.deathIdx++ % tones.length];
+    const inst: BufInst = kind === 'phantom' || kind === 'moth' ? 'glass' : kind === 'mender' ? 'harp' : 'celesta';
+    this.note(inst, ch, t + 0.012, m, (kind === 'blotling' ? 0.07 : 0.11) * (order === 0 ? 1 : 0.75), 1.2, { release: 0.8 }, 'death');
+  }
+
+  coin(t: number, pan: number, amount: number): void {
+    const a = clamp(Number.isFinite(amount) ? amount : 1, 0, 1000);
+    // throttle: merge coins arriving within 60 ms
+    if (t - this.lastCoin < 0.06) {
+      this.coinAcc += a;
+      return;
+    }
+    const total = a + this.coinAcc;
+    this.coinAcc = 0;
+    this.lastCoin = t;
+    const g = this.grid(t);
+    if (g.bar !== this.coinBar) {
+      this.coinBar = g.bar;
+      this.coinIdx = 0;
+    }
+    const tones = chordTones(this.chordAt(t), 84, 98);
+    if (!tones.length) return;
+    const n = total >= 20 ? 3 : total >= 6 ? 2 : 1;
+    const ch = this.bus(1, pan, 0.8);
+    for (let k = 0; k < n; k++) {
+      const m = tones[(this.coinIdx++) % tones.length];
+      this.note(k % 2 ? 'glass' : 'celesta', ch, t + k * 0.045, m, 0.055 + 0.016 * Math.min(3, Math.log2(1 + total)), 0.5, { release: 0.5, cap: 110, cat: 'coin' }, 'coin');
+    }
+  }
+
+  deflect(t: number, pan: number): void {
+    if (t - this.lastDeflect < 0.04) return;
+    this.lastDeflect = t;
+    const ch = this.bus(1, pan, 0.9);
+    this.note('anvil', ch, t, 92 + rand(-1, 1), 0.13, 0.25, { release: 0.25 }, 'deflect');
+    this.fx.burst(ch.input, t - COMP, { noise: 'white', type: 'highpass', f: 5000, a: 0.0008, d: 0.03, g: 0.05, cat: 'impact' });
+  }
+}

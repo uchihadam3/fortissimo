@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FORTÍSSIMO — audio lab</title>
+    <style>
+      body { margin: 0; padding: 18px; background: #14111c; color: #ece4d2; font: 14px/1.4 system-ui, sans-serif; }
+      h1 { font-weight: 600; letter-spacing: .25em; margin: 0 0 4px; }
+      .sub { color: #a99f8c; margin: 0 0 14px; }
+      h2 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #e3b660; margin: 18px 0 6px; }
+      .note { color: #9a917f; margin: 0 0 6px; font-size: 12px; }
+      section { border-top: 1px solid #2d2839; padding-bottom: 8px; }
+      button { background: #241f33; color: #eee; border: 1px solid #3d3652; border-radius: 6px; padding: 5px 9px; margin: 3px; cursor: pointer; font-size: 13px; }
+      button:hover { background: #312a46; }
+      .row { display: flex; flex-wrap: wrap; align-items: center; }
+      .lbl { width: 90px; color: #b9ad94; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+      .slider { display: inline-flex; flex-direction: column; margin: 4px 12px 4px 0; min-width: 150px; }
+      .status { margin-left: 12px; color: #9fdcc8; font-family: ui-monospace, monospace; font-size: 12px; }
+      select { background: #241f33; color: #eee; border: 1px solid #3d3652; padding: 4px; margin: 3px; }
+      .out { background: #0e0c14; padding: 8px; border-radius: 6px; max-height: 320px; overflow: auto; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>FORTÍSSIMO · AUDIO LAB</h1>
+    <p class="sub">A orquestra que caminha — every song, tower voice, cue and sound. Click “Unlock audio” first.</p>
+    <div id="lab"></div>
+    <script type="module" src="../src/audio/lab.ts"></script>
+  </body>
+</html>
