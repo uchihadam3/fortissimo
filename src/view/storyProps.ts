@@ -1149,12 +1149,22 @@ export function shadowify(o: THREE.Object3D, color = '#120f1c') {
 // ───────────────────────────── the redeemed guardians ─────────────────────────────
 
 /** The Scarab, freed: an ordinary golden beetle that walks off, calm (and dances at the end). */
+/** turn a prop whose head points down its local -z toward (x, z) (Object3D.lookAt points +z) */
+function faceToward(o: THREE.Object3D, x: number, z: number) {
+  const dx = x - o.position.x, dz = z - o.position.z;
+  if (dx * dx + dz * dz > 1e-6) o.rotation.y = Math.atan2(-dx, -dz);
+}
+
 export class GoldenScarab {
   readonly group = new THREE.Group();
   private legs: THREE.Mesh[] = [];
   private body = new THREE.Group();
   walk = 0;
   dance = 0;
+  /** turn its head toward a world point (on the ground plane) */
+  faceTo(x: number, z: number) {
+    faceToward(this.group, x, z);
+  }
   constructor() {
     const gold = stdMat('#e9b949', 0.25, 0.85);
     const dark = stdMat('#7a5a1a', 0.4, 0.6);
@@ -1211,6 +1221,10 @@ export class AuroraMoth {
   /** 0 grey dust … 1 aurora colours */
   aurora = 1;
   flap = 1;
+  /** turn its head toward a world point (on the ground plane) */
+  faceTo(x: number, z: number) {
+    faceToward(this.group, x, z);
+  }
   constructor(span = 7) {
     this.wingMat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uAurora: { value: 1 } },

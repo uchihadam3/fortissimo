@@ -908,6 +908,8 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       const gold = c.add(new GoldenScarab());
       gold.group.position.copy(spot);
       gold.group.visible = false;
+      // freed, it turns to the colossus (to thank it) until it walks away
+      c.add({ update: () => { if (!gold.walk) gold.faceTo(c.view.turtle.group.position.x, c.view.turtle.group.position.z); } }, null);
       c.at(2.2, () => {
         sc.visible = false;
         gold.group.visible = true;
@@ -920,7 +922,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.during(9, 20, (k) => {
         gold.group.position.lerpVectors(spot, away, k);
         gold.group.position.y = c.view.land.heightAt(gold.group.position.x, gold.group.position.z);
-        gold.group.lookAt(away.x, gold.group.position.y, away.z);
+        gold.faceTo(away.x, away.z);
       });
     },
     extra: (c) => {
@@ -1156,7 +1158,7 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.add({ update: () => {
         grey.pos.copy(spot);
         moth.group.position.copy(hover).add(tmp.set(0, Math.sin(c.wt * 1.5) * 0.6, 0));
-        moth.group.lookAt(c.view.turtle.group.position.x, moth.group.position.y, c.view.turtle.group.position.z);
+        moth.faceTo(c.view.turtle.group.position.x, c.view.turtle.group.position.z);
       } }, null);
       c.at(1.4, () => {
         grey.visible = false;

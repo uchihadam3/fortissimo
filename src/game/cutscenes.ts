@@ -247,6 +247,8 @@ const CINE_CSS = `
 .cine-overlay .cine-roll .cl span { display: block; color: rgba(255,247,230,.7); letter-spacing: .16em; text-transform: uppercase; font-size: 12px; font-family: var(--round, sans-serif); font-weight: 800; }
 .cine-overlay .cine-roll .cl b { display: block; font-family: var(--serif, Georgia, serif); font-size: clamp(18px, 2.4vw, 28px); color: #fff7e6; text-shadow: 0 2px 10px rgba(0,0,0,.9); }
 .cine-overlay .cine-roll .cl.big b { font-family: var(--deco, Georgia, serif); color: #ffe9a8; font-size: clamp(26px, 4vw, 48px); }
+.cine-overlay .skip { transition: opacity .8s ease; }
+.cine-overlay.idle .skip { opacity: 0; }
 `;
 
 /** A running cinematic: its world, the colossus, the Maestro and the band, the overlay, the timeline. */
@@ -366,7 +368,16 @@ export class Cine {
     // hold to skip (or the button)
     let holdT = 0;
     let holding = false;
-    const down = () => (holding = true);
+    // the skip button shows for the first seconds and whenever someone touches anything, then fades away
+    let idleT = 0;
+    const wake = () => {
+      idleT = 0;
+      this.overlay.classList.remove('idle');
+    };
+    const down = () => {
+      holding = true;
+      wake();
+    };
     const up = () => {
       holding = false;
       holdT = 0;
@@ -378,15 +389,19 @@ export class Cine {
     });
     window.addEventListener('pointerdown', down);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointermove', wake);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     this.cleanups.push(() => {
       window.removeEventListener('pointerdown', down);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointermove', wake);
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     });
     this.remove = eng.onUpdate((dt) => {
+      idleT += dt;
+      if (idleT > 4 && !holding) this.overlay.classList.add('idle');
       if (holding) {
         holdT += dt;
         skipBtn.style.setProperty('--hold', String(Math.min(1, holdT / 1.2)));
@@ -826,12 +841,17 @@ export class Cine {
   /** a cast name in the credits */
   castName(t0: number, t1: number, name: string, role: string, right = false) {
     const el = this.overlay.querySelector('.cine-cast') as HTMLElement;
+    let live = false;
     this.at(t0, () => {
+      live = true;
       el.className = `cine-cast ${right ? 'right' : ''}`;
       el.innerHTML = `<b>${name}</b><span>${role}</span>`;
-      requestAnimationFrame(() => el.classList.add('show'));
+      requestAnimationFrame(() => live && el.classList.add('show'));
     });
-    this.at(t1, () => el.classList.remove('show'));
+    this.at(t1, () => {
+      live = false;
+      el.classList.remove('show');
+    });
   }
   /** the violet music-box frame of a memory */
   memoryFrame(t: number, on: boolean) {
@@ -1877,7 +1897,7 @@ function endingScript(app: App, c: Cine) {
   c.flash(T_WHOLE, '#fff4d8', 0.6, 1.0);
   const pillar = glowSprite('#fff2c2', 1, 0);
   v.scene.add(pillar);
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 2.2, 160, 24, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2c2').multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.9, 160, 20, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2c2').multiplyScalar(1.4), transparent: true, opacity: 0, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
   v.scene.add(beam);
   c.at(T_WHOLE, () => {
     turtle.heartGlow = 1.3;
@@ -1888,10 +1908,10 @@ function endingScript(app: App, c: Cine) {
     sil.reach(null);
     sil.pose = 'small';
   });
-  c.during(T_WHOLE, T_WHOLE + 14, (k) => {
+  c.during(T_WHOLE, T_WHOLE + 8, (k) => {
     const h = heart();
     beam.position.copy(h).setY(h.y + 80);
-    (beam.material as THREE.MeshBasicMaterial).opacity = Math.sin(Math.PI * Math.min(1, k * 1.2)) * 0.45;
+    (beam.material as THREE.MeshBasicMaterial).opacity = Math.sin(Math.PI * k) * 0.32;
     pillar.position.copy(h);
     pillar.scale.setScalar(3 + Math.sin(k * 40) * 0.3);
     (pillar.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.55;
@@ -2037,12 +2057,13 @@ function endingScript(app: App, c: Cine) {
   const scarabFrom = c.roadPoint(c.s0 - 4, -30, 0), scarabTo = c.roadPoint(c.s0 + 3, -11, 0);
   c.during(T_GUESTS, T_GUESTS + 4, (k) => {
     scarab.group.position.lerpVectors(scarabFrom, scarabTo, ease.out(k));
-    scarab.group.lookAt(scarabTo.x, scarab.group.position.y, scarabTo.z);
+    scarab.group.position.y = v.land.heightAt(scarab.group.position.x, scarab.group.position.z);
+    scarab.faceTo(scarabTo.x, scarabTo.z);
   });
   c.at(T_GUESTS + 4, () => {
     scarab.walk = 0;
     scarab.dance = 1;
-    scarab.group.lookAt(turtle.group.position.x, scarab.group.position.y, turtle.group.position.z);
+    scarab.faceTo(turtle.group.position.x, turtle.group.position.z);
   });
   const golemFrom = c.roadPoint(c.s0 + 10, 40, 0), golemTo = c.roadPoint(c.s0 + 2, 13, 0);
   c.during(T_GUESTS + 1, T_GUESTS + 5, (k) => {
@@ -2055,10 +2076,12 @@ function endingScript(app: App, c: Cine) {
     const tp = turtle.group.position;
     const a = k * Math.PI * 1.6 + 1;
     moth.group.position.set(tp.x + Math.cos(a) * 16, tp.y + 14 + Math.sin(k * 9) * 1.5, tp.z + Math.sin(a) * 16);
-    moth.group.lookAt(tp.x + Math.cos(a + 0.3) * 16, moth.group.position.y, tp.z + Math.sin(a + 0.3) * 16);
+    moth.faceTo(tp.x + Math.cos(a + 0.3) * 16, tp.z + Math.sin(a + 0.3) * 16);
     if (Math.random() < 0.3) fx.burst(moth.group.position, ['#7dffb0', '#b48cff', '#7ad7ff'][Math.floor(Math.random() * 3)], 3, 0.6, 0.4, 1.4, true, 0.3);
   });
-  c.shot(T_GUESTS, T_GUESTS + 4.6, { pos: [c.T(-6, 3, -16), c.T(-9, 3.4, -13)], look: [() => scarab.group.position.clone().setY(scarab.group.position.y + 1), () => scarab.group.position.clone().setY(scarab.group.position.y + 1.4)], fov: 40 });
+  // tracking in front of the scarab as it trots up (over the grass), the party behind it
+  const scarabAt = () => scarab.group.position;
+  c.shot(T_GUESTS, T_GUESTS + 4.6, { pos: [c.R(scarabAt, 3.6, 2.5, -3.4), c.R(scarabAt, 2.6, 2.1, -3.0)], look: () => scarab.group.position.clone().setY(scarab.group.position.y + 0.9), fov: 42 });
   c.shot(T_GUESTS + 4.6, T_GUESTS + 9, { pos: [c.T(4, 3, -18), c.T(6, 4, -16)], look: [() => golem.group.position.clone().setY(golem.group.position.y + 5), () => golem.group.position.clone().setY(golem.group.position.y + 5.5)], fov: 44 });
   // the golem claps along… and the clap bowls the Maestro over
   const T_CLAP = T_GUESTS + 9;
@@ -2068,7 +2091,9 @@ function endingScript(app: App, c: Cine) {
     c.shake(0.5);
   });
   c.fall(c.maestro, T_CLAP + 1.5, 0.7);
-  c.shot(T_CLAP, T_CLAP + 4.2, { pos: [c.Sh(-3.4, 6.6, -5.6), c.Sh(-3.0, 6.5, -5.2)], look: c.mix(c.R(c.maestro, 0, 0.6, 0), () => golem.group.position.clone().setY(golem.group.position.y + 4), 0.25), fov: 38 });
+  // low angle on the giant's clap… then (cut) high over the band: the Maestro goes head over heels
+  c.shot(T_CLAP, T_CLAP + 1.45, { pos: [c.T(7.4, 2.2, -9.2), c.T(7.8, 2.0, -9.8)], look: () => golem.group.position.clone().setY(golem.group.position.y + 4.6), fov: 40 });
+  c.shot(T_CLAP + 1.45, T_CLAP + 4.2, { pos: [c.Sh(-2.2, 9.0, -5.2), c.Sh(-2.0, 8.8, -4.9)], look: c.R(c.maestro, 0, 0.5, 0), fov: 34 });
   // the moth lands on the colossus' nose: it goes cross-eyed… and sneezes
   const T_SNEEZE = T_CLAP + 4.2;
   const nose = c.T(0, 3.55, -8.3);
@@ -2100,15 +2125,17 @@ function endingScript(app: App, c: Cine) {
     const tp = turtle.group.position;
     const a = 1 + (c.wt - (T_SNEEZE + 6.4)) * 0.35;
     moth.group.position.set(tp.x + Math.cos(a) * 16, tp.y + 14 + Math.sin(c.wt * 1.3) * 1.2, tp.z + Math.sin(a) * 16);
-    moth.group.lookAt(tp.x + Math.cos(a + 0.3) * 16, moth.group.position.y, tp.z + Math.sin(a + 0.3) * 16);
+    moth.faceTo(tp.x + Math.cos(a + 0.3) * 16, tp.z + Math.sin(a + 0.3) * 16);
     moth.flap = 1;
   });
-  c.shot(T_SNEEZE, T_SNEEZE + 5.4, { pos: [c.T(-3.4, 4.4, -12), c.T(-3.0, 4.2, -11.4)], look: c.T(0, 3.8, -7.8), fov: 32 });
+  c.shot(T_SNEEZE, T_SNEEZE + 5.4, { pos: [c.T(-5.4, 5.0, -15), c.T(-4.7, 4.7, -14)], look: c.T(0, 4.1, -8.2), fov: 34 });
   // ── 14. night: fireworks of notes; the Silence's cloak becomes the stars
   const T_NIGHT = T_SNEEZE + 5.4;
   c.sky(T_NIGHT, 5, { top: '#0b0d2e', horizon: '#3a2a6a', glow: '#ff9ac8', stars: 1.6, aurora: 0.6 });
-  c.light(T_NIGHT, 5, 1.2, 0.7, '#c9c0ff');
+  c.light(T_NIGHT, 5, 0.55, 0.42, '#9fa8ff');
   c.fog(T_NIGHT, 5, '#2a2450', 0.0035);
+  // the petals thin out so the night belongs to the fireworks and the new stars
+  c.during(T_NIGHT, T_NIGHT + 4, (k) => (petals.alpha = 0.85 * (1 - k * 0.8)));
   const fireworks: NoteFirework[] = [];
   for (let i = 0; i < 9; i++) {
     const t0 = T_NIGHT + 1 + i * 0.9;
@@ -2136,7 +2163,10 @@ function endingScript(app: App, c: Cine) {
   // ── 15. the world blooms: an aerial pull-back over the restored land
   const T_BLOOM = T_NIGHT + 11;
   c.at(T_BLOOM, () => v.bloomWave(turtle.group.position));
-  c.fog(T_BLOOM, 4, undefined, 0.0022);
+  // …and a new day breaks over it
+  c.sky(T_BLOOM, 6, { top: '#2a3f8a', horizon: '#f6b0a0', glow: '#ffc58a', stars: 0.35, aurora: 0.25 });
+  c.light(T_BLOOM, 6, 2.5, 1.0, '#ffd8b0');
+  c.fog(T_BLOOM, 4, '#a898c0', 0.0022);
   c.shot(T_BLOOM, T_BLOOM + 7, { pos: [c.T(-16, 12, 18), c.T(-40, 48, 64)], look: [c.T(0, 5, -4), c.T(0, 2, -30)], fov: [44, 52], ease: ease.inOut });
   c.walk(T_BLOOM, 0.6, 2);
   // ── 16. the bow (and the little one bows late)
@@ -2157,20 +2187,28 @@ function endingScript(app: App, c: Cine) {
   });
   // …and the little one bows too, a beat late, alone (then hurries back up)
   c.during(T_BOW + 3.4, T_BOW + 4.3, (k) => (silBow = Math.sin(k * Math.PI) * 0.7));
-  c.shot(T_BOW, T_BOW + 6, { pos: [c.T(0, 7.6, -13.5), c.T(0, 7.2, -12.6)], look: c.T(0, 5.6, -1.5), fov: 36 });
+  c.shot(T_BOW, T_BOW + 6, { pos: [c.T(-1.2, 6.9, -18), c.T(-1.0, 6.6, -16.8)], look: c.T(0, 5.2, -2), fov: 40 });
   // ── 17. the cast (joyful credits): each one in their element
   const T_CAST = T_BOW + 6;
+  /** a musician's credit: from outside the shell, facing them (they sit facing outwards), a little to one side */
+  const seatShot = (k: TowerKind, side: number): { at: Anchor; from: Anchor } => {
+    const s = SEATS[k];
+    const a = Math.atan2(s.x, s.z) + side * 0.42;
+    const d = k === 'bass' ? 4.4 : 3.7;
+    const y = seatPos(s.x, s.z).y;
+    return { at: c.R(c.band.get(k)!, 0, k === 'bass' ? 0.95 : 0.75, 0), from: c.Sh(s.x + Math.sin(a) * d, y + 1.35, s.z + Math.cos(a) * d) };
+  };
   const cast: { name: string; role: string; at: Anchor; from: Anchor; act?: (t0: number) => void }[] = [
     { name: pt ? 'Vovó Tuba' : 'Granny Tuba', role: pt ? 'a Grande Tartaruga' : 'the Great Turtle', at: c.T(0, 3.6, -6.6), from: c.T(-6.5, 4.2, -14), act: (t0) => c.at(t0 + 0.4, () => turtle.cheer()) },
-    { name: pt ? 'O Maestro' : 'The Maestro', role: pt ? 'regente da Vila-Orquestra' : 'conductor of the village-orchestra', at: c.R(c.maestro, 0, 0.75, 0), from: c.R(c.maestro, -1.6, 1.3, -2.6), act: (t0) => c.at(t0, () => c.mpose('conduct')) },
-    { name: 'Lira', role: pt ? 'a aprendiz · harpa' : 'the apprentice · harp', at: c.R(c.band.get('harp')!, 0, 0.8, 0), from: c.R(c.band.get('harp')!, -1.8, 1.5, -2.4) },
-    { name: 'Bumbo', role: pt ? 'tambor' : 'drum', at: c.R(c.band.get('drum')!, 0, 0.8, 0), from: c.R(c.band.get('drum')!, 1.8, 1.5, -2.4), act: (t0) => c.fall(c.band.get('drum')!, t0 + 1.2, 0.4) },
-    { name: pt ? 'Dona Badalo' : 'Granny Clang', role: pt ? 'sino' : 'bell', at: c.R(c.band.get('bell')!, 0, 0.8, 0), from: c.R(c.band.get('bell')!, -2.6, 1.5, -1.0) },
-    { name: pt ? 'Chocalho' : 'Rattle', role: pt ? 'chocalho' : 'shaker', at: c.R(c.band.get('shaker')!, 0, 0.8, 0), from: c.R(c.band.get('shaker')!, 2.6, 1.5, -1.0), act: (t0) => c.during(t0, t0 + 2.6, (k) => (c.band.get('shaker')!.spin = k * Math.PI * 4)) },
-    { name: 'Cristalina', role: pt ? 'cristal' : 'crystal', at: c.R(c.band.get('crystal')!, 0, 0.8, 0), from: c.R(c.band.get('crystal')!, -2.4, 1.5, 1.8) },
-    { name: 'Trompa', role: pt ? 'trompa' : 'horn', at: c.R(c.band.get('horn')!, 0, 0.8, 0), from: c.R(c.band.get('horn')!, 2.4, 1.5, 1.8) },
-    { name: pt ? 'Os Coralitos' : 'The Chorlets', role: pt ? 'coral' : 'choir', at: c.R(c.band.get('choir')!, 0, 0.7, 0), from: c.R(c.band.get('choir')!, 0.6, 1.2, -2.6) },
-    { name: 'Grave', role: pt ? 'contrabaixo' : 'double bass', at: c.R(c.band.get('bass')!, 0, 1.0, 0), from: c.R(c.band.get('bass')!, 1.2, 1.8, 3.2) },
+    { name: pt ? 'O Maestro' : 'The Maestro', role: pt ? 'regente da Vila-Orquestra' : 'conductor of the village-orchestra', at: c.R(c.maestro, 0, 0.85, 0), from: c.R(c.maestro, -2.3, 1.6, -3.7), act: (t0) => c.at(t0, () => c.mpose('conduct')) },
+    { name: 'Lira', role: pt ? 'a aprendiz · harpa' : 'the apprentice · harp', ...seatShot('harp', -1) },
+    { name: 'Bumbo', role: pt ? 'tambor · e sustos' : 'drum · and frights', ...seatShot('drum', 1), act: (t0) => c.fall(c.band.get('drum')!, t0 + 1.2, 0.4) },
+    { name: pt ? 'Dona Badalo' : 'Granny Clang', role: pt ? 'sino · a avó da vila' : 'bell · the village granny', ...seatShot('bell', -1) },
+    { name: pt ? 'Chocalho' : 'Rattle', role: pt ? 'chocalho · nunca para quieto' : 'shaker · never sits still', ...seatShot('shaker', 1), act: (t0) => c.during(t0, t0 + 2.6, (k) => (c.band.get('shaker')!.spin = k * Math.PI * 4)) },
+    { name: 'Cristalina', role: pt ? 'cristal · voz de gelo' : 'crystal · a voice of ice', ...seatShot('crystal', -1) },
+    { name: 'Trompa', role: pt ? 'trompa · acorda os vales' : 'horn · wakes the valleys', ...seatShot('horn', 1) },
+    { name: pt ? 'Os Coralitos' : 'The Chorlets', role: pt ? 'coral · quase sempre afinados' : 'choir · nearly always in tune', ...seatShot('choir', 1) },
+    { name: 'Grave', role: pt ? 'contrabaixo · fala pouco, toca fundo' : 'double bass · says little, plays deep', ...seatShot('bass', 1) },
     { name: pt ? 'O Silêncio' : 'The Silence', role: pt ? 'o respiro entre as notas' : 'the breath between the notes', at: () => sil.group.getWorldPosition(new THREE.Vector3()).add(tmpV.set(0, 0.8, 0)), from: () => sil.group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(1.4, 1.0, -2.2).applyQuaternion(turtle.group.quaternion)) },
   ];
   // after the bow's last chord, the credits song (docs: 'ending:bow' … then the game plays 'credits')
