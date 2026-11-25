@@ -199,8 +199,6 @@ interface Tpl {
   hover: number;
 }
 
-const INK0 = '#16112a', INK1 = '#3b3068';
-
 function buildTemplate(kind: EnemyKind): Tpl {
   const root = grp('root');
   const body = grp('body');
@@ -1478,7 +1476,7 @@ export class EnemyView {
   }
 
   /** what each creature does with its parts */
-  private animate(t: number, beat: number, bp: number, dt: number) {
+  private animate(t: number, beat: number, bp: number, _dt: number) {
     const n = this.n;
     const fast = Math.min(2, this.speed * 0.35 + 0.4);
     switch (this.kind) {
@@ -1643,7 +1641,6 @@ export class EnemyView {
         break;
       }
     }
-    void dt;
   }
 
   /** golem: plates fall off */
