@@ -206,7 +206,6 @@ function tapNotes(j: Journey, reach: number, pick: (id: number) => boolean = () 
 }
 
 function useFF(j: Journey) {
-  if (process.env.NOFF) return;
   if (!j.ffReady()) return;
   let near = 0;
   let big = false;

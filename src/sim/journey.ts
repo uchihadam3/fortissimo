@@ -1160,6 +1160,8 @@ export class Journey {
         }
       }
     }
+    // a silenced tower leaves the band at once (and comes back the same way)
+    if (this.bandDirty) this.updateBand(t);
   }
 
   // ───────────────────────────── towers ─────────────────────────────
