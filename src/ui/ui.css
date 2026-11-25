@@ -396,3 +396,13 @@
   #journey .me, #journey .goal { width: 32px; height: 32px; }
   #journey .goal { right: -26px; }
 }
+
+/* menu on a phone held upright: the logo on top, the buttons at the bottom, the colossus in between */
+@media (orientation: portrait) and (max-width: 640px) {
+  .menu { background: linear-gradient(180deg, rgba(8,6,16,.62), rgba(8,6,16,0) 32%, rgba(8,6,16,0) 50%, rgba(8,6,16,.72) 80%); }
+  .menu .menu-left { top: calc(26px + var(--safe-t)); bottom: calc(44px + var(--safe-b)); transform: translateX(-50%); justify-content: space-between; }
+  .menu .menu-items { gap: 8px; }
+  .menu .mbtn { height: 44px; min-width: 230px; }
+  #ui .ff-logo.small .tagline { letter-spacing: .14em; white-space: nowrap; }
+  #ui .ff-logo.small .tagline i { width: 20px; }
+}

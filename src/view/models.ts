@@ -1,6 +1,7 @@
 /** Level fixtures and characters: build pads, Silence gates, the Heart, route switches, the Maestro. */
 import * as THREE from 'three';
-import { at, box, capsule, cone, cyl, damp, eye, glowMat, mergeParts, mesh, painted, rotX, rotZ, sph, stdMat, torus, vcMat } from './kit';
+import { at, box, capsule, cone, cyl, damp, glowMat, mergeParts, mesh, painted, rotX, rotZ, sph, stdMat, torus, vcMat } from './kit';
+import { Bins, CharMats, assembleBird, bird, ell, grp, paint, type Bird, type BirdDef } from './musicians';
 
 // ───────────────────────────── build pad ─────────────────────────────
 
@@ -279,108 +280,127 @@ export class SwitchView {
 
 export type MaestroPose = 'conduct' | 'idle' | 'cheer' | 'sad' | 'point' | 'bow' | 'raise';
 
+/** the Maestro is a note bird too: peach, round, in a tailcoat, with a curl and a glowing baton */
+const MAESTRO: BirdDef = {
+  R: 0.3, sy: 1.06, leg: 0.085, body: '#ffe1c4', belly: '#fff3e6', beak: '#f4a43a', feet: '#151221', cheek: '#ff9aa8', iris: '#5a3a2a',
+  eye: 0.215, spread: 0.37, eyeUp: 0.52, wing: 0.6, lid: 0,
+};
+
+let maestroTpl: { root: THREE.Group; bird: Bird } | null = null;
+function maestroTemplate() {
+  if (maestroTpl) return maestroTpl;
+  const b = new Bins();
+  const d = MAESTRO;
+  const R = d.R, cy = d.leg + R * d.sy;
+  const skin = new THREE.Color(d.body), coat = new THREE.Color('#1f1b2e'), lapel = new THREE.Color('#463e60'), shirt = new THREE.Color('#fbf7ef');
+  const skinShade = new THREE.Color(d.body).multiplyScalar(0.8);
+  // the tailcoat is painted on the egg: skin above the collar, a white shirt in a V at the front
+  const tmp = new THREE.Color();
+  const painter = (pp: THREE.Vector3, n: THREE.Vector3) => {
+    const y = pp.y - cy;
+    const collar = 0.02 + 0.13 * Math.min(1, Math.max(0, (0.4 - n.z) / 1.2));
+    if (y > collar) return tmp.copy(skin).lerp(skinShade, Math.max(0, -n.y) * 0.3);
+    const v = Math.max(0, (y + 0.27) * 0.4);
+    const ax = Math.abs(pp.x);
+    if (n.z > 0.2 && ax < v) return shirt;
+    if (n.z > 0.15 && ax < v + 0.035) return lapel;
+    return coat;
+  };
+  const B = bird(b, d, { tail: false, wings: false, feet: false, curl: true, curlCol: '#3a2a22', paint: painter });
+  for (let i = 0; i < 2; i++) {
+    const y = cy - 0.11 - i * 0.075;
+    b.add('body', 'g', paint(at(sph(0.014, 8, 6), 0, y, B.egg.zAt(0, y) + 0.006), '#2a2438'));
+  }
+  // red bow tie at the collar
+  const by = cy + 0.0, bz = B.egg.zAt(0, by) + 0.008;
+  for (const sd of [-1, 1]) {
+    const w = cone(0.046, 0.078, 3);
+    w.rotateY(Math.PI / 6);
+    w.rotateZ(sd * Math.PI / 2);
+    w.scale(1, 1, 0.45);
+    w.translate(sd * 0.043, by, bz);
+    b.add('body', 'g', paint(w, '#d6303f'));
+  }
+  b.add('body', 'g', paint(at(sph(0.022, 10, 8), 0, by, bz + 0.008), '#a8202e'));
+  // coat tails
+  for (const sd of [-1, 1]) {
+    const t = ell(0.075, 0.18, 0.024, 10, 8);
+    t.translate(0, -0.16, 0);
+    t.rotateX(0.3);
+    t.rotateZ(sd * 0.12);
+    t.translate(sd * 0.075, cy - R * 0.32, -R * 0.86);
+    b.add('body', 'm', paint(t, coat));
+  }
+  // polished shoes and trouser legs
+  for (const sd of [-1, 1]) {
+    b.add('body', 'g', paint(at(ell(0.075, 0.045, 0.11, 12, 8), sd * 0.11, 0.04, 0.05), '#151221'));
+    b.add('body', 'm', paint(at(cyl(0.04, 0.045, 0.1, 8), sd * 0.11, 0.09, 0.0), coat));
+  }
+  const root = grp('rig');
+  assembleBird(b, B, root);
+  maestroTpl = { root, bird: B };
+  return maestroTpl;
+}
+
 export class MaestroView {
   readonly group = new THREE.Group();
-  readonly body = new THREE.Group();
+  readonly body: THREE.Object3D;
   private armR = new THREE.Group();
   private armL = new THREE.Group();
   private baton: THREE.Mesh;
   private tip: THREE.Mesh;
   private tipMat: THREE.MeshBasicMaterial;
-  private eyes: THREE.Group[] = [];
+  private lids: THREE.Object3D;
+  private happy: THREE.Object3D;
+  private eyes: THREE.Object3D;
   private blink = 0;
   private nextBlink = 2;
   pose: MaestroPose = 'conduct';
   /** 0..1 strength of the glowing baton tip */
   glow = 1;
-  private head = new THREE.Group();
+  /** materials (rim light, grey, stone…) */
+  readonly mats = new CharMats('#fff1d6', 0.16);
+  private lidP = 0;
 
   constructor() {
-    const skin = '#ffe1c4';
-    const coat = '#1f1b2e';
-    // body: an egg with a tailcoat
-    const torso = new THREE.Mesh(sph(0.3, 24, 18), stdMat(skin, 0.55));
-    torso.scale.set(1, 1.08, 0.95);
-    torso.position.y = 0.42;
-    const coatM = new THREE.Mesh(sph(0.315, 24, 18, ), stdMat(coat, 0.5));
-    coatM.scale.set(1.02, 0.78, 0.98);
-    coatM.position.y = 0.33;
-    // shirt front
-    const shirt = new THREE.Mesh(sph(0.2, 16, 12), stdMat('#fbf7ef', 0.5));
-    shirt.scale.set(0.8, 1, 0.5);
-    shirt.position.set(0, 0.36, 0.2);
-    const bow = new THREE.Group();
-    const bl = new THREE.Mesh(cone(0.06, 0.1, 4), stdMat('#d6303f', 0.5));
-    bl.rotation.z = Math.PI / 2;
-    bl.position.x = -0.05;
-    const br = bl.clone();
-    br.rotation.z = -Math.PI / 2;
-    br.position.x = 0.05;
-    bow.add(bl, br, new THREE.Mesh(sph(0.025, 8, 6), stdMat('#d6303f', 0.5)));
-    bow.position.set(0, 0.52, 0.27);
-    // coat tails
-    const tailL = new THREE.Mesh(box(0.1, 0.22, 0.04), stdMat(coat, 0.5));
-    tailL.position.set(-0.08, 0.14, -0.26);
-    tailL.rotation.x = 0.35;
-    const tailR = tailL.clone();
-    tailR.position.x = 0.08;
-    // feet
-    const shoe = stdMat('#151221', 0.35);
-    const fl = new THREE.Mesh(sph(0.075, 12, 8), shoe);
-    fl.scale.set(1, 0.6, 1.5);
-    fl.position.set(-0.11, 0.04, 0.05);
-    const fr = fl.clone();
-    fr.position.x = 0.11;
-    this.body.add(torso, coatM, shirt, bow, tailL, tailR, fl, fr);
-    // head features on the upper body (the Maestro is one round body)
-    const eL = eye(0.065);
-    eL.position.set(-0.1, 0.6, 0.24);
-    const eR = eye(0.065);
-    eR.position.set(0.1, 0.6, 0.24);
-    this.eyes = [eL, eR];
-    const cheekMat = new THREE.MeshBasicMaterial({ color: '#ff9aa8', transparent: true, opacity: 0.55 });
-    const cL = new THREE.Mesh(sph(0.035, 8, 6), cheekMat);
-    cL.position.set(-0.17, 0.52, 0.24);
-    cL.scale.set(1, 0.6, 0.4);
-    const cR = cL.clone();
-    cR.position.x = 0.17;
-    // a curl of hair and a tiny smile
-    const hair = new THREE.Mesh(torus(0.06, 0.02, 6, 16, Math.PI * 1.4), stdMat('#3a2a22', 0.6));
-    hair.position.set(0, 0.79, 0.02);
-    hair.rotation.set(0, Math.PI / 2, 0.3);
-    const smile = new THREE.Mesh(torus(0.04, 0.008, 4, 12, Math.PI), stdMat('#5a2a2a', 0.6));
-    smile.position.set(0, 0.51, 0.285);
-    smile.rotation.z = Math.PI;
-    this.head.add(eL, eR, cL, cR, hair, smile);
-    this.body.add(this.head);
-    // arms with gloves
+    const tpl = maestroTemplate();
+    const rig = tpl.root.clone(true);
+    this.mats.apply(rig);
+    this.body = rig;
+    this.lids = rig.getObjectByName('lids')!;
+    this.happy = rig.getObjectByName('happy')!;
+    this.eyes = rig.getObjectByName('eyes')!;
+    const coat = stdMat('#1f1b2e', 0.5);
     const glove = stdMat('#ffffff', 0.5);
     const mkArm = (side: number) => {
       const g = new THREE.Group();
-      const sleeve = new THREE.Mesh(capsule(0.045, 0.16, 4, 8), stdMat(coat, 0.5));
+      const sleeve = new THREE.Mesh(capsule(0.048, 0.15, 4, 8), coat);
       sleeve.position.y = -0.1;
-      const hand = new THREE.Mesh(sph(0.055, 10, 8), glove);
-      hand.position.y = -0.22;
-      g.add(sleeve, hand);
-      g.position.set(side * 0.27, 0.5, 0.02);
+      const cuff = new THREE.Mesh(torus(0.045, 0.014, 6, 14).rotateX(Math.PI / 2), glove);
+      cuff.position.y = -0.19;
+      const hand = new THREE.Mesh(sph(0.058, 12, 10), glove);
+      hand.position.y = -0.23;
+      hand.scale.set(1, 0.92, 0.85);
+      g.add(sleeve, cuff, hand);
+      g.position.set(side * 0.285, 0.5, 0.02);
       g.rotation.z = side * 0.35;
       return g;
     };
     this.armR = mkArm(1);
     this.armL = mkArm(-1);
     this.baton = new THREE.Mesh(cyl(0.008, 0.014, 0.34, 6), stdMat('#f4efe6', 0.4));
-    this.baton.position.set(0, -0.36, 0.05);
+    this.baton.position.set(0, -0.37, 0.05);
     this.baton.rotation.x = -0.4;
     this.tipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2b8').multiplyScalar(3), toneMapped: false });
     this.tip = new THREE.Mesh(sph(0.025, 8, 6), this.tipMat);
     this.tip.position.y = -0.17;
     this.baton.add(this.tip);
     this.armR.add(this.baton);
-    this.body.add(this.armR, this.armL);
-    this.group.add(this.body);
+    rig.add(this.armR, this.armL);
+    this.group.add(rig);
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh) m.castShadow = true;
+      if (m.isMesh && m.userData.mk !== 'e') m.castShadow = true;
     });
   }
 
@@ -396,6 +416,7 @@ export class MaestroView {
     let hy = from[1] + (to[1] - from[1]) * e - Math.sin(f * Math.PI) * 0.06;
     let bounce = Math.exp(-f * 6) * 0.035;
     let armL = -0.35, lean = 0;
+    let happy = false, lid = 0;
     switch (this.pose) {
       case 'idle':
         hx = 0.05;
@@ -407,6 +428,7 @@ export class MaestroView {
         hy = 0.55 + Math.sin(t * 9) * 0.05;
         armL = -2.6 + Math.sin(t * 9) * 0.2;
         bounce = Math.abs(Math.sin(t * 6)) * 0.12;
+        happy = true;
         break;
       case 'sad':
         hx = 0.02;
@@ -414,6 +436,7 @@ export class MaestroView {
         armL = -0.15;
         lean = 0.25;
         bounce = 0;
+        lid = 0.5;
         break;
       case 'point':
         hx = 0.45;
@@ -425,6 +448,7 @@ export class MaestroView {
         hy = -0.2;
         lean = 0.6 * (0.5 + 0.5 * Math.sin(t * 1.2));
         bounce = 0;
+        lid = 0.9;
         break;
       case 'raise':
         hx = 0.05;
@@ -449,8 +473,11 @@ export class MaestroView {
       this.nextBlink = 2 + Math.random() * 3;
     }
     if (this.blink > 0) this.blink -= dt;
-    const s = this.blink > 0 ? 0.1 : this.pose === 'sad' ? 0.6 : 1;
-    for (const e2 of this.eyes) e2.scale.y = damp(e2.scale.y, s, 30, dt);
+    this.lidP = damp(this.lidP, lid, 8, dt);
+    const l = this.blink > 0 ? 1 : this.lidP;
+    this.lids.rotation.x = -1.75 + l * 3.2;
+    this.eyes.visible = this.lids.visible = !happy;
+    this.happy.visible = happy;
   }
 
   /** world position of the baton tip */
@@ -458,5 +485,3 @@ export class MaestroView {
     return this.tip.getWorldPosition(out);
   }
 }
-
-void capsule;
