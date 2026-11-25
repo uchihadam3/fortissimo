@@ -101,3 +101,24 @@ export const LOOKS: Record<WorldId, WorldLook> = {
     particles: 'motes',
   },
 };
+
+/**
+ * The ending: the Citadel's land once the Silence has joined the music. It starts grey like the rest
+ * of the Citadel (the colour is held back) and blooms into blossoms, green fields and a dusk sky.
+ */
+export const FINALE_LOOK: WorldLook = {
+  land: {
+    grass: ['#7cc46a', '#68b45c', '#93d27a', '#5ea352'], dry: '#cfd28a', dirt: '#a88f72', rock: ['#a7a2b4', '#928da2', '#bdb8c9'],
+    sand: '#e2d6b8', snow: false, water: '#6fb8ff', waterDeep: '#2b4fae', lava: false, frozen: false,
+    trees: ['treeRound', 'treeRound', 'column', 'treeRound', 'treePine'], bushes: ['bush'], rocks: ['rock', 'shard'], small: ['flower', 'flower', 'mushroom'], ruins: ['column', 'arch', 'statue', 'brokenColumn'],
+    leaves: ['#ff9ec7', '#ffc2dd', '#c9a0ff', '#9fd46a', '#ffb3d1'], trunk: '#6e4a3a', flowers: ['#ffd36b', '#ffffff', '#c9b8ff', '#ff7aa8', '#7ad7ff'], accent: '#ffd36b',
+    hilliness: 0.9, treeDensity: 0.9,
+  },
+  sky: {
+    top: '#1b1d4a', horizon: '#f0a6a0', sunGlow: '#ffc58a', cloud: '#ffd6e0', cloudShade: '#7a6aa8', sunDir: [-0.3, 0.22, -0.85],
+    cloudCover: 0.4, stars: 0.8, aurora: 0.3, mountains: ['#4a4a7c', '#6a6496', '#8c84b0'], snow: false, mountainHeight: 150,
+  },
+  grass: { base: '#4f9a45', tip: '#d6f08a', dry: '#e2d68a', height: 0.75 },
+  fog: '#8a7fb0', fogDensity: 0.006, sun: '#ffd2a8', sunIntensity: 2.8, hemiSky: '#c9c0ff', hemiGround: '#4f7a3f', hemiIntensity: 1.05, exposure: 1.05,
+  particles: 'motes',
+};

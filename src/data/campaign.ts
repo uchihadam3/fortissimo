@@ -114,10 +114,12 @@ export const CAMPAIGN: LevelEntry[] = [
       tutorial: ['basics', 'pickup'], pickups: 7, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 80 }, { kind: 'lake', from: 20, to: 50, side: 1 }],
       waves: [
-        { bar: 2, groups: [{ kind: 'blot', count: 3, every: 2, dir: 0, spread: 10 }] },
-        { bar: 9, groups: [{ kind: 'blot', count: 5, every: 1.5, dir: 0, spread: 30 }] },
-        { bar: 16, groups: [{ kind: 'blot', count: 4, every: 1.5, dir: -45 }, { kind: 'blot', count: 4, every: 1.5, dir: 45, at: 4 }] },
-        { bar: 23, groups: [{ kind: 'blot', count: 8, every: 1, dir: 0, spread: 50 }] },
+        // the first contact: the glove's single harp beats it on its own
+        { bar: 2, groups: [{ kind: 'blot', count: 2, every: 4, dir: 0, spread: 6, hp: 0.8 }] },
+        { bar: 8, groups: [{ kind: 'blot', count: 4, every: 2, dir: 0, spread: 20, hp: 0.9 }] },
+        { bar: 14, groups: [{ kind: 'blot', count: 3, every: 2, dir: -45 }, { kind: 'blot', count: 3, every: 2, dir: 45, at: 4 }] },
+        { bar: 21, groups: [{ kind: 'blot', count: 6, every: 1.5, dir: 0, spread: 40 }] },
+        { bar: 28, groups: [{ kind: 'blot', count: 4, every: 1.5, dir: -60 }, { kind: 'blot', count: 4, every: 1.5, dir: 60, at: 3 }] },
       ],
     }),
   },
@@ -128,11 +130,11 @@ export const CAMPAIGN: LevelEntry[] = [
       tutorial: ['upgrade'], pickups: 8,
       features: [{ kind: 'meadow', from: 0, to: 30 }, { kind: 'forest', from: 25, to: 60, side: -1 }, { kind: 'river', from: 48, to: 56 }],
       waves: [
-        { bar: 2, groups: [{ kind: 'blot', count: 6, every: 1, dir: 0, spread: 40 }] },
+        { bar: 2, groups: [{ kind: 'blot', count: 5, every: 1.5, dir: 0, spread: 30 }] },
         { bar: 9, groups: [{ kind: 'scurry', count: 5, every: 0.5, dir: 30 }, { kind: 'blot', count: 4, every: 1, dir: -30, at: 4 }] },
         { bar: 16, groups: [{ kind: 'blot', count: 10, every: 0.75, dir: -70 }] },
         { bar: 23, groups: [{ kind: 'scurry', count: 8, every: 0.5, dir: 90 }, { kind: 'blot', count: 6, every: 1, dir: 0, at: 6 }] },
-        { bar: 30, groups: [{ kind: 'blot', count: 10, every: 0.5, dir: 0, spread: 70 }, { kind: 'scurry', count: 6, every: 0.5, dir: 180, at: 8 }] },
+        { bar: 30, groups: [{ kind: 'blot', count: 8, every: 0.75, dir: 0, spread: 70 }, { kind: 'scurry', count: 5, every: 0.5, dir: 180, at: 8 }] },
       ],
     }),
   },
@@ -377,8 +379,8 @@ export function endlessDef(world: WorldId, slots = 12): JourneyDef {
   const towers: TowerKind[] = world === 'meadow' ? T3 : world === 'desert' ? T5 : world === 'ice' ? T7 : T8;
   const pool: [EnemyKind, number][] = world === 'meadow' ? [['blot', 4], ['scurry', 3], ['moth', 2]] : world === 'desert' ? [['blot', 2], ['scurry', 2], ['shell', 2], ['shield', 2], ['bubble', 1], ['moth', 2]] : [['shell', 2], ['shield', 2], ['bubble', 2], ['muffler', 1], ['mender', 2], ['phantom', 2], ['moth', 2], ['scurry', 2]];
   return def({
-    id: `bis-${world}`, world, name: { pt: 'Bis', en: 'Encore' }, bars: 400, slots, coins: 300, towers, ff: true, pickups: 40,
-    features: [{ kind: 'hills', from: 0, to: 200 }, { kind: 'forest', from: 200, to: 400, side: 0 }, { kind: 'canyon', from: 400, to: 520 }, { kind: 'lake', from: 520, to: 600, side: 1 }],
-    waves: gen({ seed: 2024 + world.length, bars: 400, first: 2, gap: 5, b0: 10.2, b1: 160.0, pool, dirs: [0, 60, -60, 120, -120, 180], tailBars: 4 }),
+    id: `bis-${world}`, world, name: { pt: 'Bis', en: 'Encore' }, bars: 260, slots, coins: 300, towers, ff: true, pickups: 40,
+    features: [{ kind: 'hills', from: 0, to: 120 }, { kind: 'forest', from: 120, to: 240, side: 0 }, { kind: 'canyon', from: 240, to: 330 }, { kind: 'lake', from: 330, to: 420, side: 1 }],
+    waves: gen({ seed: 2024 + world.length, bars: 260, first: 2, gap: 5, b0: 10.2, b1: 160.0, pool, dirs: [0, 60, -60, 120, -120, 180], tailBars: 4 }),
   });
 }

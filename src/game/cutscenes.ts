@@ -16,6 +16,7 @@ import { SHELL, domeY } from '../sim/shell';
 import { logoHTML } from '../ui/logo';
 import { worldColor } from '../view/worldColor';
 import { damp, easeInOut } from '../view/kit';
+import { FINALE_LOOK, type WorldLook } from '../view/styles';
 
 type Vec = [number, number, number];
 interface Key {
@@ -35,7 +36,8 @@ class Cine {
   private remove: () => void = () => {};
   t = 0;
   private events: { t: number; fn: () => void; done?: boolean }[] = [];
-  private tracks: { t0: number; t1: number; fn: (k: number) => void }[] = [];
+  private tracks: { t0: number; t1: number; fn: (k: number) => void; done?: boolean }[] = [];
+  private started = false;
   keys: Key[] = [];
   /** the colossus walks (path units per second) */
   walkSpeed = 0.9;
@@ -46,13 +48,13 @@ class Cine {
   private beatSpb: number;
   private startMs = performance.now();
 
-  constructor(readonly app: App, world: WorldId, bpm: number) {
+  constructor(readonly app: App, world: WorldId, bpm: number, look?: WorldLook) {
     app.enterCinematic();
     const def = showcaseDef(world);
     this.sim = new Journey(def, bpm);
     this.sim.turtle.s = 20;
     this.beatSpb = 60 / bpm;
-    this.view = new JourneyView(app.engine, def, this.sim);
+    this.view = new JourneyView(app.engine, def, this.sim, look);
     this.view.cineRate = 50;
     app.engine.setScene(this.view.scene);
     app.engine.camera.far = 5000;
@@ -68,7 +70,7 @@ class Cine {
     this.view.turtle.shell.add(this.maestro.group);
     this.overlay = document.createElement('div');
     this.overlay.className = 'cine-overlay';
-    this.overlay.innerHTML = `<div class="bar top"></div><div class="bar bottom"></div><div class="card"></div><button class="skip">${app.screens.t('skip')} ⏭</button>`;
+    this.overlay.innerHTML = `<div class="bar top"></div><div class="bar bottom"></div><div class="cine-card"></div><button class="skip">${app.screens.t('skip')} ⏭</button>`;
     app.uiRoot.appendChild(this.overlay);
     requestAnimationFrame(() => this.overlay.classList.add('on'));
     this.done = new Promise((r) => (this.ended = r));
@@ -110,12 +112,25 @@ class Cine {
     };
   }
 
+  /** compile shaders and upload the scene before the clock starts, so the opening seconds are not lost to a hitch */
+  async warm() {
+    try {
+      await this.app.engine.renderer.compileAsync(this.view.scene, this.app.engine.camera);
+    } catch {
+      /* not supported: the first frames compile instead */
+    }
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  }
+
   /** restart the timeline clock (call when the cinematic becomes visible) */
   begin() {
     // developer: ?cinet=30 starts the timeline at 30 s
     const jump = typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('cinet') ?? 0) : 0;
     this.startMs = performance.now() - jump * 1000;
-    (window as unknown as { __ready: boolean }).__ready = true;
+    this.started = true;
+    const w = window as unknown as { __ready: boolean; __cineT: number };
+    w.__cineT = jump;
+    w.__ready = true;
   }
 
   at(t: number, fn: () => void) {
@@ -132,24 +147,37 @@ class Cine {
   }
 
   card(html: string, cls = '') {
-    const c = this.overlay.querySelector('.card') as HTMLElement;
-    c.className = `card ${cls}`;
+    const c = this.overlay.querySelector('.cine-card') as HTMLElement;
+    c.className = `cine-card ${cls}`;
     c.innerHTML = html;
     requestAnimationFrame(() => c.classList.add('show'));
   }
 
   private update(dt: number) {
     // real time, so the picture stays locked to the music even when frames are slow
-    this.t = (performance.now() - this.startMs) / 1000;
+    // capture tools can freeze the timeline (window.__cineFreeze) while a frame is saved, then
+    // add the frozen span to window.__cineShift so the timeline resumes where it stopped
+    const w = window as unknown as { __cineT: number; __cineFreeze?: boolean; __cineShift?: number; __cineManual?: number };
+    if (w.__cineFreeze) return;
+    // the timeline holds at 0 until begin(); capture tools may drive it by hand (window.__cineManual)
+    this.t = !this.started ? 0 : typeof w.__cineManual === 'number' ? w.__cineManual : (performance.now() - (w.__cineShift ?? 0) - this.startMs) / 1000;
     const t = this.t;
-    for (const e of this.events) {
-      if (!e.done && t >= e.t) {
-        e.done = true;
-        e.fn();
+    w.__cineT = t;
+    if (this.started) {
+      // tracks first, so a moment's change wins over a track ending in the same frame; a track always
+      // receives its final value, even when a slow frame jumps right past it
+      for (const tr of this.tracks) {
+        if (tr.done || t < tr.t0) continue;
+        const k = Math.min(1, (t - tr.t0) / Math.max(1e-3, tr.t1 - tr.t0));
+        tr.fn(k);
+        if (k >= 1) tr.done = true;
       }
-    }
-    for (const tr of this.tracks) {
-      if (t >= tr.t0 && t <= tr.t1 + dt) tr.fn(Math.min(1, (t - tr.t0) / Math.max(1e-3, tr.t1 - tr.t0)));
+      for (const e of this.events) {
+        if (!e.done && t >= e.t) {
+          e.done = true;
+          e.fn();
+        }
+      }
     }
     if (this.walking) this.sim.turtle.s += this.walkSpeed * dt;
     this.sim.walking = this.walking;
@@ -229,10 +257,11 @@ async function intro(app: App) {
     { t: 37, pos: [-18, 15, 16], look: [0, 3, -4] },
     { t: 41, pos: [-14, 9, 6], look: [0, 3.5, -2] },
     // alone in the grey
-    { t: 44, pos: [-4.8, 7.4, -5.4], look: [-0.9, 6.1, -1.35] },
-    { t: 53, pos: [-3.6, 6.8, -5.9], look: [-0.9, 6.1, -1.35] },
+    // (the colossus lies down to sleep: the shell, and the Maestro on it, sit 1.5 lower)
+    { t: 44, pos: [-4.8, 6.1, -5.4], look: [-0.9, 4.7, -1.35] },
+    { t: 53, pos: [-3.6, 5.5, -5.9], look: [-0.9, 4.7, -1.35] },
     // hope: circling the little light
-    { t: 58, pos: [1.6, 7.6, -5.8], look: [-0.9, 6.5, -1.35] },
+    { t: 58, pos: [1.6, 6.2, -5.8], look: [-0.9, 5.1, -1.35] },
     { t: 63, pos: [-10, 5.5, -16], look: [0, 3.5, -3] },
     // the first step, and the title
     { t: 68, pos: [-18, 9, -6], look: [0, 4, -4] },
@@ -300,7 +329,7 @@ async function intro(app: App) {
   c.during(64, 72, (k) => (v.lifeTarget = 0.1 + k * 0.25));
   c.at(70, () => {
     audio.cinematic('intro:title');
-    c.card(logoHTML(app.screens.t('tagline')), 'title');
+    c.card(logoHTML(app.screens.t('tagline')), 'cine-title');
   });
   c.at(79, () => c.finish());
   // per-frame: the giant
@@ -314,6 +343,7 @@ async function intro(app: App) {
     giant.group.lookAt(v.turtle.group.position.x, giant.group.position.y, v.turtle.group.position.z);
     void giantArm;
   });
+  await c.warm();
   c.begin();
   app.screens.fadeTo(0, 1600);
   await c.done;
@@ -326,39 +356,57 @@ async function intro(app: App) {
 async function ending(app: App) {
   audio.stopMusic(1);
   audio.setAmbience('citadel', 0.5);
-  const c = new Cine(app, 'citadel', 84);
+  const c = new Cine(app, 'citadel', 84, FINALE_LOOK);
   const v = c.view;
   v.life = v.lifeTarget = 0.12;
   v.colorScale = 0.4;
-  c.walkSpeed = 0.5;
+  // the colossus has arrived: it stands still, facing the fallen Silence
+  c.walking = false;
   c.maestro.pose = 'conduct';
-  const small = new EnemyView(-2, 'silence', 9);
+  const small = new EnemyView(-2, 'silence', 6.5);
+  small.setAura(false);
   v.scene.add(small.group);
-  let size = 9;
+  let size = 6.5;
   let fade = 1;
-  const spot = () => {
-    const p = v.land.path.at(c.sim.turtle.s + 16);
-    return new THREE.Vector3(p.x, 0, p.z);
-  };
+  let lift = 11;
+  // straight ahead of the colossus (turtle-local -z), fixed once the first frame has placed it
+  let spotV: THREE.Vector3 | null = null;
   const stars: THREE.Points[] = [];
   c.keys = [
-    { t: 0, pos: [-9, 8, 6], look: [0, 6, -18] },
-    { t: 6, pos: [-6, 6, -6], look: [0, 3, -16] },
-    { t: 14, pos: [-3.5, 3.2, -12], look: [0, 1.6, -16] },
+    // the Silence, huge, hangs over the road… and falls
+    { t: 0, pos: [-16, 8, 16], look: [0, 22, -18] },
+    { t: 1.6, pos: [-14, 8.5, 12], look: [0, 12, -18] },
+    { t: 4, pos: [-12, 7, 7], look: [0, 8, -18] },
+    // it shrinks: small, alone
+    { t: 8, pos: [-8, 5, -4], look: [0, 3.4, -18] },
+    { t: 14, pos: [-3.6, 3.4, -10.5], look: [0, 3.3, -18] },
+    { t: 21, pos: [-3.0, 3.3, -11.2], look: [0, 3.3, -18] },
+    // the Maestro looks down at it, then conducts a rest
     { t: 24, pos: [-4.4, 6.8, -5.8], look: [-0.9, 6.0, -1.35] },
-    { t: 30, pos: [-6, 5.5, -9], look: [0, 3, -16] },
-    { t: 38, pos: [-14, 9, -4], look: [0, 6, -16] },
-    { t: 56, pos: [-20, 14, 12], look: [0, 10, -24] },
-    { t: 74, pos: [-4.2, 7.0, -6.0], look: [-0.9, 6.2, -1.35] },
+    { t: 29, pos: [-3.8, 6.6, -6.4], look: [-0.9, 6.0, -1.35] },
+    { t: 33, pos: [-7, 5, -9], look: [0, 3, -18] },
+    // bloom: its cloak becomes the stars, colour runs over the land
+    { t: 38, pos: [-14, 8, -4], look: [0, 6, -18] },
+    { t: 56, pos: [-14, 12, 22], look: [0, 4, -14] },
+    // the bow
+    { t: 72, pos: [-4.6, 7.0, -6.2], look: [-0.9, 6.2, -1.35] },
+    { t: 78, pos: [-4.0, 6.9, -6.6], look: [-0.9, 6.3, -1.35] },
+    // farewell: high and wide, the colossus walks on under the stars
     { t: 84, pos: [-30, 30, 40], look: [0, 6, -30] },
     { t: 96, pos: [-30, 34, 46], look: [0, 6, -34] },
   ];
-  c.at(0.2, () => {
-    audio.cinematic('ending:fall');
-    v.shake(0.8);
+  c.at(0.2, () => audio.cinematic('ending:fall'));
+  // the fall (accelerating), then the impact
+  c.during(0.2, 1.5, (k) => (lift = 11 * (1 - k * k)));
+  c.at(1.5, () => {
+    lift = 0;
+    v.shake(1);
+    if (spotV) {
+      v.fx.ring(spotV.clone().setY(spotV.y + 0.3), 26, '#b9b4cc', 1.3, 0.05);
+      v.fx.dust(spotV.clone().setY(spotV.y + 0.4), '#9a94b0', 48);
+    }
   });
-  c.during(0, 6, (k) => (size = 9 - easeInOut(k) * 7.2));
-  c.at(5, () => (c.walking = false));
+  c.during(2, 8, (k) => (size = 6.5 - easeInOut(k) * 5.1));
   c.at(6, () => {
     audio.cinematic('ending:alone');
     c.maestro.pose = 'idle';
@@ -367,12 +415,12 @@ async function ending(app: App) {
     audio.cinematic('ending:rest');
     c.maestro.pose = 'raise';
   });
-  c.at(30, () => (c.maestro.pose = 'idle'));
+  c.at(31, () => (c.maestro.pose = 'idle'));
   c.at(36, () => {
     audio.cinematic('ending:bloom');
     c.maestro.pose = 'cheer';
     v.turtle.cheer();
-    v.bloomWave();
+    v.bloomWave(small.group.position);
     const p = small.group.position.clone();
     v.fx.ring(p, 60, '#ffd36b', 2, 0.04);
     v.fx.release(p.clone().setY(p.y + 3), '#c9b8ff', true);
@@ -384,20 +432,27 @@ async function ending(app: App) {
     v.lifeTarget = 0.12 + k * 1.0;
     v.colorScale = 0.4 + k * 1.6;
   });
-  c.at(48, () => (c.walking = true));
-  c.at(74, () => {
+  c.at(50, () => (c.walking = true));
+  c.at(70, () => (c.walking = false));
+  c.at(72, () => {
     audio.cinematic('ending:bow');
     c.maestro.pose = 'bow';
   });
-  c.at(80, () => c.card(`<div class="the-end">${app.screens.t('theEnd')}</div>${logoHTML(app.screens.t('tagline'), 'small')}`, 'title'));
+  c.at(80, () => {
+    c.walking = true;
+    c.card(`<div class="the-end">${app.screens.t('theEnd')}</div>${logoHTML(app.screens.t('tagline'), 'small')}`, 'cine-title');
+  });
   c.at(95, () => c.finish());
   const removeSmall = app.engine.onUpdate((dt) => {
-    const sp = spot();
-    const ground = v.land.heightAt(sp.x, sp.z);
+    if (!spotV) {
+      spotV = c.local([0, 0, -18]);
+      spotV.y = v.land.heightAt(spotV.x, spotV.z);
+    }
+    const sp = spotV;
     small.push(c.t, sp.x, sp.z);
-    small.update(dt, c.t, c.t, () => ground, (x, z, y, out) => out.set(x, y, z), app.engine.camera.quaternion);
+    small.update(dt, c.t, c.t, () => sp.y, (x, z, y, out) => out.set(x, y, z), app.engine.camera.quaternion);
     small.group.scale.setScalar(Math.max(0.01, size * fade));
-    small.group.position.y = ground + 0.2;
+    small.group.position.y = sp.y + 0.2 + lift;
     small.group.lookAt(v.turtle.group.position.x, small.group.position.y, v.turtle.group.position.z);
     small.group.visible = fade > 0.02;
     for (const s of stars) {
@@ -405,6 +460,7 @@ async function ending(app: App) {
       (s.material as THREE.PointsMaterial).opacity = damp((s.material as THREE.PointsMaterial).opacity, 1, 1, dt);
     }
   });
+  await c.warm();
   c.begin();
   app.screens.fadeTo(0, 1600);
   await c.done;

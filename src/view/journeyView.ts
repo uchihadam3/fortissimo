@@ -120,8 +120,8 @@ export class JourneyView {
   private lastTrailS = -99;
   readonly speedPerBeat: number;
 
-  constructor(readonly engine: Engine, readonly def: JourneyDef, readonly sim: Journey) {
-    this.look = LOOKS[def.world];
+  constructor(readonly engine: Engine, readonly def: JourneyDef, readonly sim: Journey, lookOverride?: WorldLook) {
+    this.look = lookOverride ?? LOOKS[def.world];
     const look = this.look;
     this.speedPerBeat = sim.speed;
     const seed = def.seed ?? 7;
@@ -645,9 +645,12 @@ export class JourneyView {
   }
 
   /** victory: a wave of colour from the landmark */
-  bloomWave() {
+  /** a wave of colour sweeping the land, from the landmark (or from a given point) */
+  bloomWave(from?: { x: number; z: number }) {
     this.waveR = 0;
+    this.waveFrom = from ? { x: from.x, z: from.z } : null;
   }
+  private waveFrom: { x: number; z: number } | null = null;
 
   // ───────────────────────────── update ─────────────────────────────
 
@@ -770,7 +773,8 @@ export class JourneyView {
     setSources(src);
     if (this.waveR >= 0) {
       this.waveR += dt * 40;
-      worldColor.uWave.value.set(lm.x, lm.z, this.waveR, 1.12);
+      const wc = this.waveFrom ?? lm;
+      worldColor.uWave.value.set(wc.x, wc.z, this.waveR, 1.12);
     }
     this.ffGlow = Math.max(0, this.ffGlow - dt * 0.6);
   }

@@ -11,7 +11,7 @@ import { SONGS } from '../sim/defs';
 
 export function showcaseDef(world: WorldId): JourneyDef {
   return {
-    id: `show-${world}`, world, song: world === 'meadow' ? 'menu' : world, name: { pt: '', en: '' }, bars: 400, slots: 0, coins: 0, towers: [],
+    id: `show-${world}`, world, song: world === 'meadow' ? 'menu' : world, name: { pt: '', en: '' }, bars: 230, slots: 0, coins: 0, towers: [],
     waves: [], pickups: 0, seed: world === 'meadow' ? 11 : 23, curviness: 0.8,
     features: [
       { kind: 'meadow', from: 0, to: 60 },

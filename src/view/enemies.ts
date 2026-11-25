@@ -484,11 +484,6 @@ function buildRig(kind: EnemyKind): Rig {
         body.add(sleeve);
         extra[s < 0 ? 'sleeveL' : 'sleeveR'] = sleeve;
       }
-      const aura = new THREE.Mesh(new THREE.RingGeometry(ENEMIES.silence.mute! / 2.2 - 0.06, ENEMIES.silence.mute! / 2.2, 64), new THREE.MeshBasicMaterial({ color: '#6a6488', transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }));
-      aura.rotation.x = -Math.PI / 2;
-      aura.position.y = 0.06;
-      root.add(aura);
-      extra.aura = aura;
       height = r * 3;
       break;
     }
@@ -585,6 +580,11 @@ export class EnemyView {
     this.hpBar.visible = false;
     this.group.add(this.hpBar);
     this.group.visible = false;
+  }
+
+  /** show or hide the ground ring of a muting creature (cinematics hide it) */
+  setAura(on: boolean) {
+    if (this.rig.extra.aura) this.rig.extra.aura.visible = on;
   }
 
   push(t: number, x: number, z: number) {
