@@ -27,6 +27,9 @@ import { rand } from '../util';
 import { AdaptiveSong, type Layers } from './adaptive';
 import type { Inst } from './base';
 
+/** natural pitch (MIDI) of the one-shot drums the steps use (their buffers play at MIDI 60) */
+const NATURAL: Partial<Record<BufInst, number>> = { kick: 30.6, dum: 44.2 };
+
 /** instruments and channels the shared layers (duets, glory) use */
 export interface Kit {
   snare: BufInst;
@@ -96,9 +99,27 @@ export abstract class Battle extends AdaptiveSong {
   protected steps(b: BarCtx, vel: number, layers: { inst: BufInst; ch: string; midi?: number; v?: number }[]): void {
     if (b.build) return;
     const big = b.drop ? 1.3 : 1;
+    // the drums of the steps are tuned to the movement's tonic (a timpanist would tune them)
+    const tpc = this.k.tonicPc;
+    const tuned = layers.map((L) => {
+      const nat = NATURAL[L.inst];
+      if (nat !== undefined) {
+        // one-shot drums: transpose from their natural pitch to the nearest tonic (≤ ±6 semitones)
+        let m = Math.round(nat) - 6;
+        while (pcOf(m) !== tpc) m++;
+        return 60 + (m - nat);
+      }
+      if (L.inst === 'taiko' || L.inst === 'tom') {
+        const want = L.midi ?? 36;
+        let m = Math.round(want) - 6;
+        while (pcOf(m) !== tpc) m++;
+        return m;
+      }
+      return L.midi ?? 60;
+    });
     for (let beat = 0; beat < b.beats; beat++) {
       const acc = beat === 0 ? 1 : beat === 2 ? 0.88 : 0.78;
-      for (const L of layers) b.p.hit(L.inst, L.ch, this.T(b, beat, 0.0015), Math.min(1.2, vel * acc * big * (L.v ?? 1)), (L.midi ?? 60) + (beat === 0 ? 0 : -0.15));
+      layers.forEach((L, i) => b.p.hit(L.inst, L.ch, this.T(b, beat, 0.0015), Math.min(1.2, vel * acc * big * (L.v ?? 1)), tuned[i] + (beat === 0 ? 0 : -0.12)));
     }
   }
 

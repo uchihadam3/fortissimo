@@ -103,8 +103,8 @@ export class MeadowTheme extends Battle {
     p.ch('horns', { gain: 0.4, wet: 0.4, pan: -0.1 });
     p.ch('choir', { gain: 0.36, wet: 0.48, vibratoCents: 5 });
     p.ch('lead', { gain: 0.66, wet: 0.36, vibratoCents: 12, vibratoRate: 5.4, pan: 0.12 });
-    p.ch('fid', { gain: 0.64, wet: 0.36, vibratoCents: 13, vibratoRate: 5.6, pan: -0.14 });
-    p.ch('acc', { gain: 0.5, wet: 0.3, tremolo: 0.06, tremoloRate: 5.5, pan: 0.18 });
+    p.ch('fid', { gain: 0.9, wet: 0.36, vibratoCents: 13, vibratoRate: 5.6, pan: -0.14 });
+    p.ch('acc', { gain: 0.56, wet: 0.3, tremolo: 0.06, tremoloRate: 5.5, pan: 0.18 });
     p.ch('vln', { gain: 0.34, wet: 0.45, vibratoCents: 10, vibratoRate: 5.2, pan: 0.24 });
     p.ch('timp', { gain: 0.46, wet: 0.3 });
     p.ch('harp', { gain: 0.32, wet: 0.4, pan: -0.3 });

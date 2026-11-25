@@ -54,6 +54,14 @@ class Engine {
   muffle = 0;
   /** the band last reported (kept across unlock) */
   band: BandMix = FULL_BAND;
+  /** the land of the story (battle songs, ambience, land cues) */
+  world: WorldId | null = null;
+
+  setWorld(w: WorldId | null): void {
+    if (!w) return;
+    this.world = w;
+    if (this.director) this.director.world = w;
+  }
   ambience: { place: Place; level: number } = { place: 'none', level: 1 };
 
   get ctx(): AudioContext | null {
@@ -108,6 +116,7 @@ class Engine {
         bank.warm('pizz', 29, 62, 1);
         this.director = new Director(core, bank, makeTheme);
         this.director.band = this.band;
+        this.director.world = this.world;
         this.sfx = new Sfx(core, bank, this.director);
         this.towers = new Towers(core, bank, this.director);
         this.amb = new Ambience(core, bank);
@@ -171,6 +180,8 @@ class Engine {
     if (!isSong(id)) return this.clockOf() ?? { song: 'menu', t0: now, spb: 60 / SONGS.menu.bpm, beatsPerBar: 4 };
     if (this.song && this.song.id === id && !opts?.restart) return this.clockOf()!;
     const info = SONGS[id];
+    if (id === 'meadow' || id === 'desert' || id === 'ice' || id === 'forge' || id === 'citadel') this.setWorld(id);
+    else if (id === 'finale') this.setWorld('citadel');
     const fade = clamp(num(opts?.fade, 1.2), 0, 20);
     const t0 = opts && typeof opts.at === 'number' && Number.isFinite(opts.at) ? opts.at : now + 0.15;
     const intensity = this.nextIntensity;
@@ -432,6 +443,7 @@ const api: AudioAPI = {
   setAmbience: guard('setAmbience', (place: WorldId | 'menu' | 'none', level?: number) => {
     const p: Place = place === 'meadow' || place === 'desert' || place === 'ice' || place === 'forge' || place === 'citadel' || place === 'menu' ? place : 'none';
     E.ambience = { place: p, level: clamp(num(level, 1), 0, 1.5) };
+    if (p !== 'menu' && p !== 'none') E.setWorld(p);
     E.amb?.setPlace(p, E.ambience.level);
   }),
 };

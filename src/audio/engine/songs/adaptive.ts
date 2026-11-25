@@ -32,6 +32,8 @@ export interface SecDef {
   bars: (string | string[])[];
   /** the section's tune in degrees of the plan's scale from its tonic: the towers' guide (battle) or the melody (breakdown) */
   tune?: Line;
+  /** the tune's own mode (a minor song inside a Hijaz plan…); default: the plan's */
+  mode?: readonly number[];
 }
 
 export interface PlanDef {
@@ -110,7 +112,7 @@ export abstract class AdaptiveSong extends Song {
   private readonly states = new Map<number, BState>();
   private readonly infos = new Map<string, BarInfo>();
   private readonly tunes = new Map<string, MNote[]>();
-  private readonly scales = new Map<number, Scale>();
+  private readonly scales = new Map<string, Scale>();
   private lastSec = '';
   /** the state and scale of the bar being composed */
   protected st: BState = INIT;
@@ -166,12 +168,25 @@ export abstract class AdaptiveSong extends Song {
     return f;
   }
 
-  scaleOfPlan(plan: number): Scale {
-    let s = this.scales.get(plan);
+  /** semitones added to every plan (a song that takes its key from the land, like the boss); read once */
+  protected baseShift(): number {
+    return 0;
+  }
+  private base: number | null = null;
+  protected get shift0(): number {
+    if (this.base === null) this.base = this.baseShift();
+    return this.base;
+  }
+
+  /** the scale of a plan (and of a section of it, when the section has its own mode) */
+  scaleOfPlan(plan: number, sec?: string): Scale {
+    const sd = sec ? this.sec(sec) : null;
+    const key = sd?.mode ? `${plan}:${sec}` : `${plan}`;
+    let s = this.scales.get(key);
     if (!s) {
       const P = this.plans[plan];
-      s = new Scale(this.key.tonic + P.shift, P.mode ?? this.key.steps);
-      this.scales.set(plan, s);
+      s = new Scale(this.key.tonic + P.shift + this.shift0, sd?.mode ?? P.mode ?? this.key.steps);
+      this.scales.set(key, s);
     }
     return s;
   }
@@ -261,7 +276,7 @@ export abstract class AdaptiveSong extends Song {
     let f = this.infos.get(key);
     if (f) return f;
     const raw = s.mode === 'battle' ? this.battleForm(s.plan).at(Math.max(0, s.pos)) : this.breakForm(s.plan, s.brkN).at(s.brk);
-    const tr = (c: Chord) => transpose(c, P.shift);
+    const tr = (c: Chord) => transpose(c, P.shift + this.shift0);
     f = { ...raw, chords: raw.chords.map(tr), chord: tr(raw.chord), next: tr(raw.next) };
     if (this.infos.size > 2000) this.infos.clear();
     this.infos.set(key, f);
@@ -274,7 +289,8 @@ export abstract class AdaptiveSong extends Song {
   }
 
   keyAt(bar: number, p: Player): Scale {
-    return this.scaleOfPlan(this.state(Math.max(0, bar), p).plan);
+    const s = this.state(Math.max(0, bar), p);
+    return this.scaleOfPlan(s.plan, this.info(s).sec);
   }
 
   /** the notes of a section's tune in a plan's key (beats from the section start) */
@@ -283,7 +299,7 @@ export abstract class AdaptiveSong extends Song {
     let t = this.tunes.get(key);
     if (!t) {
       const line = this.sec(sec).tune;
-      const k = this.scaleOfPlan(plan);
+      const k = this.scaleOfPlan(plan, sec);
       t = line ? lineNotes(k, k.tonic, this.beats, line) : [];
       this.tunes.set(key, t);
     }
@@ -310,7 +326,7 @@ export abstract class AdaptiveSong extends Song {
     const s = this.state(b.bar, b.p);
     const f = this.info(s);
     this.st = s;
-    this.sc = this.scaleOfPlan(s.plan);
+    this.sc = this.scaleOfPlan(s.plan, f.sec);
     const sk = `${s.mode}:${s.plan}:${f.start}:${s.mode === 'break' ? s.brkN : 0}`;
     if (sk !== this.lastSec) {
       this.lastSec = sk;

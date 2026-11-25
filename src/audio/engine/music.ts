@@ -6,7 +6,7 @@
  * grid the game uses for towers. Themes expose their harmony as a pure function of the bar index
  * (`chordAt`) so tower notes can be chosen before the backing for that bar exists.
  */
-import type { SongId } from '../../sim/defs';
+import type { SongId, WorldId } from '../../sim/defs';
 import type { BandMix } from '../api';
 import type { Core, ReverbMode } from './core';
 import { BufferBank, Channel, type BufInst, type BufNoteOpts, type ChannelOpts, oscStack, playBuf, type StackOpts } from './synth';
@@ -540,6 +540,8 @@ export type ThemeFactory = (id: TrackId) => Theme | null;
 export class Director {
   private players: Player[] = [];
   current: Player | null = null;
+  /** the land the story is in (battle songs, ambience, land cues): boss and story moods take its colours */
+  world: WorldId | null = null;
   /** the band last reported by the game (new players start with it) */
   band: BandMix = FULL_BAND;
   /** the most recently started track (its harmony and grid stay the reference after it stops) */
