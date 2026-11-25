@@ -10,7 +10,8 @@ import { Journey, SUB, SUBS_PER_BAR, type Enemy, type JourneyDef, type SimEvent,
 import { BAND, ENEMIES, SONGS, TOWERS, TOWER_KINDS, type EnemyKind, type TowerKind } from '../src/sim/defs';
 import { SLOTS, SLOT_NEIGHBOURS } from '../src/sim/shell';
 import { playBot, playSpam } from '../src/sim/bots';
-import { newSave, saveFromCode, saveToCode, validate } from '../src/core/save';
+import { checkpointOf, newSave, rememberCheckpoint, saveFromCode, saveToCode, validate } from '../src/core/save';
+import type { Checkpoint } from '../src/sim/journey';
 import { Rng } from '../src/core/rng';
 
 let failed = 0;
@@ -137,6 +138,7 @@ section('determinism');
 
 section('checkpoints');
 // ───────────────────────────── checkpoints ─────────────────────────────
+let someCp: Checkpoint | null = null;
 for (const id of ['m3', 'i2', 'c1']) {
   const d = LEVEL_BY_ID.get(id)!.def;
   const bpmL = SONGS[d.song].bpm;
@@ -147,6 +149,8 @@ for (const id of ['m3', 'i2', 'c1']) {
   check(`${id} checkpoint exists`, !!cp && cp.movement === 2, JSON.stringify(cp && { m: cp.movement, s: cp.sub }));
   if (!cp) continue;
   check(`${id} checkpoint on a bar line`, cp.sub % SUBS_PER_BAR === 0);
+  check(`${id} checkpoint belongs to this journey`, Journey.canResume(d, cp) && !Journey.canResume({ ...d, waves: d.waves.slice(1) }, cp));
+  someCp = cp;
   // replaying up to the live moment gives exactly the live state
   const now = Journey.replay(d, bpmL, { ...cp, sub: L.sub, actions: L.log.filter((a) => a.sub <= L.sub) });
   check(`${id} replay == live`, now.fingerprint() === L.fingerprint(), `\n  ${now.fingerprint().slice(0, 200)}\n  ${L.fingerprint().slice(0, 200)}`);
@@ -467,6 +471,18 @@ s.knownTowers = ['harp'];
 const back = saveFromCode(saveToCode(s));
 check('save code round-trip', !!back && back.levels.m1.stars === 3 && back.knownTowers[0] === 'harp');
 check('save rejects junk', validate({ nope: 1 }) === null && saveFromCode('FF1:%%%') === null);
+if (someCp) {
+  const sv = newSave(2);
+  rememberCheckpoint(sv, someCp.id, someCp);
+  const again = validate(JSON.parse(JSON.stringify(sv)))!;
+  check('save keeps a checkpoint', JSON.stringify(again.checkpoints[someCp.id]) === JSON.stringify(someCp));
+  check('checkpoint per mode', !!checkpointOf(again, someCp.id, 'normal') && !checkpointOf(again, someCp.id, 'virtuoso'));
+  check('checkpoints stay on the device', !saveFromCode(saveToCode(sv))!.checkpoints[someCp.id]);
+  const broken = validate({ ...JSON.parse(JSON.stringify(sv)), checkpoints: { [someCp.id]: { ...someCp, actions: [{ sub: 'x', a: 'build' }] } } })!;
+  check('broken checkpoints are dropped', !broken.checkpoints[someCp.id]);
+  rememberCheckpoint(sv, someCp.id, null);
+  check('a win forgets it', !sv.checkpoints[someCp.id]);
+}
 void TOWER_KINDS;
 void SUB;
 

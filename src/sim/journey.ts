@@ -19,7 +19,7 @@ import {
 } from './defs';
 import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
-import { Rng } from '../core/rng';
+import { Rng, hashString } from '../core/rng';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
@@ -294,6 +294,13 @@ export interface Checkpoint {
   sub: number;
   /** the player's actions up to that point (replayed headless) */
   actions: SimAction[];
+  /** fingerprint of the journey's data: a checkpoint only replays on the very same journey */
+  version?: number;
+}
+
+/** A fingerprint of everything in a journey's data that the simulation depends on. */
+export function journeyVersion(def: JourneyDef): number {
+  return hashString(JSON.stringify([def.bars, def.speed, def.slots, def.coins, def.lives, def.towers, def.waves, def.movements, def.pickups, def.obelisks, def.boss, def.seed, def.curviness]));
 }
 
 interface SpawnReq {
@@ -440,6 +447,11 @@ export class Journey {
   private addPickup(s: number, off: number, value: number, breather?: number) {
     const p = this.path.at(s);
     this.pickups.push({ id: this.nextId++, x: p.x - p.dz * off, z: p.z + p.dx * off, s, value, taken: false, lost: false, breather });
+  }
+
+  /** can this checkpoint start this journey again (same level, same data)? */
+  static canResume(def: JourneyDef, cp: Checkpoint | null | undefined): boolean {
+    return !!cp && cp.id === def.id && (cp.version === undefined || cp.version === journeyVersion(def)) && Array.isArray(cp.actions);
   }
 
   /** Replays a checkpoint headless: the journey exactly as it was at the checkpoint (events drained). */
@@ -672,7 +684,7 @@ export class Journey {
     for (const c of this.checkpoints()) if (c.sub <= this.sub - margin) best = c;
     if (!best) return null;
     const until = best.sub;
-    return { id: this.def.id, mode: this.mode, movement: best.movement, total: this.movements.length, sub: until, actions: this.log.filter((a) => a.sub <= until) };
+    return { id: this.def.id, mode: this.mode, movement: best.movement, total: this.movements.length, sub: until, actions: this.log.filter((a) => a.sub <= until), version: journeyVersion(this.def) };
   }
 
   // ───────────────────────────── simulation ─────────────────────────────

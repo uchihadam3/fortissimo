@@ -94,8 +94,9 @@ export class JourneyBattle {
 
   constructor(readonly engine: Engine, readonly def: JourneyDef, readonly opts: BattleOptions, uiRoot: HTMLElement) {
     const song = SONGS[def.song];
-    this.resumed = !!opts.resume;
-    this.sim = opts.resume ? Journey.replay(def, song.bpm, opts.resume) : new Journey(def, song.bpm, { mode: opts.mode });
+    // a checkpoint only replays on the very same journey (an older one simply starts from the beginning)
+    this.resumed = Journey.canResume(def, opts.resume);
+    this.sim = this.resumed ? Journey.replay(def, song.bpm, opts.resume!) : new Journey(def, song.bpm, { mode: opts.mode });
     // the view builds a pad for every plate the journey will ever open; the locked ones stay hidden
     // until their breather. INTEGRATION: JourneyView could build `sim.slotsMax` pads itself and show
     // them on 'plate' events (then this swap can go).
