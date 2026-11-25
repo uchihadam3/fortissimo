@@ -484,7 +484,10 @@ export class GloryMood extends Mood {
     this.bassline(b, f, 'pizz', 'pizz', [[0, 0, 0.6, 0.6], [1, 3, 0.5, 0.4], [2, 2, 0.6, 0.5], [3, 3, 0.5, 0.4]], 34);
     this.play(b, SUB(), 'bass', 0, this.root(f, 0, 29), 0.4, b.beats * b.spb);
     this.ostinato(b, f, 'harp', 'harp', 57, 86, [0, 1, 2, 3, 4, 3, 2, 1], 0.32, 1.0, [0, 4]);
-    this.drum(b, P.drum === 'dum' || P.drum === 'kick' || P.drum === 'tom' ? 'taiko' : P.drum, 'kit', 'x...x...x...x...', 0.36, 33);
+    // the steps of the turtle, the drum tuned to the land's tonic
+    let step = 27;
+    while (pcOf(step) !== this.key.tonicPc) step++;
+    this.drum(b, 'taiko', 'kit', 'x...x...x...x...', 0.36, step);
     if (f.i === 0 || f.i === 4) {
       this.play(b, 'timp', 'timp', 0, this.root(f, 0, 41), 0.5, 3);
       if (f.i === 0) b.p.hit('crash', 'kit', this.T(b, 0, 0.001), 0.32);

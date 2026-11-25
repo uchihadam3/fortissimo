@@ -615,23 +615,24 @@ export class BloomMood extends Mood {
       return;
     }
     if (k === 2) {
-      // the last chord, a breath late, enormous, then ringing
+      // the last chord, a breath late, enormous, then ringing (big, but not slammed into the limiter)
       const at = 0.35;
       const ring = 7;
+      const g = 0.62;
       const I = chord(['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'][K.tonicPc]);
-      for (const m of [T - 24, T - 17, T - 12, T - 8, T - 5, T, T + 4, T + 7]) this.play(b, { ...STRINGS(1), attack: 0.08, release: 3.5 }, 'strings', at, m, 0.7, ring, undefined, 0.002);
-      for (const m of [T - 12, T - 8, T - 5, T, T + 4, T + 7]) this.play(b, { ...CHOIR('ah'), attack: 0.25, release: 3.5 }, 'choir', at, m, 0.6, ring, undefined, 0.002);
-      for (const m of [T - 24, T - 17, T - 12, T - 8, T - 5]) this.play(b, 'brass', 'brass', at, m, 0.5, 3, 1.5, 0.002);
-      for (const m of [T - 12, T - 5, T]) this.play(b, { ...LOWBRASS(0.8), attack: 0.06, release: 3 }, 'brass', at, m, 0.6, ring - 1, undefined, 0.002);
-      this.play(b, HORNLEAD(0.9), 'horn', at, T + 12, 1, ring - 2.5);
-      this.play(b, VIOLIN(0.95), 'violins', at, T + 24, 0.62, ring - 2.5);
-      this.play(b, 'timp', 'timp', at, T - 24 >= 36 ? T - 24 : T - 12, 0.8, 4, undefined, 0.001);
-      b.p.hit('crash', 'kit', this.T(b, at, 0.001), 0.6);
-      b.p.hit('gong', 'kit', this.T(b, at, 0.001), 0.3);
-      this.play(b, 'taiko', 'kit', at, 29, 0.8, 2, undefined, 0.001);
-      this.play(b, { ...SUB(), attack: 0.02, release: 3 }, 'bass', at, T - 36 >= 24 ? T - 36 : T - 24, 0.6, ring - 1, undefined, 0.001);
-      this.play(b, 'tbell', 'bells', at + 0.02, T, 0.35, 7);
-      chordTones(chord(`${I.sym}add9`), 77, 101).forEach((m, i) => this.play(b, 'glass', 'glass', at + 0.4 + i * 0.22, m, 0.2, 3.5, 2.5));
+      for (const m of [T - 24, T - 17, T - 12, T - 8, T - 5, T, T + 4, T + 7]) this.play(b, { ...STRINGS(1), attack: 0.08, release: 3.5 }, 'strings', at, m, 0.7 * g, ring, undefined, 0.002);
+      for (const m of [T - 12, T - 8, T - 5, T, T + 4, T + 7]) this.play(b, { ...CHOIR('ah'), attack: 0.25, release: 3.5 }, 'choir', at, m, 0.6 * g, ring, undefined, 0.002);
+      for (const m of [T - 24, T - 17, T - 12, T - 8, T - 5]) this.play(b, 'brass', 'brass', at, m, 0.5 * g, 3, 1.5, 0.002);
+      for (const m of [T - 12, T - 5, T]) this.play(b, { ...LOWBRASS(0.8), attack: 0.06, release: 3 }, 'brass', at, m, 0.6 * g, ring - 1, undefined, 0.002);
+      this.play(b, HORNLEAD(0.9), 'horn', at, T + 12, 1 * g, ring - 2.5);
+      this.play(b, VIOLIN(0.95), 'violins', at, T + 24, 0.62 * g, ring - 2.5);
+      this.play(b, 'timp', 'timp', at, T - 24 >= 36 ? T - 24 : T - 12, 0.8 * g, 4, undefined, 0.001);
+      b.p.hit('crash', 'kit', this.T(b, at, 0.001), 0.6 * g);
+      b.p.hit('gong', 'kit', this.T(b, at, 0.001), 0.3 * g);
+      this.play(b, 'taiko', 'kit', at, 29, 0.8 * g, 2, undefined, 0.001);
+      this.play(b, { ...SUB(), attack: 0.02, release: 3 }, 'bass', at, T - 36 >= 24 ? T - 36 : T - 24, 0.6 * g, ring - 1, undefined, 0.001);
+      this.play(b, 'tbell', 'bells', at + 0.02, T, 0.35 * g, 7);
+      chordTones(chord(`${I.sym}add9`), 77, 101).forEach((m, i) => this.play(b, 'glass', 'glass', at + 0.4 + i * 0.22, m, 0.2 * g, 3.5, 2.5));
       return;
     }
     if (k < 4) return;

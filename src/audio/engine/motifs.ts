@@ -130,13 +130,13 @@ export class Motifs {
     };
     switch (kind) {
       case 'harp': {
-        run([{ d: 0, at: 0, len: 1 }, { d: 4, at: 1, len: 1.5 }, { d: 3, at: 2.5, len: 0.5 }, { d: 2, at: 3, len: 1 }, { d: 0, at: 4, len: 0.5, v: 0.8 }, { d: 2, at: 4.5, len: 0.5, v: 0.85 }, { d: 4, at: 5, len: 0.5, v: 0.9 }, { d: 7, at: 5.5, len: 0.5 }, { d: 8, at: 6, len: 1, v: 1.05 }, { d: 7, at: 7, len: 1.5 }], 'harp', 66, this.stage, 0.5, 0.9);
-        run([{ d: 7, at: 7, len: 1.5 }], 'celesta', 78, this.stageWide, 0.22, 1.2);
+        run([{ d: 0, at: 0, len: 1 }, { d: 4, at: 1, len: 1.5 }, { d: 3, at: 2.5, len: 0.5 }, { d: 2, at: 3, len: 1 }, { d: 0, at: 4, len: 0.5, v: 0.8 }, { d: 2, at: 4.5, len: 0.5, v: 0.85 }, { d: 4, at: 5, len: 0.5, v: 0.9 }, { d: 7, at: 5.5, len: 0.5 }, { d: 8, at: 6, len: 1, v: 1.05 }, { d: 7, at: 7, len: 1.5 }], 'harp', 66, this.stage, 0.88, 0.9);
+        run([{ d: 7, at: 7, len: 1.5 }], 'celesta', 78, this.stageWide, 0.32, 1.2);
         break;
       }
       case 'drum': {
         const T = this.deg(k, 0, 40);
-        const tk = (at: number, m: number, v: number, inst: BufInst = 'tom') => this.fx.buf(inst, this.stage, t + at * spb, m, v, 1.2, { cat: 'motif', cap: 64, release: 0.4 });
+        const tk = (at: number, m: number, v: number, inst: BufInst = 'tom') => this.fx.buf(inst, this.stage, t + at * spb, m, v * 0.7, 1.2, { cat: 'motif', cap: 64, release: 0.4 });
         tk(0, T - 7, 0.85, 'taiko');
         tk(1, T + 7, 0.5);
         tk(1.5, T + 7, 0.42);
@@ -144,7 +144,7 @@ export class Motifs {
         tk(3, T - 7, 0.7, 'taiko');
         [12, 10, 7, 5, 3, 0].forEach((x, i) => tk(4 + i * 0.25, T + x, 0.4 + i * 0.05));
         tk(6, T - 7, 0.95, 'taiko');
-        this.fx.buf('crash', this.stage, t + 6 * spb, 60, 0.42, 3, { cat: 'motif', cap: 64 });
+        this.fx.buf('crash', this.stage, t + 6 * spb, 60, 0.3, 3, { cat: 'motif', cap: 64 });
         this.fx.buf('snare', this.stage, t + 5.75 * spb, 60, 0.3, 0.3, { cat: 'motif', cap: 64 });
         break;
       }
@@ -161,12 +161,12 @@ export class Motifs {
         for (let i = 0; i < 16; i++) {
           const ch = pat[i];
           if (ch === '.') continue;
-          this.fx.buf('shaker', this.stage, t + (i * 0.25) * spb, 60 + rand(-0.2, 0.2), ch === 'x' ? 0.5 : 0.3, 0.2, { cat: 'motif', cap: 64 });
+          this.fx.buf('shaker', this.stage, t + (i * 0.25) * spb, 60 + rand(-0.2, 0.2), ch === 'x' ? 0.66 : 0.4, 0.2, { cat: 'motif', cap: 64 });
         }
         for (const at of [4, 4.75, 5.5, 6]) this.fx.buf('shaker', this.stage, t + at * spb, 61, 0.5, 0.2, { cat: 'motif', cap: 64 });
         this.fx.buf('tamb', this.stage, t + 7 * spb, 60, 0.4, 0.4, { cat: 'motif', cap: 64 });
-        run([{ d: 4, at: 6.5, len: 0.5 }, { d: 7, at: 7, len: 1.5 }], 'marimba', 72, this.stage, 0.5, 0.6);
-        run([{ d: 2, at: 6.5, len: 0.5 }, { d: 4, at: 7, len: 1.5 }], 'marimba', 66, this.stage, 0.32, 0.6);
+        run([{ d: 4, at: 6.5, len: 0.5 }, { d: 7, at: 7, len: 1.5 }], 'marimba', 72, this.stage, 0.7, 0.6);
+        run([{ d: 2, at: 6.5, len: 0.5 }, { d: 4, at: 7, len: 1.5 }], 'marimba', 66, this.stage, 0.45, 0.6);
         break;
       }
       case 'crystal': {
@@ -175,14 +175,14 @@ export class Motifs {
         evs.push({ d: 14, at: 1.75, len: 1.2, v: 1 });
         [11, 9, 7, 4, 2, 0].forEach((d, i) => evs.push({ d: d + 7, at: 4 + i * 0.25, len: 0.4, v: 0.85 - i * 0.05 }));
         evs.push({ d: 11, at: 6, len: 2, v: 0.9 });
-        run(evs, 'zap', 74, this.stage, 0.32, 0.4);
-        run([{ d: 14, at: 1.75, len: 2 }, { d: 11, at: 6, len: 2.5 }], 'glass', 86, this.stageWide, 0.18, 1.6);
+        run(evs, 'zap', 74, this.stage, 0.48, 0.4);
+        run([{ d: 14, at: 1.75, len: 2 }, { d: 11, at: 6, len: 2.5 }], 'glass', 86, this.stageWide, 0.26, 1.6);
         break;
       }
       case 'horn': {
         const call: Ev[] = [{ d: 0, at: 0, len: 1 }, { d: 4, at: 1, len: 1.5 }, { d: 3, at: 2.5, len: 0.5 }, { d: 2, at: 3, len: 1 }, { d: 4, at: 4, len: 1 }, { d: 7, at: 5, len: 3 }];
-        run(call, HORNLEAD(0.85), 60, this.stage, 0.9);
-        run(call, 'brass', 60, this.stage, 0.32, 0.4);
+        run(call, HORNLEAD(0.85), 60, this.stage, 1.05);
+        run(call, 'brass', 60, this.stage, 0.38, 0.4);
         run(call.map((e) => ({ ...e, oct: -12 })), 'brass', 60, this.stageWide, 0.24, 0.4);
         this.fx.buf('timp', this.stage, t + 5 * spb, bassNote(chord(['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'][k.tonicPc]), 40), 0.4, 2.5, { cat: 'motif', cap: 64 });
         break;
