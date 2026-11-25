@@ -5,7 +5,8 @@ const CACHE = 'fortissimo-' + VERSION;
 const CORE = ['./', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
+  // 'reload' skips the browser's HTTP cache, so a new version never stores an old copy of the game
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -26,7 +27,8 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
   const isPage = req.mode === 'navigate' || url.pathname.endsWith('/index.html');
   if (isPage) {
-    const net = fetch(req, { cache: 'no-cache' }).then(async (res) => {
+    // (a navigation request cannot be re-sent with options, so ask for its address afresh)
+    const net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(async (res) => {
       if (res.ok) {
         const c = await caches.open(CACHE);
         await c.put('./', res.clone());
