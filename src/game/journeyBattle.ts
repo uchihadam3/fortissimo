@@ -59,7 +59,8 @@ export class JourneyBattle {
   private queuedCards: EnemyKind[] = [];
   private removeUpdate: () => void = () => {};
   private disposed = false;
-  private elapsed = 0;
+  /** simulation time when the colossus set off (the journey's own clock, unaffected by slow frames) */
+  private goSimTime = -1;
   /** incoming waves (from warnings) for the edge arrows */
   private incoming: { index: number; at: number; dirs: { dir: number; kinds: EnemyKind[] }[] }[] = [];
   private bossAnnounced = false;
@@ -86,8 +87,11 @@ export class JourneyBattle {
     this.hud.onGo = () => this.go();
     this.hud.onHoverTower = (k) => this.previewRange(k);
     this.hud.showGo(true);
-    if (opts.tutorials && def.tutorial?.length) this.tutorial = new JourneyTutorial(this, def.tutorial);
+    // the first land also gets gentle nudges: an idle player with notes to spend is shown the free plate
+    if (opts.tutorials && (def.tutorial?.length || def.world === 'meadow')) this.tutorial = new JourneyTutorial(this, def.tutorial ?? [], def.world === 'meadow');
     this.removeUpdate = engine.onUpdate((dt, t) => this.update(dt, t));
+    // developer handle for automated play-throughs
+    if (import.meta.env.DEV) (window as unknown as { __battle: JourneyBattle }).__battle = this;
     this.detach = this.attachInput(engine.renderer.domElement);
   }
 
@@ -327,9 +331,14 @@ export class JourneyBattle {
     this.hud.flyCoins(s.x, s.y, Math.min(6, Math.ceil(v / 30)));
   }
 
+  private journeyTime(): number {
+    return this.goSimTime < 0 ? 0 : Math.max(0, this.sim.time - this.goSimTime);
+  }
+
   go() {
     if (this.paused || this.ended || this.sim.started) return;
     this.sim.begin();
+    this.goSimTime = this.sim.time;
     this.hud.showGo(false);
     audio.uiClick();
     this.tutorial?.notify('go');
@@ -375,7 +384,6 @@ export class JourneyBattle {
 
   private update(dt: number, t: number) {
     if (this.disposed) return;
-    this.elapsed += dt;
     const song = this.songNow();
     const lat = audio.latency();
     if (this.paused && this.resumeAtSong !== null) {
@@ -609,7 +617,7 @@ export class JourneyBattle {
       }
       setTimeout(() => {
         if (this.disposed) return;
-        this.resolveEnd({ outcome, stars: this.sim.stars(), lives: this.sim.lives, time: this.elapsed, kills: this.sim.stats.kills, collected: this.sim.stats.collected });
+        this.resolveEnd({ outcome, stars: this.sim.stars(), lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected });
       }, outcome === 'victory' ? 5600 : 2600);
     }, lag + 200);
   }
@@ -638,7 +646,7 @@ export class JourneyBattle {
   quit() {
     if (this.ended) return;
     this.ended = true;
-    this.resolveEnd({ outcome: 'quit', stars: 0, lives: this.sim.lives, time: this.elapsed, kills: this.sim.stats.kills, collected: this.sim.stats.collected });
+    this.resolveEnd({ outcome: 'quit', stars: 0, lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected });
   }
 
   dispose() {

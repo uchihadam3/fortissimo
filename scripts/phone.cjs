@@ -19,7 +19,7 @@ const { chromium } = require('playwright');
   // follow the glove to the plate
   const hp = await page.evaluate(() => { const e = document.querySelector('#hand'); return { x: parseFloat(e.style.left), y: parseFloat(e.style.top) }; });
   await page.touchscreen.tap(hp.x, hp.y);
-  await page.waitForSelector('#radial.open', { timeout: 120000 }).catch(() => logs.push('no radial'));
+  await page.waitForSelector('#radial.open', { state: 'attached', timeout: 120000 }).catch(() => logs.push('no radial'));
   await frames(2);
   await page.screenshot({ path: `${prefix}-2.png`, timeout: 180000 });
   console.log('shot 2 (build menu)');
@@ -28,7 +28,19 @@ const { chromium } = require('playwright');
   await frames(3);
   await page.evaluate(() => document.querySelector('#go')?.click());
   await frames(2);
-  await page.waitForTimeout(Number(process.env.PLAY_MS ?? 30000));
+  // keep following the glove like a new player would: tap where it points, take the first affordable instrument
+  const until = Date.now() + Number(process.env.PLAY_MS ?? 30000);
+  let shot = 0;
+  while (Date.now() < until) {
+    const hand = await page.evaluate(() => { const e = document.querySelector('#hand.on'); return e ? { x: parseFloat(e.style.left), y: parseFloat(e.style.top) } : null; });
+    if (hand) {
+      if (process.env.NUDGE_SHOT && !shot++) await page.screenshot({ path: `${prefix}-nudge.png`, timeout: 180000 });
+      await page.touchscreen.tap(hand.x, hand.y);
+      await frames(2);
+      await page.evaluate(() => document.querySelector('#radial.open .rb:not(.poor)')?.click());
+    }
+    await frames(1);
+  }
   await frames(2);
   await page.screenshot({ path: `${prefix}-3.png`, timeout: 180000 });
   console.log('shot 3 (journey)');

@@ -4,6 +4,7 @@
  */
 import type { JourneyBattle } from './journeyBattle';
 import type { TutorialId } from '../sim/journey';
+import { TOWERS } from '../sim/defs';
 
 type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup';
 
@@ -17,8 +18,11 @@ interface Step {
 export class JourneyTutorial {
   private steps: Step[] = [];
   private shown = 0;
+  /** seconds since the player last built, upgraded or opened a plate */
+  private idle = 0;
+  private slotScreen: (i: number, y?: number) => { x: number; y: number } | null;
 
-  constructor(private b: JourneyBattle, ids: TutorialId[]) {
+  constructor(private b: JourneyBattle, ids: TutorialId[], private nudges = false) {
     const sim = b.sim;
     const view = b.view;
     const hud = b.hud;
@@ -26,6 +30,7 @@ export class JourneyTutorial {
       const s = view.screen(view.slotWorld(i, y));
       return s.behind ? null : { x: s.x, y: s.y };
     };
+    this.slotScreen = slotScreen;
     const radial = (index: number, count: number) => {
       const el = hud.root.querySelector('#radial') as HTMLElement | null;
       if (!el || !hud.radialOpen) return null;
@@ -99,6 +104,7 @@ export class JourneyTutorial {
   }
 
   notify(sig: Signal) {
+    if (sig === 'built' || sig === 'upgraded' || sig === 'slotOpen' || sig === 'towerOpen' || sig === 'go') this.idle = 0;
     const s = this.steps[0];
     if (s && s.until === sig) {
       this.steps.shift();
@@ -108,23 +114,39 @@ export class JourneyTutorial {
   }
 
   update(dt: number) {
+    if (this.b.isPaused) {
+      this.b.hud.hand(null);
+      return;
+    }
+    this.idle += dt;
     const s = this.steps[0];
-    if (!s || this.b.isPaused) {
-      this.b.hud.hand(null);
-      return;
+    let p: { x: number; y: number } | null = null;
+    if (s && (!s.when || s.when())) {
+      p = s.where();
+      if (p) this.shown += dt;
+      if (s.timeout && this.shown > s.timeout) {
+        this.steps.shift();
+        this.shown = 0;
+        p = null;
+      }
     }
-    if (s.when && !s.when()) {
-      this.b.hud.hand(null);
-      return;
-    }
-    const p = s.where();
+    if (!p && this.nudges) p = this.nudge();
     this.b.hud.hand(p);
-    if (p) this.shown += dt;
-    if (s.timeout && this.shown > s.timeout) {
-      this.steps.shift();
-      this.shown = 0;
-      this.b.hud.hand(null);
+  }
+
+  /** an idle player with notes to spend: the free plate (or, with no free plate, a tower that can grow) */
+  private nudge(): { x: number; y: number } | null {
+    const { sim, hud } = this.b;
+    if (!sim.started || hud.radialOpen || this.idle < 6) return null;
+    const cheapest = Math.min(...this.b.def.towers.map((k) => TOWERS[k].levels[0].cost));
+    if (sim.coins >= cheapest) {
+      for (let i = 0; i < sim.slotsOpen; i++) if (!sim.towerAt(i)) return this.slotScreen(i);
     }
+    if (this.idle >= 10) {
+      const t = sim.towers.find((x) => (sim.upgradeCost(x) ?? Infinity) <= sim.coins);
+      if (t) return this.slotScreen(t.slot, 2.4);
+    }
+    return null;
   }
 
   dispose() {
