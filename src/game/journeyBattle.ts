@@ -70,6 +70,8 @@ export class JourneyBattle {
   private sel: Sel = null;
   private ghost: THREE.Mesh | null = null;
   private intensity: 0 | 1 | 2 | 3 = 0;
+  /** the movement the music was last told about (breathers announce the next one early) */
+  private audioMovement = -1;
   private ended = false;
   private resolveEnd!: (r: BattleResult) => void;
   readonly done: Promise<BattleResult>;
@@ -152,7 +154,8 @@ export class JourneyBattle {
     for (const tw of s.towers) if (tw.muted) evs.push({ t: s.time, type: 'muted', tower: tw, muted: true, cause: tw.muteCause });
     this.view.push(evs);
     this.lastVt = s.time;
-    audio.movement(Math.max(0, s.movement), s.movements.length, this.ctx(s.time));
+    this.audioMovement = Math.max(0, s.movement);
+    audio.movement(this.audioMovement, s.movements.length, this.ctx(s.time));
   }
 
   onPauseRequest: () => void = () => {};
@@ -631,7 +634,11 @@ export class JourneyBattle {
           break;
         }
         case 'movement': {
-          audio.movement(ev.index, ev.total, at);
+          // (usually already announced at its breather, so the calm modulates into the new key)
+          if (this.audioMovement !== ev.index) {
+            this.audioMovement = ev.index;
+            audio.movement(ev.index, ev.total, at);
+          }
           // the creatures this movement brings for the first time
           const m = this.sim.movements[ev.index];
           const next = this.sim.movements[ev.index + 1];
@@ -649,20 +656,19 @@ export class JourneyBattle {
             this.intensity = 0;
             audio.setIntensity(0);
           }
+          // the breather's calm already sings in the key of the movement it leads into
+          if (this.audioMovement !== ev.index) {
+            this.audioMovement = ev.index;
+            audio.movement(ev.index, this.sim.movements.length, at);
+          }
           break;
         // (the Mimic's look and burrowing are drawn by the view from `enemy.mimicKind` / `enemy.burrowed`)
-        case 'disable':
-          // the bite: a puff of lava on the tower. INTEGRATION: TowerView.setDisabled(on) follows
-          // `tower.muteCause === 'disable'` (or the 'muted' events with cause 'disable').
-          this.later(ev.t, () => {
-            const tv = this.view.towers.get(ev.tower.id);
-            if (tv) this.view.fx.burst(tv.group.getWorldPosition(new THREE.Vector3()), '#ff6a1f', 30, 2.6, 0.2, 0.9);
-          });
-          break;
+        // (the slug's bite is drawn by the view: a puff of lava and the musician knocked out)
         case 'deflect':
           audio.deflect(at, this.view.pan(ev.enemy.x, ev.enemy.z));
           break;
         case 'heartHeal':
+          audio.heartHeal(at);
           this.later(ev.t, () => this.hud.healed());
           break;
       }
