@@ -1032,7 +1032,8 @@ export class InkCoil {
   /** 0 none … 1 fully wrapped */
   grow = 1;
   constructor(radius = 6.5, height = 22, n = 4) {
-    this.mat = new THREE.MeshStandardMaterial({ color: '#1d1a2b', roughness: 0.28, metalness: 0.3, emissive: new THREE.Color('#2a1648'), emissiveIntensity: 0.4 });
+    // the Silence's ink does not fade into the haze: it stays ink-black even on a far Voice
+    this.mat = new THREE.MeshStandardMaterial({ color: '#1d1a2b', roughness: 0.28, metalness: 0.3, emissive: new THREE.Color('#2a1648'), emissiveIntensity: 0.4, fog: false });
     for (let i = 0; i < n; i++) {
       const pts: THREE.Vector3[] = [];
       const turns = 1.6 + i * 0.25;

@@ -610,10 +610,10 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       bumbo.holder.lookAt(v.turtle.group.position.x, top.y, v.turtle.group.position.z);
       c.cue(0.2, 'story:frozen');
       // 1. a grey square; the colossus arrives behind the statue
-      c.shot(0, 4.6, { pos: [c.R(() => top, -4.6, 0.6, -5.2), c.R(() => top, -3.8, 0.9, -4.6)], look: [c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 3), 0.55), c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 2), 0.4)], fov: 44 });
+      c.shot(0, 4.6, { pos: [c.R(() => top, -5.6, 0.7, -2.2), c.R(() => top, -5.0, 0.95, -1.8)], look: [c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 3), 0.55), c.mix(() => top, () => v.turtle.group.position.clone().setY(top.y + 2), 0.4)], fov: 44 });
       c.placeName(0.8, 4.2, placeOf('m2', lang));
       // 2. the statue, close: frozen in the middle of a beat
-      c.shot(4.6, 7.4, { pos: [c.R(bumbo, 2.2, 1.0, -1.6), c.R(bumbo, 1.8, 0.95, -1.3)], look: c.R(bumbo, 0, 0.8, 0), fov: 30 });
+      c.shot(4.6, 7.4, { pos: [c.R(bumbo, 2.9, 1.1, -2.1), c.R(bumbo, 2.5, 1.0, -1.8)], look: c.R(bumbo, 0, 0.75, 0), fov: 32 });
       // 3. Lira plucks; golden notes fly to the statue
       c.cue(7.4, 'story:wake');
       const lira = c.band.get('harp')!;
@@ -621,13 +621,19 @@ const INTERLUDES: Record<string, (app: App) => Promise<unknown>> = {
       c.at(7.6, () => c.mpose('conduct'));
       serenade(c, 7.8, 2.2, ['harp'], () => top.clone().setY(top.y + 0.8), 18);
       // 4. colour runs down into the stone
-      c.shot(10.2, 12.4, { pos: [c.R(bumbo, 2.0, 1.3, -1.8), c.R(bumbo, 1.7, 1.15, -1.5)], look: c.R(bumbo, 0, 0.8, 0), fov: 32 });
+      c.shot(10.2, 12.4, { pos: [c.R(bumbo, 2.6, 1.4, -2.3), c.R(bumbo, 2.2, 1.25, -1.9)], look: c.R(bumbo, 0, 0.75, 0), fov: 34 });
       c.during(10.3, 11.8, (k) => (bumbo.view as MusicianView).setFrozen(1 - ease.inOut(k)));
       c.colourCircle(10.4, 3, () => top, 0.5, 12, 1.15);
       c.at(10.4, () => v.fx.burst(top.clone().setY(top.y + 2.2), '#ffd36b', 40, 2, 0.16, 1.2, true, 2));
       // 5. he wakes with a start, topples off the pedestal…
       startled(c, bumbo, 11.9);
-      c.during(12.3, 12.9, (k) => (bumbo.holder.position.y = top.y - k * k * 1.45));
+      // he tumbles off the front of the pedestal (toward us) and lands on the cobbles
+      let offPed: THREE.Vector3 | null = null;
+      c.during(12.3, 12.9, (k) => {
+        offPed ??= new THREE.Vector3(1.8, 0, -1.2).applyQuaternion(v.turtle.group.quaternion);
+        bumbo.holder.position.copy(top).addScaledVector(offPed, ease.out(k));
+        bumbo.holder.position.y = top.y - k * k * 1.45;
+      });
       c.at(12.0, () => audio.cinematic('story:comic'));
       c.shot(12.4, 15, { pos: [c.R(bumbo, 3.2, 1.2, -2.6), c.R(bumbo, 2.8, 1.1, -2.2)], look: c.R(bumbo, 0, 0.6, 0), fov: 38 });
       // 6. …then drums for joy and jumps onto the shell
