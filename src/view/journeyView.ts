@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import type { Engine } from '../core/engine';
 import type { Journey, JourneyDef, SimEvent, Enemy } from '../sim/journey';
-import { ENEMIES, ENEMY_SCALE, TOWERS, type DuetId, type TowerKind } from '../sim/defs';
+import { DUETS, ENEMIES, ENEMY_SCALE, TOWERS, type DuetId, type TowerKind } from '../sim/defs';
 import { SLOTS } from '../sim/shell';
 import { LOOKS, type WorldLook } from './styles';
 import { buildLandscape, type Landscape, treeUniforms } from './landscape';
@@ -14,7 +14,7 @@ import { Sky } from './sky';
 import { Grass } from './grass';
 import { Turtle } from './turtle';
 import { TowerView } from './towers';
-import { EnemyView } from './enemies';
+import { CREATURE_INK, EnemyView } from './enemies';
 import { Fx } from './fx';
 import { Landmark, MistView, PickupView } from './journeyProps';
 import { damp, glowMat, torus } from './kit';
@@ -23,11 +23,8 @@ import { Rng } from '../core/rng';
 
 export type Pick = { type: 'slot'; id: number } | { type: 'pickup'; id: number } | { type: 'turtle' };
 
-const INK: Partial<Record<string, string>> = {
-  blot: '#463d63', blotling: '#6a5f8c', scurry: '#4f6185', shell: '#4a4660', moth: '#9a90b8', shield: '#3d4a6b',
-  bubble: '#9f96d6', phantom: '#d9d3ff', muffler: '#8a8598', mender: '#3f5a52', obelisk: '#4a465c', bossBlot: '#3a3158',
-  bossScarab: '#a8742e', bossMoth: '#9fc4ea', bossGolem: '#ff6a1f', silence: '#1d1a2b',
-};
+/** the ink each creature bursts into when it turns back into golden notes */
+const INK: Partial<Record<string, string>> = CREATURE_INK;
 
 class SlotPad {
   readonly group = new THREE.Group();
@@ -110,6 +107,8 @@ export class JourneyView {
   private cineMix = 0;
   life = 0.26;
   lifeTarget = 0.26;
+  /** colour floor for lands already restored (set from the save: 0 grey … ~0.8 mostly coloured) */
+  restoredLife = 0;
   private waveR = -1;
   ffGlow = 0;
   private trail: { x: number; z: number }[] = [];
@@ -122,6 +121,8 @@ export class JourneyView {
 
   constructor(readonly engine: Engine, readonly def: JourneyDef, readonly sim: Journey, lookOverride?: WorldLook) {
     this.look = lookOverride ?? LOOKS[def.world];
+    // the musicians on the shell turn to play for whoever is watching
+    TowerView.audience = engine.camera.position;
     const look = this.look;
     this.speedPerBeat = sim.speed;
     const seed = def.seed ?? 7;
@@ -342,8 +343,93 @@ export class JourneyView {
     }
   }
 
-  /** v2: glowing ribbons between duet partners on the shell (tower ids); implemented by the integrator */
-  setDuets(_list: { id: DuetId; a: number; b: number }[]): void {}
+  // ───────────────────────────── duets ─────────────────────────────
+
+  private duetRibbons = new Map<string, { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; grow: number; dying: boolean }>();
+  private duetBeat = 0;
+
+  /**
+   * Glowing ribbons between duet partners on the shell (tower ids): an arch of flowing light in the
+   * duet's colour that pulses on the beat. New duets grow in with a little burst; broken ones fade out.
+   */
+  setDuets(list: { id: DuetId; a: number; b: number }[]): void {
+    const want = new Set<string>();
+    for (const d of list) {
+      const sa = this.towerSlot.get(d.a), sb = this.towerSlot.get(d.b);
+      if (sa === undefined || sb === undefined) continue;
+      const key = `${d.id}:${Math.min(d.a, d.b)}:${Math.max(d.a, d.b)}`;
+      want.add(key);
+      const have = this.duetRibbons.get(key);
+      if (have) {
+        have.dying = false;
+        continue;
+      }
+      const A = SLOTS[sa], B = SLOTS[sb];
+      const p0 = new THREE.Vector3(A.x, A.y + 2.3, A.z);
+      const p1 = new THREE.Vector3(B.x, B.y + 2.3, B.z);
+      const mid = p0.clone().lerp(p1, 0.5);
+      mid.y += 1.5 + p0.distanceTo(p1) * 0.12;
+      const curve = new THREE.QuadraticBezierCurve3(p0, mid, p1);
+      const geo = new THREE.TubeGeometry(curve, 32, 0.13, 6, false);
+      const color = new THREE.Color(DUETS.find((x) => x.id === d.id)?.color ?? '#ffd36b');
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: color }, uTime: { value: 0 }, uGrow: { value: 0 }, uBeat: { value: 0 } },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+          uniform vec3 uColor; uniform float uTime; uniform float uGrow; uniform float uBeat; varying vec2 vUv;
+          void main() {
+            float along = vUv.x;
+            // grows out from both partners toward the middle
+            float reach = uGrow * 0.5 + 0.001;
+            float shown = step(0.5 - reach, abs(along - 0.5) + 0.001);
+            // little notes of light flowing both ways
+            float flow = 0.5 + 0.5 * sin((along * 18.0 - uTime * 4.0) * 3.14159);
+            float flow2 = 0.5 + 0.5 * sin((along * 11.0 + uTime * 3.0) * 3.14159);
+            float edge = smoothstep(0.0, 0.06, along) * smoothstep(1.0, 0.94, along);
+            float a = (0.35 + 0.45 * flow * flow2 + uBeat * 0.6) * edge * shown;
+            gl_FragColor = vec4(uColor * (1.4 + uBeat * 1.2), a);
+          }`,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 5;
+      this.turtle.shell.add(mesh);
+      this.duetRibbons.set(key, { mesh, mat, grow: 0, dying: false });
+      // the moment two musicians click: a ring and a burst at each of them
+      for (const slot of [sa, sb]) {
+        const wp = this.slotWorld(slot, 2.2);
+        this.fx.ring(wp.clone().setY(wp.y - 2), 2.6, color.getStyle(), 0.6);
+        this.fx.burst(wp, color.getStyle(), 22, 2.4, 0.16, 0.8);
+      }
+    }
+    for (const [key, r] of this.duetRibbons) if (!want.has(key)) r.dying = true;
+  }
+
+  private updateDuets(dt: number, t: number, beatPos: number) {
+    const beat = Math.exp(-(beatPos - Math.floor(beatPos)) * 5);
+    this.duetBeat = beat;
+    for (const [key, r] of this.duetRibbons) {
+      r.grow = r.dying ? r.grow - dt * 2.5 : Math.min(1, r.grow + dt * 1.6);
+      if (r.dying && r.grow <= 0) {
+        r.mesh.removeFromParent();
+        r.mesh.geometry.dispose();
+        r.mat.dispose();
+        this.duetRibbons.delete(key);
+        continue;
+      }
+      r.mat.uniforms.uTime.value = t;
+      r.mat.uniforms.uGrow.value = r.grow;
+      r.mat.uniforms.uBeat.value = beat;
+    }
+  }
+
+  /** change only the orbit distance (eased) */
+  setDistance(d: number) {
+    this.camDistGoal = d;
+  }
 
   /** jump straight to the camera goal (no easing) */
   snapCamera() {
@@ -463,6 +549,9 @@ export class JourneyView {
           this.scene.add(v.group);
           v.push(ev.t, ev.enemy.x, ev.enemy.z);
         }
+        // a Mimic (Sombra) shows which of the band's instruments it copies
+        const mk = (ev.enemy as { mimicKind?: TowerKind | null }).mimicKind;
+        if (mk) v.setMimicKind(mk);
         if (!ev.enemy.structure && ev.enemy.wave >= 0) {
           const p = new THREE.Vector3(ev.enemy.x, this.land.heightAt(ev.enemy.x, ev.enemy.z) + 0.3, ev.enemy.z);
           this.fx.burst(p, '#5a5378', 10, 2, 0.4, 0.8, false, 0.5);
@@ -727,6 +816,9 @@ export class JourneyView {
       while (this.sHist.length > 2 && this.sHist[1].t < vt - 0.5) this.sHist.shift();
     }
     this.turtleS = this.sAt(vt);
+    // long journeys: only the land around the colossus is drawn
+    this.land.setFocus(this.turtleS);
+    if (this.duetRibbons.size) this.updateDuets(dt, t, beatPos);
     const prevWalking = this.walking;
     this.walking = sim.walking && !sim.halted;
     void prevWalking;
@@ -746,6 +838,9 @@ export class JourneyView {
         if (v) {
           v.push(sim.time, e.x, e.z);
           v.revealed = !e.def.camo || e.revealedUntil > sim.time;
+          // creatures that dig in (the dune scorpions) sink while they are underground
+          const bur = (e as { burrowed?: boolean }).burrowed;
+          if (bur !== undefined && !e.def.boss) v.burrowed = bur;
         }
       }
     }
@@ -821,7 +916,8 @@ export class JourneyView {
       this.trail.push({ x: tpos.x, z: tpos.z });
       if (this.trail.length > 18) this.trail.shift();
     }
-    this.life = damp(this.life, this.lifeTarget, 1.2, dt);
+    // a land whose guardian was defeated remembers its colour: it never goes back to full grey
+    this.life = damp(this.life, Math.max(this.lifeTarget, this.restoredLife), 1.2, dt);
     worldColor.uWorldSat.value = this.life;
     const cs = this.colorScale;
     const src: { x: number; z: number; r: number; s: number }[] = [];

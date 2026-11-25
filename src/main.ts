@@ -22,6 +22,7 @@ async function boot() {
   const p = new URLSearchParams(location.search);
   const container = document.getElementById('app')!;
   if (p.get('scene') === 'turtle') return turtleScene(container);
+  if (p.get('scene') === 'gallery') return import('./dev/gallery').then((m) => m.gallery(container, p));
   if (p.get('scene') === 'journey') return journeyScene(container, (p.get('world') as WorldId) ?? 'meadow', { t: Number(p.get('t') ?? 40), cam: p.get('cam') ?? 'chase' });
   await Promise.all([
     document.fonts.load('900 40px "Cinzel Decorative"'),
