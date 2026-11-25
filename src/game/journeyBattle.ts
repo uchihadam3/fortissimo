@@ -152,7 +152,6 @@ export class JourneyBattle {
     for (const tw of s.towers) if (tw.muted) evs.push({ t: s.time, type: 'muted', tower: tw, muted: true, cause: tw.muteCause });
     this.view.push(evs);
     this.lastVt = s.time;
-    for (const e of s.enemies) if (e.alive && e.mimicKind) this.later(s.time, () => this.view.enemies.get(e.id)?.setMimicKind(e.mimicKind));
     audio.movement(Math.max(0, s.movement), s.movements.length, this.ctx(s.time));
   }
 
@@ -651,21 +650,13 @@ export class JourneyBattle {
             audio.setIntensity(0);
           }
           break;
-        case 'mimic':
-          // INTEGRATION: the view could do this itself on the 'mimic' event (EnemyView.setMimicKind)
-          this.later(ev.t, () => this.view.enemies.get(ev.enemy.id)?.setMimicKind(ev.kind), 60);
-          break;
+        // (the Mimic's look and burrowing are drawn by the view from `enemy.mimicKind` / `enemy.burrowed`)
         case 'disable':
+          // the bite: a puff of lava on the tower. INTEGRATION: TowerView.setDisabled(on) follows
+          // `tower.muteCause === 'disable'` (or the 'muted' events with cause 'disable').
           this.later(ev.t, () => {
             const tv = this.view.towers.get(ev.tower.id);
             if (tv) this.view.fx.burst(tv.group.getWorldPosition(new THREE.Vector3()), '#ff6a1f', 30, 2.6, 0.2, 0.9);
-          });
-          break;
-        case 'burrow':
-          // INTEGRATION: the view could handle 'burrow' itself (dust, sinking)
-          this.later(ev.t, () => {
-            const v = this.view.enemies.get(ev.enemy.id);
-            if (v) v.burrowed = ev.on;
           });
           break;
         case 'deflect':

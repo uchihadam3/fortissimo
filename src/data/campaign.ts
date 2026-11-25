@@ -742,12 +742,13 @@ export function endlessDef(world: WorldId, slots = 8): JourneyDef {
   const pool: [EnemyKind, number][] = world === 'meadow' ? MEADOW : world === 'desert' ? DUNES : world === 'ice' ? PEAKS : world === 'forge' ? FORGE : CITADEL;
   const moves: MoveSpec[] = [];
   for (let k = 0; k < 8; k++) {
-    moves.push({ bars: 30, rest: 8, notes: 8, gen: { seed: 2024 + world.length * 7 + k, b0: 10 + k * 9, b1: 18 + k * 11, pool, gap: 4, first: 1, tail: 3 } });
+    moves.push({ bars: 30, rest: 8, notes: 8, gen: { seed: 2024 + world.length * 7 + k, b0: 10 + k * 3, b1: 16 + k * 3, pool, gap: 4, first: 1, tail: 3 } });
   }
-  const d = journey({
+  // an encore grows until the band gives way: every movement twice as hard (the record is how far you get)
+  const ramp = moves.map((_, k) => Math.pow(2.1, k));
+  return journey({
     id: `bis-${world}`, world, name: { pt: 'Bis', en: 'Encore' }, slots, coins: 320, towers, pickups: 34,
     features: [{ kind: 'hills', from: 0, to: 120 }, { kind: 'forest', from: 120, to: 240, side: 0 }, { kind: 'canyon', from: 240, to: 330 }, { kind: 'lake', from: 330, to: 420, side: 1 }, { kind: 'hills', from: 420, to: 520 }],
     moves,
-  });
-  return d;
+  }, ramp);
 }

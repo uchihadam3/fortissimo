@@ -31,6 +31,8 @@ export const SUB = 4;
 const BEATS_PER_BAR = 4;
 export const SUBS_PER_BAR = STEPS_PER_BAR * SUB;
 export const DEFAULT_SPEED = 0.42;
+/** the Virtuoso challenge (a crown): the same journey with half the lives and a tighter purse at the start */
+export const VIRTUOSO = { hp: 1, speed: 1, coins: 0.92, lives: 10 };
 
 export interface Feature {
   kind: FeatureKind;
@@ -390,9 +392,9 @@ export class Journey {
     this.path = opts.path ?? new JourneyPath(this.length, def.seed ?? 7, def.curviness ?? 1);
     this.mode = opts.mode ?? 'normal';
     const virt = this.mode === 'virtuoso';
-    this.hpScale = virt ? 1.6 : 1;
-    this.coins = Math.round(def.coins * (virt ? 0.9 : 1));
-    this.maxLives = virt ? 10 : def.lives ?? MAX_LIVES;
+    this.hpScale = virt ? VIRTUOSO.hp : 1;
+    this.coins = Math.round(def.coins * (virt ? VIRTUOSO.coins : 1));
+    this.maxLives = virt ? VIRTUOSO.lives : def.lives ?? MAX_LIVES;
     this.lives = this.maxLives;
     this.movements = def.movements?.length ? def.movements.slice().sort((a, b) => a.bar - b.bar) : [{ bar: 0, rest: 0 }];
     this.slotsOpen = Math.min(SLOTS.length, def.slots);
@@ -1038,7 +1040,7 @@ export class Journey {
     const hp = def.hp * hpMul * this.hpScale;
     const e: Enemy = {
       id: this.nextId++, kind, def, hp, maxHp: hp, shield: (def.shield ?? 0) * this.hpScale * (elite ? 2 : 1), maxShield: (def.shield ?? 0) * this.hpScale * (elite ? 2 : 1),
-      armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? 1.08 : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
+      armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? VIRTUOSO.speed : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
       revealedUntil: 0, alive: true, leaked: false, spawnT: t, burrowed: false, invulnUntil: 0, phase: 0, hitT: -1, wave,
       structure: kind === 'obelisk', kx: 0, kz: 0, lives: def.lives + (elite ? 1 : 0), bounty: Math.round(def.bounty * (elite ? 3 : echoed ? 0.5 : 1)),
       elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1,
