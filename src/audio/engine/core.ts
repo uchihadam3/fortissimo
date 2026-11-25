@@ -164,7 +164,8 @@ export class Core {
     this.musicTone = ctx.createBiquadFilter();
     this.musicTone.type = 'highshelf';
     this.musicTone.frequency.value = 3200;
-    this.musicTone.gain.value = 0;
+    // a little air on the music (the synth voices are warm; this keeps them clear on small speakers)
+    this.musicTone.gain.value = 2;
     const hp = () => {
       const f = ctx.createBiquadFilter();
       f.type = 'highpass';

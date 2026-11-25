@@ -44,6 +44,8 @@ export interface Stats {
   windows: number[];
   maxVoices: number;
   started: number;
+  /** peak active voices per category (pad, strings, lead, tower, music…) */
+  cats?: Record<string, number>;
 }
 
 export interface Rig {
@@ -58,7 +60,7 @@ export interface Rig {
   motifs: Motifs;
   /** run fn once the render reaches context time `at` − lead */
   at(at: number, fn: () => void, lead?: number): void;
-  render(): Promise<{ buf: AudioBuffer; ms: number; maxVoices: number }>;
+  render(): Promise<{ buf: AudioBuffer; ms: number; maxVoices: number; cats: Record<string, number> }>;
 }
 
 export function makeRig(seconds: number, sr = 44100): Rig {
@@ -74,6 +76,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
   const motifs = new Motifs(core, bank, director);
   const actions: { at: number; fn: () => void }[] = [];
   let maxVoices = 0;
+  const cats: Record<string, number> = {};
   const step = 0.05;
   const run = () => {
     const now = ctx.currentTime;
@@ -90,7 +93,10 @@ export function makeRig(seconds: number, sr = 44100): Rig {
     cine.tick();
     amb.tick();
     let v = 0;
-    for (const n of Object.values(core.voiceTable())) v += n;
+    for (const [k, n] of Object.entries(core.voiceTable())) {
+      v += n;
+      if (n > (cats[k] ?? 0)) cats[k] = n;
+    }
     if (v > maxVoices) maxVoices = v;
   };
   for (let k = 1; k * step < seconds - 0.05; k++) {
@@ -108,7 +114,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
       run();
       const t0 = performance.now();
       const buf = await ctx.startRendering();
-      return { buf, ms: performance.now() - t0, maxVoices };
+      return { buf, ms: performance.now() - t0, maxVoices, cats };
     },
   };
 }
@@ -811,6 +817,7 @@ export async function renderJourney(song: SongId, bars: number, events: JourneyE
   const stats = measure(r.buf, r.ms, 0.3);
   stats.maxVoices = r.maxVoices;
   stats.started = rig.core.started;
+  stats.cats = r.cats;
   const segs: SegmentStats[] = [];
   for (const sg of segments) {
     const a = p.barStart(sg.from);
@@ -891,6 +898,7 @@ export async function renderCue(cue: CinematicCue, world: WorldId | null, second
   const stats = measure(r.buf, r.ms, 0.3);
   stats.maxVoices = r.maxVoices;
   stats.started = rig.core.started;
+  stats.cats = r.cats;
   const p = rig.director.current ?? rig.director.last;
   let h = { inChord: 0, inScale: 0 };
   if (p) {

@@ -591,7 +591,7 @@ export const PAD = (cutoff = 1400): StackOpts => ({
   cutoff,
   q: 0.4,
   cat: 'pad',
-  cap: 28,
+  cap: 36,
 });
 
 export const STRINGS = (bright = 1): StackOpts => ({
@@ -604,7 +604,7 @@ export const STRINGS = (bright = 1): StackOpts => ({
   q: 0.4,
   hp: 140,
   cat: 'strings',
-  cap: 24,
+  cap: 40,
 });
 
 export const CHOIR = (vowel: 'oo' | 'ah' | 'mm' = 'oo'): StackOpts => ({
@@ -622,7 +622,7 @@ export const CHOIR = (vowel: 'oo' | 'ah' | 'mm' = 'oo'): StackOpts => ({
   cutoff: 3200,
   q: 0.3,
   cat: 'choir',
-  cap: 16,
+  cap: 24,
 });
 
 export const FLUTE = (bamboo = false): StackOpts => ({
@@ -636,7 +636,7 @@ export const FLUTE = (bamboo = false): StackOpts => ({
   scoop: bamboo ? 45 : 0,
   cutoff: 5000,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 export const HORN = (): StackOpts => ({
@@ -651,7 +651,7 @@ export const HORN = (): StackOpts => ({
   q: 0.7,
   hp: 70,
   cat: 'horn',
-  cap: 12,
+  cap: 32,
 });
 
 export const REED = (): StackOpts => ({
@@ -664,7 +664,7 @@ export const REED = (): StackOpts => ({
   q: 0.4,
   hp: 180,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 export const OBOE = (): StackOpts => ({
@@ -678,7 +678,7 @@ export const OBOE = (): StackOpts => ({
   hp: 220,
   breath: 0.05,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 export const SUB = (): StackOpts => ({
@@ -717,7 +717,7 @@ export const ORGAN = (bright = 0.5): StackOpts => ({
   cutoff: 1400 + 2600 * bright,
   q: 0.4,
   cat: 'organ',
-  cap: 16,
+  cap: 24,
 });
 
 /** Folk fiddle: quicker bow than STRINGS, singing vibrato comes from the channel. */
@@ -733,7 +733,7 @@ export const FIDDLE = (): StackOpts => ({
   q: 0.6,
   hp: 220,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 /** Low brass chord pad (trombones / horns sustained). */
@@ -750,7 +750,7 @@ export const LOWBRASS = (bright = 0.5): StackOpts => ({
   q: 0.6,
   hp: 55,
   cat: 'horn',
-  cap: 16,
+  cap: 32,
 });
 
 /** Melodic horn: brass-like filter envelope (bright onset that mellows), quick enough for quarter notes. */
@@ -769,7 +769,7 @@ export const HORNLEAD = (bright = 0.6): StackOpts => ({
   hp: 80,
   scoop: 22,
   cat: 'lead',
-  cap: 12,
+  cap: 28,
 });
 
 /** Violin section line: singing legato strings (vibrato from the channel). */
@@ -785,7 +785,7 @@ export const VIOLIN = (bright = 0.7): StackOpts => ({
   q: 0.5,
   hp: 260,
   cat: 'lead',
-  cap: 12,
+  cap: 28,
 });
 
 /** Cello / low string line. */
@@ -801,7 +801,7 @@ export const CELLO = (): StackOpts => ({
   q: 0.6,
   hp: 60,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 /** Clarinet: hollow (odd-harmonic) reed. */
@@ -816,7 +816,7 @@ export const CLARINET = (): StackOpts => ({
   q: 0.5,
   breath: 0.04,
   cat: 'lead',
-  cap: 8,
+  cap: 28,
 });
 
 export const GLASSHARM = (): StackOpts => ({

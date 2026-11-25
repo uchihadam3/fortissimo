@@ -520,12 +520,13 @@ export class Player {
   buf(inst: BufInst, ch: string, t: number, midi: number, vel: number, dur: number, o?: BufNoteOpts): void {
     const c = this.channels.get(this.prefix + ch);
     if (!c || t < this.core.now - 0.01 || !(vel > 0)) return;
-    playBuf(this.core, this.bank, inst, c.input, t, midi, vel, dur, { cat: 'music', cap: 96, pitch: this.pitch, ...o });
+    // caps count notes from the moment they are scheduled (a whole bar ahead): they are per-bar budgets
+    playBuf(this.core, this.bank, inst, c.input, t, midi, vel, dur, { cat: 'music', cap: 160, pitch: this.pitch, ...o });
   }
 
   /** a percussion one-shot (natural pitch at MIDI 60) */
-  hit(inst: BufInst, ch: string, t: number, vel: number, midi = 60, o?: BufNoteOpts): void {
-    this.buf(inst, ch, t, midi, vel, 4, { cat: 'perc', cap: 48, ...o });
+  hit(inst: BufInst, ch: string, t: number, vel: number, midi = 60, o?: BufNoteOpts & { dur?: number }): void {
+    this.buf(inst, ch, t, midi, vel, o?.dur ?? 4, { cat: 'perc', cap: 96, ...o });
   }
 
   rt(preset: StackOpts, ch: string, t: number, midi: number, vel: number, dur: number): void {

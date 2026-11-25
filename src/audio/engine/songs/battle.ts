@@ -119,7 +119,7 @@ export abstract class Battle extends AdaptiveSong {
     });
     for (let beat = 0; beat < b.beats; beat++) {
       const acc = beat === 0 ? 1 : beat === 2 ? 0.88 : 0.78;
-      layers.forEach((L, i) => b.p.hit(L.inst, L.ch, this.T(b, beat, 0.0015), Math.min(1.2, vel * acc * big * (L.v ?? 1)), tuned[i] + (beat === 0 ? 0 : -0.12)));
+      layers.forEach((L, i) => b.p.hit(L.inst, L.ch, this.T(b, beat, 0.0015), Math.min(1.2, vel * acc * big * (L.v ?? 1)), tuned[i] + (beat === 0 ? 0 : -0.12), { dur: 1.1, release: 0.35 }));
     }
   }
 

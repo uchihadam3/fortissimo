@@ -75,6 +75,7 @@ export class FinaleTheme extends Battle {
   protected readonly sections = SECTIONS;
   protected readonly plans = PLANS;
   protected readonly kit: Kit = { snare: 'snare', perc: 'kit', shake: 'shaker', clap: 'clap', glock: 'celesta', glockCh: 'bells', bell: 'tbell', bellCh: 'bells', brass: 'brass', choir: 'choir', bass: 'bass', timp: 'timp' };
+  protected readonly breakGain: number = 1.26;
 
   setup(p: Player): void {
     p.ch('strings', { gain: 0.44, wet: 0.42, vibratoCents: 8 });

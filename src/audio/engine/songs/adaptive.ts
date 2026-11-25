@@ -331,7 +331,7 @@ export abstract class AdaptiveSong extends Song {
     if (sk !== this.lastSec) {
       this.lastSec = sk;
       this.lines = {};
-      this.vmul = this.energy[f.sec] ?? 1;
+      this.vmul = (this.energy[f.sec] ?? 1) * (s.mode === 'break' ? this.breakGain : 1);
       try {
         this.onSection(b, f);
       } catch {
@@ -346,6 +346,9 @@ export abstract class AdaptiveSong extends Song {
   protected get k(): Scale {
     return this.sc ?? this.key;
   }
+
+  /** velocity trim of the breakdowns (they carry the music alone: no towers play in them) */
+  protected readonly breakGain: number = 1.12;
 
   /** a band that ignores the shell (cinematic statements of the land's song: the full orchestra) */
   fixedBand: BandMix | null = null;

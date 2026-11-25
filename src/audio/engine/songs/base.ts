@@ -159,7 +159,7 @@ export abstract class Song extends Theme {
       if (!v) continue;
       const sw = i % 2 === 1 ? swing * step : 0;
       const t = this.T(b, i * step + sw, h);
-      b.p.hit(inst, ch, t, vel * v * this.vmul * rand(0.94, 1.04), midi + rand(-0.08, 0.08));
+      b.p.hit(inst, ch, t, vel * v * this.vmul * rand(0.94, 1.04), midi + rand(-0.08, 0.08), { dur: 1.6, release: 0.3 });
     }
   }
 
@@ -192,7 +192,7 @@ export abstract class Song extends Theme {
     const n = Math.max(1, Math.round((to - from) * rate));
     for (let i = 0; i < n; i++) {
       const x = i / Math.max(1, n - 1);
-      b.p.hit(inst, ch, this.T(b, from + (i * (to - from)) / n, 0.002), (v0 + (v1 - v0) * x) * this.vmul, midi + x * 0.5);
+      b.p.hit(inst, ch, this.T(b, from + (i * (to - from)) / n, 0.002), (v0 + (v1 - v0) * x) * this.vmul, midi + x * 0.5, { dur: 1.4, release: 0.3 });
     }
   }
 

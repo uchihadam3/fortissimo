@@ -92,6 +92,7 @@ export class BossTheme extends Battle {
   protected readonly sections = SECTIONS;
   protected readonly plans = PLANS;
   protected readonly kit: Kit = { snare: 'snare', perc: 'kit', shake: 'shaker', clap: 'clap', glock: 'glass', glockCh: 'color', bell: 'tbell', bellCh: 'color', brass: 'brass', choir: 'choir', bass: 'bass', timp: 'timp' };
+  protected readonly breakGain: number = 1.26;
   private world: WorldId | null = null;
   private resolved = false;
 

@@ -113,7 +113,7 @@ export class MeadowTheme extends Battle {
   private strum(b: BarCtx, f: BarInfo, beat: number, up: boolean, vel: number): void {
     const tones = chordTones(this.cAt(f, beat), 50, 67).slice(0, up ? 4 : 6);
     const order = up ? [...tones].reverse() : tones;
-    order.forEach((m, k) => this.play(b, 'guitar', 'guitar', beat + (k * 0.018) / b.spb, m, vel * (1 - k * 0.05), 1.2 * b.spb, undefined, 0.002));
+    order.forEach((m, k) => this.play(b, 'guitar', 'guitar', beat + (k * 0.018) / b.spb, m, vel * (1 - k * 0.05), 0.9 * b.spb, undefined, 0.002));
   }
 
   protected arrange(b: BarCtx, f: BarInfo): void {

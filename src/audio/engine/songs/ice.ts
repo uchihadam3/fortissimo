@@ -74,6 +74,7 @@ export class IceTheme extends Battle {
   protected readonly sections = SECTIONS;
   protected readonly plans = PLANS;
   protected readonly kit: Kit = { snare: 'snare', perc: 'snare', shake: 'shaker', clap: 'clap', glock: 'glass', glockCh: 'glass', bell: 'tbell', bellCh: 'bells', brass: 'horns', choir: 'choir', bass: 'bass', timp: 'timp' };
+  protected readonly breakGain: number = 0.96;
 
   setup(p: Player): void {
     p.ch('pad', { gain: 0.4, wet: 0.5, filterLfoHz: 320, filterLfoRate: 0.05 });
@@ -101,7 +102,7 @@ export class IceTheme extends Battle {
     const sec = f.sec;
 
     // ── core: the cold air (a high pad), a soft root, footsteps in the snow ──
-    this.chords(b, f, 'pad', PAD(I >= 2 ? 1300 : 950), 'pad', 52, 71, 4, brk ? 0.34 : I === 0 ? 0.36 : 0.36, 0.6);
+    this.chords(b, f, 'pad', PAD(I >= 2 ? 1300 : 950), 'pad', 52, 71, 3, brk ? 0.38 : 0.4, 0.6);
     if ((brk || I === 0) && f.i % 2 === 0) this.chords(b, f, 'sh', GLASSHARM(), 'shimmer', 76, 88, 2, 0.2, 1.2);
     this.play(b, SUB(), 'bass', 0, this.root(f, 0, 28), brk ? 0.36 : 0.42, (brk || I === 0 ? 4 : 2.5) * b.spb);
     const sv = brk ? 0.22 : [0.26, 0.36, 0.42, 0.48][I];

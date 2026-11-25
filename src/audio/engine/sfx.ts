@@ -53,9 +53,9 @@ export class Sfx {
     this.fx.buf(inst, ch, t, midi, vel, dur, o);
   }
 
-  /** the key of the current song (or the last one) */
+  /** the key sounding now (a movement may have lifted it), or the last one heard */
   key(): Scale {
-    const k = this.director.current?.theme.key;
+    const k = this.director.current ? this.director.keyAt(this.core.now) : null;
     if (k) this.lastKey = k;
     return this.lastKey;
   }

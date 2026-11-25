@@ -73,6 +73,7 @@ export class ForgeTheme extends Battle {
   protected readonly sections = SECTIONS;
   protected readonly plans = PLANS;
   protected readonly kit: Kit = { snare: 'snare', perc: 'taiko', shake: 'shaker', clap: 'clap', glock: 'anvil', glockCh: 'anvil', bell: 'tbell', bellCh: 'carillon', brass: 'horns', choir: 'choir', bass: 'bass', timp: 'timp' };
+  protected readonly breakGain: number = 1.18;
 
   setup(p: Player): void {
     p.ch('drone', { gain: 0.4, wet: 0.24, filterLfoHz: 110, filterLfoRate: 0.04 });
