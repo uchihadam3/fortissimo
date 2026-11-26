@@ -290,8 +290,8 @@ export class Core {
   }
 
   /**
-   * The size of the band (harmony 0…5): a lone musician's backing is 3 dB quieter and narrower
-   * (side ×0.6); the full band's is at full level and wide (side ×1.7).
+   * The size of the band (harmony 0…5): a lone musician's backing is 1.5 dB quieter and narrower
+   * (side ×0.75); the full band's is at full level and wide (side ×1.5).
    */
   setBandSize(harmony: number, t = this.now): void {
     this.harmonyNow = clamp(Number.isFinite(harmony) ? harmony : 5, 0, 5);
@@ -299,11 +299,9 @@ export class Core {
   }
 
   /**
-   * The player's power 0…1 (v4), reached smoothly (`tau` s; ~a third of a bar). Low power dims the
-   * battle music: quieter (−4.5 dB), darker (low-pass down to ~4.5 kHz), narrower, a drier reverb,
-   * and the towers a little quieter and darker too (−3 dB, 6.5 kHz); full power opens it all up —
-   * full level, open top, wide, and a longer, louder reverb tail. The player's own sounds (rhythm
-   * bus) never dim.
+   * The player's power 0…1 (v4), reached smoothly (`tau` s). v6: power 0 is the full, normal song;
+   * power only adds a little width and a longer reverb tail (and, in the arrangement, a couple of
+   * soft layers). It never dims or muffles anything.
    * 1 = neutral for everything that is not a battle song.
    */
   setPower(power: number, tau = 0.8, t = this.now): void {
@@ -314,8 +312,8 @@ export class Core {
   private applyShape(t: number, tau: number): void {
     const h = this.harmonyNow;
     const pw = this.powerNow;
-    const gain = Math.pow(10, (-3 + 0.6 * h) / 20);
-    const side = (0.6 + 0.22 * h) * (0.6 + 0.6 * pw);
+    const gain = Math.pow(10, Math.min(0, -1.5 + 0.4 * h) / 20);
+    const side = (0.75 + 0.15 * h) * (1 + 0.15 * pw);
     const at = Math.max(this.now, t);
     const set = (p: AudioParam, v: number, tc = tau) => {
       try {
@@ -331,11 +329,13 @@ export class Core {
     set(this.wideRR.gain, (1 + side) / 2);
     set(this.wideLR.gain, (1 - side) / 2);
     set(this.wideRL.gain, (1 - side) / 2);
-    set(this.powerGain.gain, Math.pow(10, (-4.5 + 4.5 * pw) / 20));
-    set(this.powerGainW.gain, Math.pow(10, (-4 + 5.5 * pw) / 20));
-    set(this.powerLP.frequency, 4500 * Math.pow(20000 / 4500, pw));
-    set(this.towerPower.gain, Math.pow(10, (-3 + 3 * pw) / 20));
-    set(this.towerPowerLP.frequency, 6500 * Math.pow(20000 / 6500, pw));
+    // v6: power only ADDS, tastefully — a little more air and a longer reverb tail; it never
+    // dims or muffles the song (power 0 is the full, normal song)
+    set(this.powerGain.gain, 1);
+    set(this.powerGainW.gain, Math.pow(10, (1.5 * pw) / 20));
+    set(this.powerLP.frequency, 20000);
+    set(this.towerPower.gain, 1);
+    set(this.towerPowerLP.frequency, 20000);
   }
 
   /**

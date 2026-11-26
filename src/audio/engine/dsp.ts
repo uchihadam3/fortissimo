@@ -635,8 +635,8 @@ function tdrum(m: number): Rendered {
   });
   const out = r.data;
   // snare wires (rattle) and the stick's crack
-  noiseInto(out, sr, [new Bq('hp', 1300, 0.7, sr), new Bq('lp', 9000, 0.7, sr)], 1.6, 0.11, 0.0008);
-  noiseInto(out, sr, [new Bq('bp', 2600, 1.0, sr)], 2.2, 0.014, 0.0004);
+  noiseInto(out, sr, [new Bq('hp', 1300, 0.7, sr), new Bq('lp', 7000, 0.7, sr)], 0.9, 0.08, 0.0008);
+  noiseInto(out, sr, [new Bq('bp', 2600, 1.0, sr)], 1.6, 0.012, 0.0004);
   // the shell's ring an octave and a fifth up (a crisp, pitched 'tak')
   pingsInto(out, sr, [[f0 * 3.0, 0.45, 0.06], [f0 * 4.5, 0.3, 0.04]]);
   finish(out, sr, 0.0004);

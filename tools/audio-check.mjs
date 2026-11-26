@@ -165,7 +165,8 @@ try {
     }
     return { n, maxErr, read: lab.read(), started: d.started() };
   });
-  ok(grid.n > 300, `${grid.n} tower voices scheduled`);
+  // (v6 thins the tower voices by design: per-kind and per-step caps; this only checks that they fire)
+  ok(grid.n > 150, `${grid.n} tower voices scheduled`);
   ok(grid.maxErr < 1e-6, `every tower voice on the 16th grid (max error ${(grid.maxErr * 1e6).toFixed(3)} µs)`);
   ok(grid.read.peak < 0.891, `peak with 24 towers ${(20 * Math.log10(grid.read.peak)).toFixed(2)} dBFS (< −1)`);
   ok(grid.read.nan === 0, 'no NaN at the output');

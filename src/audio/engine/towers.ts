@@ -34,20 +34,20 @@ interface KindCfg {
 }
 
 const KIND: Record<TowerKind, KindCfg> = {
-  harp: { cap: 3, base: 0.6, wet: 1, panMul: 1 },
-  drum: { cap: 2, base: 0.56, wet: 0, panMul: 0.35 },
-  bell: { cap: 2, base: 0.19, wet: 2, panMul: 0.8 },
-  shaker: { cap: 1, base: 0.62, wet: 1, panMul: 1 },
-  crystal: { cap: 3, base: 0.36, wet: 1, panMul: 1 },
-  horn: { cap: 3, base: 0.38, wet: 1, panMul: 0.6 },
-  choir: { cap: 1, base: 0.21, wet: 2, panMul: 0.5 },
-  bass: { cap: 1, base: 0.38, wet: 0, panMul: 0.2 },
+  harp: { cap: 2, base: 0.8, wet: 1, panMul: 1 },
+  drum: { cap: 1, base: 0.5, wet: 0, panMul: 0.35 },
+  bell: { cap: 1, base: 0.19, wet: 2, panMul: 0.8 },
+  shaker: { cap: 1, base: 0.42, wet: 1, panMul: 1 },
+  crystal: { cap: 2, base: 0.28, wet: 1, panMul: 1 },
+  horn: { cap: 2, base: 0.3, wet: 1, panMul: 0.6 },
+  choir: { cap: 1, base: 0.19, wet: 2, panMul: 0.5 },
+  bass: { cap: 1, base: 0.44, wet: 0, panMul: 0.2 },
 };
 
 const BUS_PANS = [-0.65, -0.32, 0, 0.32, 0.65];
 const WETS = [0.07, 0.2, 0.42];
 /** at most this many tower voices start on one 16th step */
-const STEP_CAP = 10;
+const STEP_CAP = 7;
 /** the tower bus compressor delays its signal by its 6 ms look-ahead: towers start that much earlier
  *  so they leave the mix exactly together with the music (which skips that compressor) */
 const COMP = 0.006;
@@ -200,7 +200,7 @@ export class Towers {
       if (tt > t - barDur * 1.25) n++;
       else if (tt < t - barDur * 8) this.all.delete(k);
     }
-    return 1 / Math.sqrt(1 + 0.07 * Math.max(0, n - 1));
+    return 1 / Math.sqrt(1 + 0.1 * Math.max(0, n - 1));
   }
 
   /** the backing's level under the band (linear) and when it was last set */
@@ -209,12 +209,13 @@ export class Towers {
 
   /**
    * The band leads: the backing steps back gently as the band gets busy (distinct towers heard in
-   * the last bar: one ≈ −0.5 dB … eight or more ≈ −2.5 dB) and comes back when the towers stop.
+   * the last bar: one ≈ −0.05 dB … four or more ≈ −0.2 dB; v6: barely — the song is the protagonist)
+   * and comes back when the towers stop.
    */
   private lead(t: number, barDur: number, spb: number): void {
     let n = 0;
     for (const tt of this.all.values()) if (tt > t - barDur && tt <= t + 0.001) n++;
-    const dB = n <= 0 ? 0 : -Math.min(2.5, 0.5 + 0.3 * (n - 1));
+    const dB = n <= 0 ? 0 : -Math.min(0.2, 0.05 * n);
     const target = Math.pow(10, dB / 20);
     if (t < this.leadT - 0.001) return;
     if (Math.abs(target - this.leadLevel) < 0.02 && t - this.leadT < spb) return;
@@ -224,7 +225,7 @@ export class Towers {
   }
 
   /** overall level of tower voices: calibrated so that one tower of each kind ≈ the backing's loudness */
-  trim = 0.66;
+  trim = 0.49;
 
   /** velocity factor from how many towers of this kind were heard during the last bar */
   private density(kind: TowerKind, voice: number, t: number, barDur: number): number {
@@ -236,7 +237,7 @@ export class Towers {
       if (tt > t - barDur * 1.25) n++;
       else if (tt < t - barDur * 8) m.delete(v);
     }
-    return 1 / Math.sqrt(1 + 0.35 * Math.max(0, n - 1));
+    return 1 / Math.sqrt(1 + 0.5 * Math.max(0, n - 1));
   }
 
   /** this voice's rank among the towers of its kind heard in the last 1.5 bars (0 = the oldest = the lead) */
@@ -258,7 +259,7 @@ export class Towers {
 
   private note(inst: BufInst, ch: Channel, t: number, midi: number, vel: number, dur: number, o: { release?: number; lp?: number; cap?: number; cat?: string; bend?: number; bendTime?: number } = {}, kind = 'tower'): void {
     if (!(vel > 0.001)) return;
-    playBuf(this.core, this.bank, inst, ch.input, t - COMP, midi, vel, dur, { cat: o.cat ?? 'tower', cap: o.cap ?? 110, release: o.release, lp: o.lp, bend: o.bend, bendTime: o.bendTime });
+    playBuf(this.core, this.bank, inst, ch.input, t - COMP, midi, vel, dur, { cat: o.cat ?? 'tower', cap: Math.min(o.cap ?? 64, 64), release: o.release, lp: o.lp, bend: o.bend, bendTime: o.bendTime });
     if (this.debugLog && this.debugLog.length < 20000) this.debugLog.push({ kind, t });
   }
 
@@ -323,11 +324,7 @@ export class Towers {
         this.note('tdrum', ch, t, m, vel * accent, 0.5, { release: 0.12 }, kind);
         const sx = g.spb / 4;
         // level 1: a ghost stroke on the next 16th ("ta-ka"); level 2: "ta-ka-ta" and a rim crack
-        if (lv >= 1) this.note('tdrum', ch, t + sx, m, vel * 0.36, 0.25, { release: 0.08 }, kind);
-        if (lv === 2) {
-          this.note('tdrum', ch, t + 2 * sx, fifth === m ? root : fifth, vel * 0.5, 0.3, { release: 0.1 }, kind);
-          this.note('rim', ch, t, 60, vel * 0.5, 0.15, {}, kind);
-        }
+        if (lv === 2) this.note('tdrum', ch, t + sx, m, vel * 0.3, 0.25, { release: 0.08 }, kind);
         // groundwork: the drum lands together with a sub on the root
         if (D.has('groundwork') && g.stepInBar % 8 === 0) this.note('boom', ch, t, bassNote(c, 28), vel * 0.5, 1.2, { release: 0.4 }, kind);
         break;
@@ -347,8 +344,8 @@ export class Towers {
         this.lastBell = m;
         const dur = this.holdFor(t, m, g.spb, 10);
         this.note('tbell', ch, t, m, vel * accent, dur, { release: 1.2, cap: 110 }, kind);
-        this.note('celesta', ch, t, m + 12, vel * 0.42 * accent, Math.min(dur, 2.5), { release: 0.8 }, kind);
-        if (lv >= 1 || D.has('shimmer')) this.note('glass', ch, t, m + 24 <= 98 ? m + 24 : m + 12, vel * (lv === 2 || D.has('shimmer') ? 0.22 : 0.14), Math.min(dur, 3), { release: 1 }, kind);
+        this.note('celesta', ch, t, m + 12, vel * 0.28 * accent, Math.min(dur, 2.5), { release: 0.8 }, kind);
+        if (lv === 2 || D.has('shimmer')) this.note('glass', ch, t, m + 24 <= 98 ? m + 24 : m + 12, vel * (lv === 2 || D.has('shimmer') ? 0.22 : 0.14), Math.min(dur, 3), { release: 1 }, kind);
         // hymn: the choir sings the bell's note with it
         if (D.has('hymn')) this.note('choiroo', ch, t + 0.02, m - 12 >= 50 ? m - 12 : m, vel * 0.7, Math.min(dur, 4 * g.spb), { release: 0.9, cap: 110 }, kind);
         break;
@@ -360,8 +357,7 @@ export class Towers {
         const acc = groove ? (g.stepInBar % 8 === 6 ? 1.25 : off ? 1 : 0.5) : off ? 1 : 0.62;
         this.note('shaker', ch, t, 60 + (off ? 0 : 1.2) + rand(-0.15, 0.15), vel * acc, 0.2, { release: 0.05 }, kind);
         // the jingle that makes it a musician (and not the backing's hi-hat): a tambourine on the off-beats
-        if (off || lv === 2) this.note('tamb', ch, t, 60 + rand(-0.2, 0.2), vel * acc * 0.55, 0.3, { release: 0.1 }, kind);
-        if (lv >= 1 && g.stepInBar % 8 === 6) this.note('shaker', ch, t + g.spb / 8, 60.6, vel * 0.45, 0.15, { release: 0.04 }, kind);
+        if (lv === 2 && off) this.note('tamb', ch, t, 60 + rand(-0.2, 0.2), vel * acc * 0.4, 0.3, { release: 0.1 }, kind);
         if (groove && (g.stepInBar === 4 || g.stepInBar === 12)) this.note('clap', ch, t, 60, vel * 0.7, 0.3, { release: 0.1 }, kind);
         break;
       }
@@ -457,8 +453,8 @@ export class Towers {
         this.note('tbass', ch, t, b2, vel * 1.15 * accent, Math.min(1.6 * g.spb, this.holdFor(t, b2, g.spb, 2)), { release: 0.2 }, kind);
         const t2 = t + g.spb / 2;
         const c2 = this.peek(t2);
-        if (c2.pcs.includes(pcOf(b2))) this.note('tbass', ch, t2, b2 + 12, vel * 0.55, 0.4 * g.spb, { release: 0.1 }, kind);
-        if (lv >= 1) {
+        if (lv >= 1 && c2.pcs.includes(pcOf(b2))) this.note('tbass', ch, t2, b2 + 12, vel * 0.45, 0.4 * g.spb, { release: 0.1 }, kind);
+        if (lv === 2) {
           const t3 = t + g.spb;
           const c3 = this.peek(t3);
           const fifth = chordTones(c3, b2 + 5, b2 + 8)[0];

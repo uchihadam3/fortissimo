@@ -643,7 +643,7 @@ export class BossScore extends Song {
   private setupOn(p: Player): void {
     if (this.ready.has(p)) return;
     this.ready.add(p);
-    for (const [name, o] of CH) p.ch(name, { ...o, gain: o.gain * 0.9 });
+    for (const [name, o] of CH) p.ch(name, { ...o, gain: o.gain * 0.74 });
   }
 
   /** compose one bar of the boss (b.bar is the host's absolute bar) */
@@ -713,11 +713,11 @@ export class BossScore extends Song {
 
     // ── the band and the player on top ──
     if (h >= 4 && f.i % 4 === 3) this.chords(b, f, 'bx-tu', 'choir', 'bx-choir', 60, 76, 3, 0.12, 0.4);
+    // v6: the player's groove and power add one soft layer each (the fight stays the music)
     const g = b.groove;
-    if (g >= 1 && !b.build) this.drum(b, 'clap', 'bx-kit', '....x.......x...', 0.4);
-    if (g >= 3 && !b.build) this.stabs(b, f, 'bx-g', 'brass', 'bx-brass', 55, 70, 3, f.i % 2 === 0 ? [0, 1.5] : [2.5, 3.5], 0.34, 0.3);
-    if (b.power > 0.6) this.melody(b, f, ph, 'celesta', 'bx-colour', 0.3 * Math.min(1, (b.power - 0.6) / 0.2), 12, { legato: 0.9 });
-    if (b.power > 0.85 && !(top && cls !== 'mini')) this.melody(b, f, ph, 'choir', 'bx-choir', 0.18, 0, { minDur: 0.9, legato: 1, release: 0.5 });
+    if (g >= 2 && !b.build) this.drum(b, 'clap', 'bx-kit', '....x.......x...', 0.28);
+    const D = Math.max(b.power, g / 4);
+    if (D > 0.7 && !(top && cls !== 'mini')) this.melody(b, f, ph, 'celesta', 'bx-colour', 0.2 * Math.min(1, (D - 0.7) / 0.2), 12, { legato: 0.9 });
 
     this.signature(b, f, ph, I);
   }
