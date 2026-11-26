@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderCinema, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderCinema, renderEvents, renderPower, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderBalance, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
+  offline: { renderBalance, renderEvents, renderPower, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;
@@ -262,6 +262,15 @@ button(cRow, 'echo wrong (next bar)', () => {
   const c = audio.songClock();
   const b0 = nextBar();
   for (let i = 0; i < 4; i++) audio.echoNote(3 - i, b0 + i * (c?.spb ?? 0.6), i !== 2);
+});
+let pickRun = 0;
+const v4 = row(rh, 'v4: coins, strikes, power');
+for (const q of ['perfect', 'good', 'miss'] as const) button(v4, `pickup ${q}`, () => audio.pickupTap(nextBeat(), q, 0.3, (pickRun = q === 'miss' ? 0 : pickRun + 1)));
+for (const q of ['perfect', 'good', 'miss'] as const) button(v4, `strike ${q}`, () => audio.strike(nextBeat(), q, -0.3));
+for (const p of [0, 0.25, 0.5, 0.75, 1]) button(v4, `power ${p}`, () => audio.setPower(p));
+button(v4, 'power drop', () => {
+  audio.powerDrop(nextBeat());
+  audio.setPower(0.3);
 });
 button(cRow, 'success', () => audio.echoResult(true));
 button(cRow, 'fail', () => audio.echoResult(false));

@@ -58,6 +58,8 @@ export interface BarCtx {
   /** the player's groove (0…4: their run of on-beat taps) for this bar and the previous one */
   groove: number;
   groovePrev: number;
+  /** the player's power (0…1, v4) when this bar is composed (1 = neutral) */
+  power: number;
 }
 
 export abstract class Theme {
@@ -391,6 +393,7 @@ export class Player {
       band: this.bandAt(bar),
       bandPrev: this.bandAt(bar - 1),
       groove: this.grooveAt(bar),
+      power: this.director.power,
       groovePrev: this.grooveAt(bar - 1),
     };
   }
@@ -578,6 +581,8 @@ export class Director {
   band: BandMix = FULL_BAND;
   /** the player's groove (0…4) last reported (new players start with it) */
   groove = 0;
+  /** the player's power (0…1, v4): battle songs grow with it; 1 = neutral */
+  power = 1;
   /** the most recently started track (its harmony and grid stay the reference after it stops) */
   last: Player | null = null;
 
@@ -672,7 +677,20 @@ export class Director {
   /** the backing's size: the band's harmony for battle songs, the full size for everything else */
   applySize(): void {
     const p = this.current;
-    this.core.setBandSize(p && p.theme.followsBand ? this.band.harmony : 5);
+    const battle = !!p && p.theme.followsBand;
+    this.core.setBandSize(battle ? this.band.harmony : 5);
+    this.core.setPower(battle ? this.power : 1, p ? p.barDur / 3 : 0.8);
+  }
+
+  /** the player's power 0…1: the mix follows smoothly (~1 bar), the arrangement from the next bar composed */
+  setPower(power: number): void {
+    const v = clamp(Number.isFinite(power) ? power : 1, 0, 1);
+    if (Math.abs(v - this.power) < 0.004) return;
+    const falling = v < this.power;
+    this.power = v;
+    const p = this.current;
+    // growth swells in over about a bar; a loss is felt at once (half a beat or so)
+    if (p && p.theme.followsBand) this.core.setPower(v, falling ? p.barDur / 8 : p.barDur / 3);
   }
 
   setBand(mix: BandMix): void {

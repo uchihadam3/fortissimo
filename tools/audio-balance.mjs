@@ -12,9 +12,14 @@
  *     octave spread. Target: ≥ +5 LU.
  *  3. groove 0 vs 4 (with perfect taps on every beat) over the full band.
  *  4. the rhythm API: taps of each quality, every solo, the call & echo (loudness, consonance).
+ *  5. v4 events: baton taps, coin pickups and the colossus' strikes in every quality, measured as a
+ *     stem over the full band (+ towers): level, brightness (energy > 2 kHz) and stem − band on the
+ *     phone model. A miss must be clearly duller and quieter than a hit; a strike must cut through.
+ *  6. v4 power: the full band while power climbs 0 → 1, holds, then a miss drops it (0.3): loudness,
+ *     brightness, width per stage, the drop's dip, peaks and clicks.
  *
  * Usage: node tools/audio-balance.mjs [--song meadow,desert] [--level 0] [--intensity 1] [--bars 8]
- *        [--only kinds|band|groove|rhythm] [--wav DIR]      AUDIO_PORT selects the Vite server (default 5174).
+ *        [--only kinds|band|groove|rhythm|events|power] [--wav DIR]      AUDIO_PORT selects the Vite server (default 5174).
  */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -145,6 +150,42 @@ for (const song of songs) {
     console.log(`call & echo: ${f1(r.call.lufs)} LUFS (breather alone ${f1(r.call.ref)}), ${(r.call.inScale * 100).toFixed(0)}% on the scale · whole render peak ${f1(r.stats.peakDb)} dBFS, clicks ${r.stats.clicks}, voices ${r.stats.maxVoices}`);
     if (r.stats.peakDb > -1) problems.push(`${song} rhythm: peak ${f1(r.stats.peakDb)}`);
     if (r.stats.clicks) problems.push(`${song} rhythm: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
+  }
+}
+for (const song of songs) {
+  if (!only || only === 'events') {
+    console.log(`\n── ${song}: the player's sounds over the full band (stems, 80 ms from each onset: the attack) ──`);
+    console.log('event    quality   hitK  hitPh  bright%  overBand(ph)  peak');
+    const r = await page.evaluate((s) => window.__lab.offline.renderEvents(s), song);
+    const by = {};
+    for (const x of r.rows) {
+      by[`${x.kind}:${x.q}`] = x;
+      console.log(`${x.kind.padEnd(8)} ${x.q.padEnd(8)} ${p6(x.hitK)} ${p6(x.hitPhone)} ${p6(x.bright)}   ${p6(x.overPhone)}     ${p6(x.peakDb)}`);
+      if (x.peakDb > -1) problems.push(`${song} ${x.kind} ${x.q}: peak ${f1(x.peakDb)}`);
+    }
+    for (const k of ['tap', 'pickup', 'strike']) {
+      const g = by[`${k}:good`];
+      const m = by[`${k}:miss`];
+      if (g.hitPhone - m.hitPhone < 6) problems.push(`${song} ${k}: miss only ${f1(g.hitPhone - m.hitPhone)} dB under good (phone)`);
+      if (k !== 'strike' && g.bright - m.bright < 8) problems.push(`${song} ${k}: miss not clearly duller (${f1(m.bright)}% vs ${f1(g.bright)}% above 2 kHz)`);
+      if (g.overPhone < -4) problems.push(`${song} ${k}: good buried under the band on a phone (${f1(g.overPhone)} dB)`);
+    }
+  }
+  if (!only || only === 'power') {
+    console.log(`\n── ${song}: power 0 → 1, a miss (full band, intensity ${intensity}) ──`);
+    const r = await page.evaluate(([s, w, i]) => window.__lab.offline.renderPower(s, { wav: w, intensity: i }), [song, !!wavDir, intensity]);
+    save(`${song}-power`, r);
+    console.log('stage              LUFS  phone  >3kHz(dB) width   peak');
+    for (const x of r.segments) x.hfDb = x.lufs + 10 * Math.log10(Math.max(1e-3, x.hf) / 100);
+    for (const x of r.segments) console.log(`${x.name.padEnd(16)} ${p6(x.lufs)} ${p6(x.phone)} ${p6(x.hfDb)}    ${p6(x.width)} ${p6(x.peakDb)}`);
+    const s0 = r.segments[0];
+    const s1 = r.segments[4];
+    const s3 = r.segments[5];
+    console.log(`power 1 − power 0: ${f1(s1.lufs - s0.lufs)} LU (phone ${f1(s1.phone - s0.phone)}), highs ${f1(s1.hfDb - s0.hfDb)} dB, width ${f1(s1.width - s0.width)} dB · after the miss ${f1(s3.lufs - s1.lufs)} LU · drop sting: ${f1(r.drop.before)} → ${f1(r.drop.after)} · whole peak ${f1(r.stats.peakDb)}, clicks ${r.stats.clicks}`);
+    if (s1.lufs - s0.lufs < 3) problems.push(`${song}: power 1 only ${f1(s1.lufs - s0.lufs)} LU over power 0`);
+    if (s1.lufs - s3.lufs < 1.5) problems.push(`${song}: losing power is not clear (${f1(s1.lufs - s3.lufs)} LU)`);
+    if (r.stats.peakDb > -1) problems.push(`${song} power: peak ${f1(r.stats.peakDb)}`);
+    if (r.stats.clicks) problems.push(`${song} power: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
   }
 }
 if (errors.length) console.log('\nERRORS:\n' + [...new Set(errors)].slice(0, 30).join('\n'));
