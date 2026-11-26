@@ -7,19 +7,16 @@
  *  1. one tower of each kind over its song (the band = that tower's section), three renders each:
  *     backing alone, tower stem alone, the mix. Per kind: stem and backing loudness (K-weighted and
  *     phone), the stem's level during its hits (250 ms from each onset) and stem − backing there.
- *     Target (v6): every kind clearly above the backing during its hits (≥ ~3 dB on a phone) but
- *     inside the music — at or below the harp (the melody), not +20 dB.
+ *     Target: every kind's hit level within ~3 dB of the harp's, and clearly above the backing.
  *  2. one harp (harmony 0) vs a full diverse band (harmony 5): loudness, stereo width (side/mid),
- *     octave spread. Target: clearly bigger (v6: ≥ +3 LU — size by arrangement, not by loudness).
+ *     octave spread. Target: ≥ +5 LU.
  *  3. groove 0 vs 4 (with perfect taps on every beat) over the full band.
  *  4. the rhythm API: taps of each quality, every solo, the call & echo (loudness, consonance).
  *  5. v4 events: baton taps, coin pickups and the colossus' strikes in every quality, measured as a
  *     stem over the full band (+ towers): level, brightness (energy > 2 kHz) and stem − band on the
- *     phone model. A miss must be clearly duller and quieter than a hit; v6: taps and coins blend
- *     into the band (never louder than it), a strike may punch through.
+ *     phone model. A miss must be clearly duller and quieter than a hit; a strike must cut through.
  *  6. v4 power: the full band while power climbs 0 → 1, holds, then a miss drops it (0.3): loudness,
- *     brightness, width per stage, the drop's dip, peaks and clicks. v6: power 0 must be the full,
- *     normal song (power only adds, within ~2 LU), never muffled.
+ *     brightness, width per stage, the drop's dip, peaks and clicks.
  *
  * Usage: node tools/audio-balance.mjs [--song meadow,desert] [--level 0] [--intensity 1] [--bars 8]
  *        [--only kinds|band|groove|rhythm|events|power] [--wav DIR]      AUDIO_PORT selects the Vite server (default 5174).
@@ -111,9 +108,8 @@ for (const song of songs) {
     for (const { kind, r } of rows) {
       const vs = r.hitPhone - harp;
       console.log(`${kind.padEnd(8)} ${p6(r.stem.lufs)} ${p6(r.stem.phone)} ${p6(r.back.lufs)} ${p6(r.back.phone)} | ${p6(r.hitK)} ${p6(r.hitPhone)} ${p6(r.hitDelta)} ${p6(r.hitDeltaPhone)} | ${p6(vs)} ${p6(r.mix.peakDb)}`);
-      // v6: the harp carries the melody; the others sit at or below it (never far above), and every one is heard
-      if (vs > 4) problems.push(`${song} ${kind}: ${f1(vs)} dB above the harp (phone) — it should sit inside the music`);
-      if (r.hitDeltaPhone < 2.5) problems.push(`${song} ${kind}: only ${f1(r.hitDeltaPhone)} dB over the backing during its hits (phone)`);
+      if (Math.abs(vs) > 3.5) problems.push(`${song} ${kind}: hit level ${f1(vs)} dB vs the harp (phone)`);
+      if (r.hitDeltaPhone < 2) problems.push(`${song} ${kind}: only ${f1(r.hitDeltaPhone)} dB over the backing during its hits (phone)`);
       if (r.mix.peakDb > -1) problems.push(`${song} ${kind}: peak ${f1(r.mix.peakDb)}`);
     }
   }
@@ -128,7 +124,7 @@ for (const song of songs) {
     const d = full.mix.lufs - one.mix.lufs;
     const dp = full.mix.phone - one.mix.phone;
     console.log(`full − one: ${f1(d)} LU (phone ${f1(dp)}), width ${f1(full.mix.width - one.mix.width)} dB`);
-    if (d < 3) problems.push(`${song}: full band only ${f1(d)} LU over one harp`);
+    if (d < 5) problems.push(`${song}: full band only ${f1(d)} LU over one harp`);
     if (full.mix.peakDb > -1) problems.push(`${song} full band: peak ${f1(full.mix.peakDb)}`);
   }
   if (!only || only === 'groove') {
@@ -171,10 +167,8 @@ for (const song of songs) {
       const g = by[`${k}:good`];
       const m = by[`${k}:miss`];
       if (g.hitPhone - m.hitPhone < 6) problems.push(`${song} ${k}: miss only ${f1(g.hitPhone - m.hitPhone)} dB under good (phone)`);
-      if (k === 'pickup' && g.bright - m.bright < 8) problems.push(`${song} ${k}: miss not clearly duller (${f1(m.bright)}% vs ${f1(g.bright)}% above 2 kHz)`);
-      // v6: the player's sounds sit INSIDE the music — the strike may punch through, taps and coins blend
-      if (k === 'strike' && g.overPhone < -8) problems.push(`${song} strike: buried under the band on a phone (${f1(g.overPhone)} dB)`);
-      if (k !== 'strike' && g.overPhone > 0) problems.push(`${song} ${k}: louder than the whole band (${f1(g.overPhone)} dB) — it should blend`);
+      if (k !== 'strike' && g.bright - m.bright < 8) problems.push(`${song} ${k}: miss not clearly duller (${f1(m.bright)}% vs ${f1(g.bright)}% above 2 kHz)`);
+      if (g.overPhone < -4) problems.push(`${song} ${k}: good buried under the band on a phone (${f1(g.overPhone)} dB)`);
     }
   }
   if (!only || only === 'power') {
@@ -188,10 +182,8 @@ for (const song of songs) {
     const s1 = r.segments[4];
     const s3 = r.segments[5];
     console.log(`power 1 − power 0: ${f1(s1.lufs - s0.lufs)} LU (phone ${f1(s1.phone - s0.phone)}), highs ${f1(s1.hfDb - s0.hfDb)} dB, width ${f1(s1.width - s0.width)} dB · after the miss ${f1(s3.lufs - s1.lufs)} LU · drop sting: ${f1(r.drop.before)} → ${f1(r.drop.after)} · whole peak ${f1(r.stats.peakDb)}, clicks ${r.stats.clicks}`);
-    // v6: power 0 is the full, normal song; power only adds a little (never dims or muffles)
-    if (s0.lufs < s1.lufs - 2) problems.push(`${song}: power 0 is ${f1(s1.lufs - s0.lufs)} LU under power 1 — it must be the full song`);
-    if (s1.lufs - s0.lufs < 0) problems.push(`${song}: power 1 is quieter than power 0`);
-    if (s0.hfDb < s1.hfDb - 2.5) problems.push(`${song}: power 0 sounds muffled (highs ${f1(s0.hfDb - s1.hfDb)} dB)`);
+    if (s1.lufs - s0.lufs < 3) problems.push(`${song}: power 1 only ${f1(s1.lufs - s0.lufs)} LU over power 0`);
+    if (s1.lufs - s3.lufs < 1.5) problems.push(`${song}: losing power is not clear (${f1(s1.lufs - s3.lufs)} LU)`);
     if (r.stats.peakDb > -1) problems.push(`${song} power: peak ${f1(r.stats.peakDb)}`);
     if (r.stats.clicks) problems.push(`${song} power: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
   }

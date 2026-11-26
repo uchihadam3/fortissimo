@@ -28,11 +28,11 @@ const SOLO: Record<TowerKind, number> = { harp: 0.95, drum: 1, bell: 0.27, shake
 /** the Maestro's call and the player's echo */
 const CALL = 0.5;
 /** level of the baton taps */
-const TAP = 0.12;
+const TAP = 0.36;
 /** level of the coin pickups (v4) */
-const PICK = 0.13;
+const PICK = 0.32;
 /** level of the colossus' strikes (v4) */
-const STRIKE = 0.34;
+const STRIKE = 0.5;
 
 /** each land's pickup voice (a coin collected on the beat rings a note of the song) */
 interface PickVoice {
@@ -85,16 +85,16 @@ interface Palette {
 
 const PALETTES: Record<WorldId | 'menu', Palette> = {
   // frame drum (bodhrán) and a tambourine, a celesta note
-  meadow: { body: 'tdrum', bodyLo: 52, bodyHi: 63, click: 'rim', clickMidi: 60, tone: 'kalimba', toneLo: 67, toneHi: 84, sparkle: 'celesta', jingle: 'tamb' },
+  meadow: { body: 'tdrum', bodyLo: 52, bodyHi: 63, click: 'rim', clickMidi: 60, tone: 'celesta', toneLo: 76, toneHi: 90, sparkle: 'glass', jingle: 'tamb' },
   // darbuka: dum/tek and finger cymbals, a koto-like pluck
-  desert: { body: 'tdrum', bodyLo: 50, bodyHi: 61, click: 'tek', clickMidi: 60, tone: 'koto', toneLo: 67, toneHi: 84, sparkle: 'glass', jingle: 'tamb' },
+  desert: { body: 'tdrum', bodyLo: 50, bodyHi: 61, click: 'tek', clickMidi: 60, tone: 'koto', toneLo: 72, toneHi: 86, sparkle: 'anvil', jingle: 'tamb' },
   // crisp ice: a rim crack and a glass ping
-  ice: { body: 'tdrum', bodyLo: 55, bodyHi: 66, click: 'rim', clickMidi: 62, tone: 'celesta', toneLo: 72, toneHi: 88, sparkle: 'glass', jingle: null },
+  ice: { body: 'tdrum', bodyLo: 55, bodyHi: 66, click: 'rim', clickMidi: 62, tone: 'glass', toneLo: 79, toneHi: 93, sparkle: 'celesta', jingle: null },
   // the forge: a hammer on the anvil over a war drum
-  forge: { body: 'tdrum', bodyLo: 48, bodyHi: 59, click: 'tek', clickMidi: 58, tone: 'marimba', toneLo: 67, toneHi: 84, sparkle: 'glass', jingle: null },
+  forge: { body: 'tdrum', bodyLo: 48, bodyHi: 59, click: 'tek', clickMidi: 58, tone: 'anvil', toneLo: 76, toneHi: 88, sparkle: 'glass', jingle: null },
   // the citadel: a hollow drum and a bell
-  citadel: { body: 'tdrum', bodyLo: 50, bodyHi: 61, click: 'rim', clickMidi: 58, tone: 'harp', toneLo: 67, toneHi: 84, sparkle: 'glass', jingle: null },
-  menu: { body: 'tdrum', bodyLo: 52, bodyHi: 63, click: 'rim', clickMidi: 60, tone: 'kalimba', toneLo: 67, toneHi: 84, sparkle: 'celesta', jingle: 'tamb' },
+  citadel: { body: 'tdrum', bodyLo: 50, bodyHi: 61, click: 'rim', clickMidi: 58, tone: 'tbell', toneLo: 67, toneHi: 79, sparkle: 'glass', jingle: null },
+  menu: { body: 'tdrum', bodyLo: 52, bodyHi: 63, click: 'rim', clickMidi: 60, tone: 'celesta', toneLo: 76, toneHi: 90, sparkle: 'glass', jingle: 'tamb' },
 };
 
 export class Rhythm {
@@ -125,16 +125,6 @@ export class Rhythm {
   }
 
   // ───────────────────────────── helpers ─────────────────────────────
-
-  /** the duel's and the fight transitions' channels (v6: a step under the music) */
-  private dch(pan: number, wet = false): Channel {
-    if (!this.duel) {
-      this.duel = [PANS.map((p) => new Channel(this.core, this.core.rhythmBus, this.core.sfxWet, { pan: p, wet: 0.12, gain: 0.6 })), PANS.map((p) => new Channel(this.core, this.core.rhythmBus, this.core.sfxWet, { pan: p, wet: 0.35, gain: 0.6 }))];
-    }
-    const i = clamp(Math.round((clamp(Number.isFinite(pan) ? pan : 0, -1, 1) + 1) * 2), 0, 4);
-    return this.duel[wet ? 1 : 0][i];
-  }
-  private duel: Channel[][] | null = null;
 
   private ch(pan: number, wet = false): Channel {
     const i = clamp(Math.round((clamp(Number.isFinite(pan) ? pan : 0, -1, 1) + 1) * 2), 0, 4);
@@ -206,22 +196,35 @@ export class Rhythm {
     this.tapRun = t - this.lastTap < g.spb * 1.6 && t > this.lastTap ? this.tapRun + 1 : 0;
     this.lastTap = t;
     const beat = this.beatOf(t);
+    const root = this.rootIn(c, P.bodyLo, P.bodyHi);
     if (q === 'miss') {
-      // a soft, muted thunk: no pitch, no sparkle — clearly not a note, and never loud
-      this.play('tom', ch, t, 43, 0.1 * TAP, 0.14, { release: 0.05, lp: 420 });
-      this.play('wood', ch, t, 50, 0.06 * TAP, 0.06, { release: 0.04, lp: 700, cents: -40 });
+      // a dead, muted thunk: no pitch to speak of, no click, no sparkle — unmistakably not a hit
+      this.play('tom', ch, t, 43, 0.3 * TAP, 0.16, { release: 0.05, lp: 420 });
+      this.play('wood', ch, t, 50, 0.3 * TAP, 0.08, { release: 0.04, lp: 1100, cents: -40 });
       return;
     }
-    // v6: the baton plays a gentle tuned note on the chord (a mallet in the land's colour) that
-    // walks up the chord with the run and blends into the groove — no drum, no click every beat.
-    // perfect: a little brighter, with a faint glint an octave up
     const perfect = q === 'perfect';
+    // calibrated: over a full band at intensity 1 a tap on every beat adds ≈ +1.5 LU (it leads the
+    // beat, it does not drown the band)
+    const v = (perfect ? 1 : 0.92) * TAP;
+    const downbeat = beat === 0;
+    // the drum: tuned to the chord root, the downbeat a fifth-free octave lower accent
+    this.play(P.body, ch, t, downbeat ? root : chordTones(c, root, root + 8)[beat % 2 === 1 ? 1 : 0] ?? root, 0.62 * v * (downbeat ? 1.1 : 1), 0.4, { release: 0.1 });
+    this.play('tom', ch, t, Math.max(41, root - 12), 0.18 * v, 0.3, { release: 0.1 });
+    this.play(P.click, ch, t, P.clickMidi + rand(-0.1, 0.1), (perfect ? 0.5 : 0.46) * v, 0.15);
+    // the pitched voice on a chord tone (walks up the chord with the run)
     const tones = chordTones(c, P.toneLo, P.toneHi);
-    if (!tones.length) return;
-    const m = tones[(this.tapRun + (beat === 0 ? 0 : beat)) % Math.min(tones.length, 4)];
-    const v = (perfect ? 1 : 0.8) * TAP;
-    this.play(P.tone, this.ch(pan * 0.5, true), t, m, 0.62 * v, perfect ? 0.7 : 0.45, { release: 0.35, lp: perfect ? 9000 : 3800 });
-    if (perfect) this.play(P.sparkle, this.ch(-pan * 0.5, true), t + 0.02, m + 12 <= 98 ? m + 12 : m, 0.18 * v, 0.5, { release: 0.35 });
+    if (tones.length) {
+      const m = tones[(this.tapRun + (downbeat ? 0 : beat)) % Math.min(tones.length, 4)];
+      this.play(P.tone, this.ch(pan * 0.5, true), t, m, (perfect ? 0.34 : 0.3) * TAP * (P.tone === 'tbell' ? 0.8 : 1), perfect ? 0.9 : 0.5, { release: 0.4, lp: perfect ? undefined : 5000 });
+      if (perfect) {
+        // the sparkle: two chord tones flicked up an octave above, and a jingle
+        const hi = chordTones(c, m + 7, m + 19);
+        hi.slice(0, 2).forEach((x, k) => this.play(P.sparkle, this.ch(-pan * 0.6, true), t + 0.035 + k * 0.035, x <= 98 ? x : x - 12, (0.16 - k * 0.03) * TAP * 1.3, 0.5, { release: 0.4 }));
+        this.fx.burst(ch.input, t, { noise: 'white', type: 'highpass', f: 7000, a: 0.0008, d: 0.045, g: 0.05 * TAP, cat: 'rhythm' });
+      }
+    }
+    if (P.jingle && (perfect || beat % 2 === 1)) this.play(P.jingle, this.ch(pan * 0.5 + 0.2), t, 60, (perfect ? 0.32 : 0.2) * TAP, 0.25, { release: 0.08 });
   }
 
   /**
@@ -235,19 +238,20 @@ export class Rhythm {
     const from = Math.max(now + 0.03, tLand - Math.min(g.barDur, 2 * g.spb));
     const ch = this.ch(0, true);
     const d = tLand - from;
-    this.fx.burst(ch.input, from, { noise: 'white', type: 'bandpass', f: 500, f1: 7000, q: 1.2, a: d * 0.95, d: 0.06, g: 0.07, cat: 'rhythm' });
+    this.fx.burst(ch.input, from, { noise: 'white', type: 'bandpass', f: 500, f1: 7000, q: 1.2, a: d * 0.95, d: 0.06, g: 0.12, cat: 'rhythm' });
     const sd = g.spb / 4;
     const n = Math.floor(d / (sd / 2));
     for (let k = 0; k < n; k++) {
       const tk = tLand - (n - k) * (sd / 2);
       if (tk < from) continue;
-      this.play('snare', this.ch(0.15), tk, 60 + k * 0.05, 0.05 + 0.18 * (k / Math.max(1, n)), 0.2, { release: 0.06 });
+      this.play('snare', this.ch(0.15), tk, 60 + k * 0.05, 0.08 + 0.3 * (k / Math.max(1, n)), 0.2, { release: 0.06 });
     }
     // the drop
     const c = this.chordAt(tLand);
     const dry = this.ch(0);
-    this.play('crash', ch, tLand, 60, 0.3, 3, { release: 1 });
-    this.play('boom', dry, tLand, bassNote(c, 28), 0.35, 1.4, { release: 0.5 });
+    this.play('crash', ch, tLand, 60, 0.45, 3, { release: 1 });
+    this.play('boom', dry, tLand, bassNote(c, 28), 0.55, 1.6, { release: 0.5 });
+    this.play('tdrum', dry, tLand, this.rootIn(c, 52, 63), 0.7, 0.4);
     chordTones(c, 55, 70).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.35 : -0.35), tLand, m, 0.3, 0.55 * g.spb, { release: 0.2 }));
     chordTones(c, 62, 76).slice(0, 3).forEach((m, k) => this.play('choirx', this.ch(k - 1, true), tLand + 0.01, m, 0.26, 0.4 * g.spb, { release: 0.15 }));
   }
@@ -333,12 +337,14 @@ export class Rhythm {
     const low = this.ch(pan * 0.25);
     const mid = this.ch(pan * 0.5);
     this.play('timp', low, t, this.rootIn(c, 40, 51), 0.6 * v, 0.9, { release: 0.4 });
-    this.play('boom', low, t, bassNote(c, 28), 0.25 * v, 0.2, { release: 0.08 });
-    this.play('tdrum', mid, t, this.rootIn(c, 52, 63), 0.8 * v, 0.3, { release: 0.1 });
-    if (perfect) this.play('snare', mid, t, 60, 0.35 * v, 0.2, { release: 0.06 });
+    this.play('boom', low, t, bassNote(c, 28), 0.35 * v, 0.22, { release: 0.08 });
+    this.play('tdrum', mid, t, this.rootIn(c, 52, 63), 1.0 * v, 0.3, { release: 0.1 });
+    this.play('rim', mid, t, 60, 0.45 * v, 0.1);
+    this.play('snare', mid, t, 60, (perfect ? 0.6 : 0.35) * v, 0.2, { release: 0.06 });
     const col = P.colourLo === P.colourHi ? P.colourLo : chordTones(c, P.colourLo, P.colourHi)[0] ?? P.colourLo;
     this.play(P.colour, this.ch(pan * 0.6, true), t, col, (P.colour === 'tamb' || P.colour === 'tek' ? 0.5 : 0.3) * v, 0.4, { release: 0.25 });
     if (perfect) {
+      this.play('clap', mid, t, 60, 0.3 * v, 0.2, { release: 0.06 });
       this.play('crash', this.ch(-pan * 0.4, true), t, 61, 0.22 * v, 0.7, { release: 0.35 });
     }
   }
@@ -358,10 +364,11 @@ export class Rhythm {
     const c = this.chordAt(t);
     const root = this.rootIn(c, 55, 66);
     const ch = this.ch(0, true);
-    // v6: gentle — a soft sigh down to the root and a tiny dip, never a muffle
-    this.play('choiroo', ch, t, root - 12 >= 48 ? root - 12 : root, 0.17 * v, 0.45, { release: 0.3, bend: 500, bendTime: 0.34 });
-    this.play('celesta', ch, t, root + 12, 0.08 * v, 0.4, { release: 0.3, bend: 500, bendTime: 0.3, lp: 3000 });
-    this.core.duck(0.1 * v, 0.3);
+    this.play('brass', ch, t, root, 0.36 * v, 0.42, { release: 0.25, bend: 700, bendTime: 0.32 });
+    this.play('choiroo', ch, t, root - 12 >= 48 ? root - 12 : root, 0.3 * v, 0.45, { release: 0.3, bend: 700, bendTime: 0.36 });
+    this.fx.burst(ch.input, t, { noise: 'pink', type: 'bandpass', f: 2400, f1: 320, q: 1.1, a: 0.015, d: 0.4, g: 0.07 * v, cat: 'rhythm' });
+    this.play('tom', this.ch(0), t + 0.3, 43, 0.25 * v, 0.2, { release: 0.08, lp: 500 });
+    this.core.duck(0.22 * v, 0.45);
   }
 
 
@@ -379,45 +386,45 @@ export class Rhythm {
     const c = this.chordAt(t);
     const tones = chordTones(c, 67, 91);
     const m = tones.length ? tones[Math.min(tones.length - 1, this.tellIdx + (last ? 1 : 0))] : 76;
-    const ch = this.dch(pan * 0.7);
+    const ch = this.ch(pan * 0.7);
     if (!last) {
       this.play('tom', ch, t, 47 + Math.min(6, this.tellIdx * 2), 0.32, 0.2, { release: 0.06, lp: 2500 });
       this.play('tek', ch, t, 62 + this.tellIdx * 0.6, 0.22, 0.1);
-      this.play('zap', this.dch(pan * 0.7, true), t, m, 0.16, 0.25, { release: 0.15, lp: 6000 });
+      this.play('zap', this.ch(pan * 0.7, true), t, m, 0.16, 0.25, { release: 0.15, lp: 6000 });
       return;
     }
     const sw = Math.min(g.spb * 0.9, 0.4);
     this.fx.burst(ch.input, t - sw, { noise: 'white', type: 'bandpass', f: 1200, f1: 6000, q: 1.4, a: sw * 0.95, d: 0.03, g: 0.05, cat: 'rhythm' });
-    this.play('zap', this.dch(pan * 0.7, true), t, m, 0.22, 0.3, { release: 0.2 });
+    this.play('zap', this.ch(pan * 0.7, true), t, m, 0.22, 0.3, { release: 0.2 });
     this.play('rim', ch, t, 64, 0.3, 0.1);
   }
 
   /** The player parries the blow on the beat: perfect = a triumphant clang and a chord stab (the blow is reflected); good = a solid block. */
   parry(t: number, q: 'perfect' | 'good', pan: number): void {
     const c = this.chordAt(t);
-    const ch = this.dch(pan * 0.5);
+    const ch = this.ch(pan * 0.5);
     this.play('tdrum', ch, t, this.rootIn(c, 52, 63), 0.5, 0.3, { release: 0.1 });
     this.play('wood', ch, t, 62, 0.3, 0.1);
-    this.play('tom', this.dch(pan * 0.3), t, 45, 0.36, 0.3, { release: 0.1 });
+    this.play('tom', this.ch(pan * 0.3), t, 45, 0.36, 0.3, { release: 0.1 });
     if (q !== 'perfect') return;
-    const w = this.dch(-pan * 0.4, true);
+    const w = this.ch(-pan * 0.4, true);
     const hi = chordTones(c, 79, 91);
     this.play('anvil', w, t, hi[hi.length - 1] ?? 84, 0.34, 1.2, { release: 0.8 });
     this.play('tbell', w, t, this.rootIn(c, 60, 71), 0.3, 1.6, { release: 1 });
     this.play('crash', w, t, 62, 0.3, 1.2, { release: 0.5 });
-    chordTones(c, 55, 70).slice(0, 4).forEach((m, k) => this.play('brass', this.dch(k % 2 ? 0.4 : -0.4), t + 0.004 * k, m, 0.3, 0.5 * this.grid().spb, { release: 0.2 }));
-    chordTones(c, 64, 79).slice(0, 3).forEach((m, k) => this.play('choirx', this.dch(k - 1, true), t + 0.01, m, 0.2, 0.45 * this.grid().spb, { release: 0.2 }));
+    chordTones(c, 55, 70).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.4 : -0.4), t + 0.004 * k, m, 0.3, 0.5 * this.grid().spb, { release: 0.2 }));
+    chordTones(c, 64, 79).slice(0, 3).forEach((m, k) => this.play('choirx', this.ch(k - 1, true), t + 0.01, m, 0.2, 0.45 * this.grid().spb, { release: 0.2 }));
   }
 
   /** The blow lands on the colossus: a heavy impact (sub, war drums, a dark crash) and the music reels. */
   bossBlow(t: number, pan: number, strength: number): void {
     const s = clamp(Number.isFinite(strength) ? strength : 1, 0.2, 1.5);
     const c = this.chordAt(t);
-    const low = this.dch(pan * 0.25);
+    const low = this.ch(pan * 0.25);
     this.play('boom', low, t, bassNote(c, 26), 0.5 * s, 0.9, { release: 0.3 });
     this.play('taiko', low, t, 31, 0.6 * s, 1, { release: 0.4 });
-    this.play('tdrum', this.dch(pan * 0.5), t, this.rootIn(c, 45, 56), 0.45 * s, 0.3, { release: 0.1 });
-    this.play('crash', this.dch(pan * 0.5, true), t, 54, 0.3 * s, 1.2, { release: 0.5, lp: 3500 });
+    this.play('tdrum', this.ch(pan * 0.5), t, this.rootIn(c, 45, 56), 0.45 * s, 0.3, { release: 0.1 });
+    this.play('crash', this.ch(pan * 0.5, true), t, 54, 0.3 * s, 1.2, { release: 0.5, lp: 3500 });
     this.fx.burst(low.input, t, { noise: 'brown', type: 'lowpass', f: 600, f1: 120, a: 0.004, d: 0.5, g: 0.22 * s, cat: 'rhythm' });
     this.core.duck(0.3 * Math.min(1, s), 0.4);
   }
@@ -432,15 +439,15 @@ export class Rhythm {
     const g = this.grid();
     const from = Math.max(now + 0.03, tStart - g.barDur);
     const rise = tStart - from;
-    const ch = this.dch(0, true);
-    const dry = this.dch(0);
+    const ch = this.ch(0, true);
+    const dry = this.ch(0);
     if (enter) {
       if (rise > 0.2) {
         this.fx.burst(ch.input, from, { noise: 'white', type: 'bandpass', f: 300, f1: 5000, q: 1.1, a: rise * 0.97, d: 0.05, g: 0.1 * big, cat: 'rhythm' });
         const n = Math.floor(rise / (g.spb / 4));
         for (let k = 0; k < n; k++) {
           const tk = tStart - (n - k) * (g.spb / 4);
-          this.play('snare', this.dch(0.2), tk, 60, 0.05 + 0.3 * (k / Math.max(1, n)), 0.2, { release: 0.06 });
+          this.play('snare', this.ch(0.2), tk, 60, 0.05 + 0.3 * (k / Math.max(1, n)), 0.2, { release: 0.06 });
           if (k % 2 === 0) this.play('timp', dry, tk, 40, 0.1 + 0.3 * (k / Math.max(1, n)), 0.5, { release: 0.2 });
         }
       }
@@ -449,7 +456,7 @@ export class Rhythm {
       this.play('gong', ch, tStart, 60, 0.32 * big, 4, { release: 1.5 });
       this.play('boom', dry, tStart, bassNote(c, 26), 0.6 * big, 1.5, { release: 0.5 });
       this.play('taiko', dry, tStart, 31, 0.6 * big, 1.2, { release: 0.4 });
-      chordTones(c, 45, 64).slice(0, 4).forEach((m, k) => this.play('brass', this.dch(k % 2 ? 0.4 : -0.4), tStart, m, 0.36 * big, 1.2 * g.spb, { release: 0.3 }));
+      chordTones(c, 45, 64).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.4 : -0.4), tStart, m, 0.36 * big, 1.2 * g.spb, { release: 0.3 }));
       return;
     }
     // the victory flourish (in the harmony the level's song resumes with)
@@ -464,8 +471,8 @@ export class Rhythm {
     }
     this.play('crash', ch, tStart, 62, 0.4, 3, { release: 1 });
     tri.forEach((m, i) => {
-      this.play('brass', this.dch(i - 1), tStart, m, 0.4, 1.6 * g.spb, { release: 0.4 });
-      this.play('choirx', this.dch(1 - i, true), tStart + 0.01, m + 12 <= 84 ? m + 12 : m, 0.24, 1.8 * g.spb, { release: 0.6 });
+      this.play('brass', this.ch(i - 1), tStart, m, 0.4, 1.6 * g.spb, { release: 0.4 });
+      this.play('choirx', this.ch(1 - i, true), tStart + 0.01, m + 12 <= 84 ? m + 12 : m, 0.24, 1.8 * g.spb, { release: 0.6 });
     });
     this.play('glass', ch, tStart + 0.02, tri[2] + 12 <= 98 ? tri[2] + 12 : tri[2], 0.3, 2, { release: 1 });
     this.play('timp', dry, tStart, this.rootIn(c, 40, 51), 0.5, 1.5, { release: 0.5 });
@@ -476,7 +483,7 @@ export class Rhythm {
     this.bossTransition(tStart, true, phase >= 3 ? 1.2 : 1);
     if (phase >= 3) {
       const c = this.chordAt(tStart + 0.01);
-      chordTones(c, 60, 76).slice(0, 4).forEach((m, k) => this.play('choir', this.dch(k % 2 ? 0.5 : -0.5, true), tStart + 0.02, m, 0.26, 2.2 * this.grid().spb, { release: 0.8 }));
+      chordTones(c, 60, 76).slice(0, 4).forEach((m, k) => this.play('choir', this.ch(k % 2 ? 0.5 : -0.5, true), tStart + 0.02, m, 0.26, 2.2 * this.grid().spb, { release: 0.8 }));
     }
   }
 
