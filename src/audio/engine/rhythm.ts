@@ -351,8 +351,10 @@ export class Rhythm {
           if (!n) return;
           const first = n.from === parts[k][0];
           const vel = (0.36 + 0.05 * parts[k][0] + (k === 4 ? 0.06 : 0)) * V;
-          this.play('choirx', chW, at(n.from), n.m, first ? vel : vel * 0.7, (to - n.from) * spb + (to >= 4 ? 0.3 : 0.02), { release: to >= 4 ? 0.7 : 0.08 });
-          if (first) this.play('choir', chW, at(n.from) + 0.03, n.m, 0.25 * V, (4 - n.from) * spb + 0.3, { release: 0.9 });
+          const len = (to - n.from) * spb + (to >= 4 ? 0.3 : 0.02);
+          const rel = to >= 4 ? 0.7 : 0.08;
+          this.play('choirx', chW, at(n.from), n.m, first ? vel : vel * 0.7, len, { release: rel });
+          this.play('choir', chW, at(n.from) + (first ? 0.03 : 0), n.m, (first ? 0.25 : 0.2) * V, len, { release: rel });
           held[k] = null;
         };
         for (let e = 0; e < edges.length - 1; e++) {
