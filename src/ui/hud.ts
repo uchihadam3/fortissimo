@@ -679,7 +679,7 @@ export class Hud {
       this.batonWrap.classList.toggle('duel', on);
     }
     if (!on) return;
-    ring.style.transform = `scale(${(1 + 1.4 * Math.min(1, k)).toFixed(3)})`;
+    ring.style.transform = `scale(${(1 + 0.7 * Math.min(1, k)).toFixed(3)})`;
     ring.style.opacity = (0.35 + 0.65 * (1 - Math.min(1, k))).toFixed(3);
     this.batonWrap.classList.toggle('strike', k < 0.08);
     if (n.dataset.n !== String(count)) {
