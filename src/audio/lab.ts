@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderBoss, renderCinema, renderEvents, renderPower, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderBoss, renderCinema, renderEvents, renderPower, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, renderVirada, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderBalance, renderBoss, renderEvents, renderPower, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
+  offline: { renderBalance, renderBoss, renderEvents, renderPower, renderRhythm, renderVirada, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;
@@ -299,6 +299,38 @@ const duelRun = (end: (t: number) => void) => {
 button(duel, 'duel → perfect parry', () => duelRun((t) => audio.parry(t, 'perfect', 0.3)));
 button(duel, 'duel → good parry', () => duelRun((t) => audio.parry(t, 'good', 0.3)));
 button(duel, 'duel → blow lands', () => duelRun((t) => audio.bossBlow(t, 0.3, 1)));
+
+// ── v7: viradas (the player plays the fill on marks in the world) ──
+const vr = section('Viradas (v7)', 'Start a battle song first. The cue comes now; the fill is the bar after next (the song\'s drums step back for it), its marks on 8ths then 16ths, the end on the following downbeat. Level 0…2 = chained viradas.');
+const VIRADA_BEATS = [1, 2, 2.5, 3, 3.5, 3.75];
+const viradaRun = (play: 'perfect' | 'good' | 'partial' | 'none', level: number) => {
+  const c = audio.songClock();
+  if (!c) return;
+  const bar = c.spb * 4;
+  const start = nextBar() + bar;
+  const end = start + bar;
+  // chained viradas grow: one more mark per level
+  const beats = level >= 2 ? [1, 1.5, 2, 2.5, 3, 3.25, 3.5, 3.75] : level === 1 ? [1, 1.5, 2, 2.5, 3, 3.5, 3.75] : VIRADA_BEATS;
+  const n = beats.length;
+  const q = (i: number) => (play === 'none' ? 'miss' : play === 'partial' ? (i % 2 === 1 ? 'miss' : 'perfect') : play);
+  audio.viradaCue(start, end, n, level);
+  let hits = 0;
+  beats.forEach((b, i) => {
+    const tm = start + b * c.spb;
+    const qi = q(i);
+    if (qi !== 'miss') hits++;
+    // the game calls it when the tap is judged (around the mark's time)
+    window.setTimeout(() => audio.viradaHit(i, n, tm, qi, -0.6 + (1.2 * i) / (n - 1)), Math.max(0, (tm - audio.now() - 0.06) * 1000));
+  });
+  window.setTimeout(() => audio.viradaEnd(end, hits, n, play === 'perfect'), Math.max(0, (end - audio.now() - 0.08) * 1000));
+};
+for (const level of [0, 1, 2]) {
+  const r = row(vr, `level ${level}`);
+  button(r, 'full (perfect)', () => viradaRun('perfect', level));
+  button(r, 'full (good)', () => viradaRun('good', level));
+  button(r, 'partial', () => viradaRun('partial', level));
+  button(r, 'none (all missed)', () => viradaRun('none', level));
+}
 
 const res = row(bt, 'results');
 button(res, 'arrive → victory', () => {

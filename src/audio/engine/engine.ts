@@ -196,6 +196,7 @@ class Engine {
     const intensity = this.nextIntensity;
     this.nextIntensity = 0;
     this.song = { id, t0, spb: 60 / info.bpm, beatsPerBar: info.beatsPerBar };
+    this.rhythm?.dropVirada();
     this.cine?.reset(Math.max(0.3, fade));
     if (this.live && this.director) {
       this.pending = null;
@@ -213,6 +214,7 @@ class Engine {
   stopMusic(fade: number): void {
     this.song = null;
     this.pending = null;
+    this.rhythm?.dropVirada();
     this.cine?.reset(Math.max(0.3, num(fade, 1)));
     this.director?.stop(clamp(num(fade, 1), 0, 20));
   }
@@ -396,6 +398,7 @@ const api: AudioAPI = {
     E.pending = null;
     if (!E.live || !E.core) return;
     E.sfx?.key();
+    E.rhythm?.dropVirada();
     const p = E.director?.current;
     if (p) {
       p.tapeStop(E.core.now + 0.02, 1.3);
@@ -510,10 +513,21 @@ const api: AudioAPI = {
     if (tc !== null) E.rhythm?.bossBlow(tc, num(pan, 0), num(strength, 1));
   }),
 
-  // v7 viradas: no-ops until the audio agent implements them
-  viradaCue: guard('viradaCue', (_start: number, _end: number, _n: number, _level: number) => {}),
-  viradaHit: guard('viradaHit', (_i: number, _n: number, _t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
-  viradaEnd: guard('viradaEnd', (_t: number, _hits: number, _n: number, _perfect: boolean) => {}),
+  // v7: viradas (the player plays the fill; the song's drums step back for it)
+  viradaCue: guard('viradaCue', (start: number, end: number, n: number, level: number) => {
+    if (typeof start !== 'number' || typeof end !== 'number' || !Number.isFinite(start) || !Number.isFinite(end)) return;
+    const a = E.at(start);
+    const b = E.at(end);
+    if (a !== null && b !== null) E.rhythm?.viradaCue(a, b, num(n, 5), num(level, 0));
+  }),
+  viradaHit: guard('viradaHit', (i: number, n: number, t: number, q: 'perfect' | 'good' | 'miss', pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.viradaHit(num(i, 0), num(n, 5), tc, q === 'perfect' || q === 'miss' ? q : 'good', num(pan, 0));
+  }),
+  viradaEnd: guard('viradaEnd', (t: number, hits: number, n: number, perfect: boolean) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.viradaEnd(tc, num(hits, 0), num(n, 0), perfect === true);
+  }),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();

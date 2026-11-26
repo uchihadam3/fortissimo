@@ -1525,3 +1525,253 @@ async function bossRun(kind: EnemyKind, o: { wav?: boolean; bars?: number; phase
   segments.push(seg('song after', bEnd, bars));
   return { stats, segments, wav: o.wav && !musicOnly ? wavBase64(r.buf) : undefined };
 }
+
+// ───────────────────────────── viradas (v7) ─────────────────────────────
+
+export type ViradaPlay = 'perfect' | 'good' | 'partial' | 'none';
+
+export interface ViradaRender {
+  song: SongId;
+  /** grid times (s) of the marks and of the virada's window */
+  marks: number[];
+  start: number;
+  end: number;
+  /** the song's drum kit inside the window (from its 2nd beat), with the virada vs without (dB, K-weighted): the duck */
+  duckDb: number;
+  /** everything but the drum kit inside the window, with vs without (dB): must stay ≈ 0 */
+  restDb: number;
+  /** the song's drum kit outside the window (the bars before it and the bar after), with vs without (dB) */
+  drumsOutsideDb: number;
+  /** the largest sample difference (dBFS) with vs without the virada: the rest of the song over the
+   * whole render, and the whole mix (song + towers) before the window — −Infinity = bit-identical */
+  diff: { rest: number; mixBefore: number };
+  /** the song's drum hits (the 2 bars before): 90th percentile of the 100 ms windows on each 16th (K / phone) */
+  drumRef: { k: number; phone: number };
+  /** every stroke (the player's stem, 100 ms from its onset), K / phone */
+  strokes: { i: number; q: string; k: number; phone: number }[];
+  /** loudest stroke − drumRef (dB, K / phone): must be ≤ 0 */
+  over: { k: number; phone: number };
+  /** the crash on the downbeat: the highs' rise there (dB), its onset error (ms) vs `end` (null: no
+   * rise of 6 dB), its level (100 ms, K) */
+  crash: { errMs: number | null; rise: number; k: number };
+  /** onsets found in the player's stem and the worst distance (ms) of one from the 16th grid */
+  grid: { onsets: number; maxErrMs: number; worst: number[] };
+  /** the song's kit energy before the virada (Director.kitEnergy at the cue) */
+  kitE: number | null;
+  /** the bar after the virada: mix loudness with the virada vs without (the swell's lift) */
+  after: { with: number; without: number };
+  /** the whole mix (song + towers + the player): clicks and peak */
+  stats: Stats;
+  wav?: string;
+}
+
+/**
+ * A virada over a battle song (full band and 10 towers firing, intensity `intensity`): the cue a bar
+ * ahead, `n` marks across the last bar of a 6-bar phrase (8ths then 16ths), struck per `play`
+ * (perfect / good / partial: every other one missed / none: all missed), then viradaEnd on the
+ * downbeat. Measured as stems: the song's drum kit with and without the virada (the duck), the rest
+ * of the song (unchanged), the player's strokes (level vs the song's drums, the crash, the grid).
+ */
+export async function renderVirada(song: SongId = 'meadow', o: { play?: ViradaPlay; level?: number; n?: number; intensity?: number; world?: WorldId; wav?: boolean } = {}): Promise<ViradaRender> {
+  const play = o.play ?? 'perfect';
+  const level = o.level ?? 0;
+  const n = Math.max(2, Math.min(8, o.n ?? 6));
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = 4 * spb;
+  const sd = spb / 4;
+  const t0 = 0.2;
+  const vBar = 5;
+  const bars = 8;
+  const seconds = t0 + bars * barDur + 1.5;
+  // the fill: 8ths, then 16ths into the downbeat (all on the grid, inside the last bar)
+  const PAT: Record<number, number[]> = {
+    2: [3, 3.5],
+    3: [2, 3, 3.5],
+    4: [2, 2.5, 3, 3.5],
+    5: [1, 2, 2.5, 3, 3.5],
+    6: [1, 2, 2.5, 3, 3.5, 3.75],
+    7: [1, 1.5, 2, 2.5, 3, 3.5, 3.75],
+    8: [1, 1.5, 2, 2.5, 3, 3.25, 3.5, 3.75],
+  };
+  const beats = PAT[n];
+  const start = t0 + vBar * barDur;
+  const end = start + barDur;
+  const marks = beats.map((b) => start + b * spb);
+  const quality = (i: number): TapQuality => (play === 'none' ? 'miss' : play === 'partial' ? (i % 2 === 1 ? 'miss' : 'perfect') : play);
+  const hits = beats.filter((_, i) => quality(i) !== 'miss').length;
+  const army = defaultArmy(10).map((x) => ({ ...x, level: 1 }));
+  const world: WorldId | null = o.world ?? (song === 'meadow' || song === 'desert' || song === 'ice' || song === 'forge' || song === 'citadel' ? song : null);
+  // every render draws the same random numbers (the humanisation is identical): with and without the
+  // virada differ only by what the virada does, so "unchanged" can be measured exactly
+  const seeded = (seed: number) => {
+    let x = seed >>> 0;
+    return () => {
+      x = (x + 0x6d2b79f5) >>> 0;
+      let t = x;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  const run = async (virada: boolean, mode: 'drums' | 'rest' | 'player' | 'mix') => {
+    const keep = Math.random;
+    Math.random = seeded(1234567);
+    try {
+      return await run1(virada, mode);
+    } finally {
+      Math.random = keep;
+    }
+  };
+  let kitE: number | null = null;
+  const run1 = async (virada: boolean, mode: 'drums' | 'rest' | 'player' | 'mix') => {
+    const rig = makeRig(seconds);
+    const mix = bandOf({ strings: 2, percussion: 2, bells: 1, brass: 1, voices: 1, low: 1 });
+    rig.director.band = mix;
+    rig.towers.setBand(mix);
+    rig.director.world = world;
+    // the fill's voices are rendered up front in every render (the same random draws either way)
+    rig.rhythm.warmVirada();
+    // (volumes 1 = the core's defaults: master 0.9, music 0.8, sfx 0.9, ambience 0.8)
+    if (mode === 'drums' || mode === 'rest') {
+      // the music alone (the sfx bus, dry and wet, is off: towers and the player's sounds)
+      rig.director.stem = mode;
+      rig.core.setVolumes({ master: 1, music: 1, sfx: 0, ambience: 1 });
+    }
+    if (mode === 'player') {
+      rig.core.setVolumes({ master: 1, music: 0, sfx: 1, ambience: 1 });
+      rig.core.towerBus.gain.value = 0;
+    }
+    const p = rig.director.play(song, t0, 0.05, o.intensity ?? 1);
+    if (!p) throw new Error('no song');
+    if (virada) {
+      rig.at(start - barDur, () => {
+        if (mode === 'player') kitE = rig.director.kitEnergy(start);
+        rig.rhythm.viradaCue(start, end, n, level);
+      }, 0.1);
+      marks.forEach((t, i) => rig.at(t, () => rig.rhythm.viradaHit(i, n, t, quality(i), -0.6 + (1.2 * i) / (n - 1)), 0.05));
+      rig.at(end, () => rig.rhythm.viradaEnd(end, hits, n, play === 'perfect'), 0.06);
+    }
+    if (mode === 'mix') {
+      for (const tw of army) {
+        const lv = TOWERS[tw.kind].levels[tw.level];
+        for (let st = 0; st < bars * 16; st++) {
+          if (lv.pattern[st % lv.pattern.length] !== 'x') continue;
+          const t = t0 + st * sd;
+          rig.at(t, () => rig.towers.shot(tw.kind, tw.level, t, tw.pan, tw.voice), 0.12);
+        }
+      }
+    }
+    return rig.render();
+  };
+  const drumsRef = await run(false, 'drums');
+  const drumsV = await run(true, 'drums');
+  const restRef = await run(false, 'rest');
+  const restV = await run(true, 'rest');
+  const player = await run(true, 'player');
+  const mixRef = await run(false, 'mix');
+  const mixV = await run(true, 'mix');
+  const sr = player.buf.sampleRate;
+  const W = { dRef: weighted(drumsRef.buf), dV: weighted(drumsV.buf), rRef: weighted(restRef.buf), rV: weighted(restV.buf), pl: weighted(player.buf), mRef: weighted(mixRef.buf), mV: weighted(mixV.buf) };
+  // the window from its second beat (the hits before it ring out through the first; the first mark
+  // is on beat 2), less its last 20 ms (the song's drums are back on the downbeat)
+  const duckDb = r1(windowLoudness(W.dV.k, sr, start + spb, end - 0.02) - windowLoudness(W.dRef.k, sr, start + spb, end - 0.02));
+  const restDb = r1(windowLoudness(W.rV.k, sr, start, end) - windowLoudness(W.rRef.k, sr, start, end));
+  const outside = (w: ReturnType<typeof weighted>) => {
+    const a = Math.pow(10, windowLoudness(w.k, sr, t0 + barDur, start) / 10) * (start - t0 - barDur);
+    const b = Math.pow(10, windowLoudness(w.k, sr, end + 0.15, end + barDur) / 10) * (barDur - 0.15);
+    return 10 * Math.log10((a + b) / (start - t0 - barDur + barDur - 0.15));
+  };
+  const drumsOutsideDb = r1(outside(W.dV) - outside(W.dRef));
+  const maxDiff = (x: AudioBuffer, y: AudioBuffer, until: number) => {
+    let m = 0;
+    for (let c = 0; c < x.numberOfChannels; c++) {
+      const a = x.getChannelData(c);
+      const b = y.getChannelData(c);
+      const i1 = Math.min(a.length, b.length, Math.floor(until * sr));
+      for (let i = 0; i < i1; i++) m = Math.max(m, Math.abs(a[i] - b[i]));
+    }
+    return m > 0 ? r1(20 * Math.log10(m)) : -Infinity;
+  };
+  const diff = { rest: maxDiff(restV.buf, restRef.buf, seconds), mixBefore: maxDiff(mixV.buf, mixRef.buf, start - 0.04) };
+  const p90 = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * 0.9))] : -99;
+  };
+  const refK: number[] = [];
+  const refP: number[] = [];
+  for (let k = 0; k < 32; k++) {
+    const t = start - 2 * barDur + k * sd;
+    refK.push(windowLoudness(W.dRef.k, sr, t, t + 0.1));
+    refP.push(windowLoudness(W.dRef.phone, sr, t, t + 0.1));
+  }
+  const drumRef = { k: r1(p90(refK)), phone: r1(p90(refP)) };
+  const strokes = marks.map((t, i) => ({ i, q: quality(i), k: r1(windowLoudness(W.pl.k, sr, t, t + 0.1)), phone: r1(windowLoudness(W.pl.phone, sr, t, t + 0.1)) }));
+  const hitStrokes = strokes.filter((s) => s.q !== 'miss');
+  const loudest = (f: (s: (typeof strokes)[number]) => number) => (hitStrokes.length ? Math.max(...hitStrokes.map(f)) : -99);
+  const over = { k: r1(loudest((s) => s.k) - drumRef.k), phone: r1(loudest((s) => s.phone) - drumRef.phone) };
+  // onsets in the player's stem: 32-sample frames (0.7 ms), a jump of ≥ 8 dB over the previous 20 ms, above −50 dBFS
+  const L = player.buf.getChannelData(0);
+  const R = player.buf.getChannelData(1);
+  const FR = 32;
+  const envOf = (x: (i: number) => number) => {
+    const e: number[] = [];
+    for (let i = 0; i + FR <= L.length; i += FR) {
+      let pk = 0;
+      for (let j = i; j < i + FR; j++) pk = Math.max(pk, x(j));
+      e.push(pk);
+    }
+    return e;
+  };
+  const look = Math.round((0.02 * sr) / FR);
+  const onsetsOf = (e: number[], floor: number) => {
+    const out: number[] = [];
+    for (let k = look; k < e.length; k++) {
+      let prev = 0;
+      for (let j = k - look; j < k; j++) prev = Math.max(prev, e[j]);
+      const tk = (k * FR) / sr;
+      if (e[k] > floor && e[k] > 2.5 * prev && (!out.length || tk - out[out.length - 1] > 0.03)) out.push(tk);
+    }
+    return out;
+  };
+  const onsets = onsetsOf(envOf((j) => Math.max(Math.abs(L[j]), Math.abs(R[j]))), 0.00316);
+  // the master chain's two compressors look 6 ms ahead each: everything leaves 12 ms late
+  const LAT = 0.012;
+  const errs = onsets.map((t) => {
+    const g = Math.round((t - LAT - t0) / sd);
+    return { t, e: Math.abs(t - LAT - (t0 + g * sd)) * 1000 };
+  });
+  // a frame quantises the onset (and a drum's attack takes a moment): up to ~2 ms is the measurement itself
+  const worst = errs.filter((x) => x.e > 2.5).map((x) => Math.round(x.t * 1000) / 1000);
+  // the crash: an onset in the highs (> 5 kHz) at the downbeat (the strokes are low drums)
+  const hp = [Biquad.hp(sr, 5000, 0.7071), Biquad.hp(sr, 5000, 0.7071)];
+  const H = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) H[i] = hp[1].run(hp[0].run((L[i] + R[i]) * 0.5));
+  const eH = (a: number, b: number) => {
+    let e = 0;
+    for (let i = Math.max(0, Math.floor(a * sr)); i < Math.min(H.length, Math.floor(b * sr)); i++) e += H[i] * H[i];
+    return e;
+  };
+  // the highs' rise at the downbeat (30 ms after vs 30 ms before) and the steepest 1 ms of it
+  const tE = end + LAT;
+  const rise = r1(10 * Math.log10((eH(tE, tE + 0.03) + 1e-12) / (eH(tE - 0.03, tE) + 1e-12)));
+  let errMs: number | null = null;
+  if (rise >= 6) {
+    // the onset: the first millisecond whose highs are 4× the mean of the 30 ms before the downbeat
+    const base = eH(tE - 0.03, tE) / 30;
+    for (let tt = tE - 0.02; tt < tE + 0.02; tt += 0.00025) {
+      if (eH(tt, tt + 0.001) > 4 * base + 1e-12) {
+        errMs = Math.round((tt - tE) * 10000) / 10;
+        break;
+      }
+    }
+  }
+  const crash = { errMs, rise, k: r1(windowLoudness(W.pl.k, sr, tE, tE + 0.1)) };
+  const after = { with: r1(gatedLoudness(W.mV.k, sr, end, end + barDur)), without: r1(gatedLoudness(W.mRef.k, sr, end, end + barDur)) };
+  const stats = measure(mixV.buf, mixV.ms, 0.3);
+  stats.maxVoices = mixV.maxVoices;
+  return {
+    song, marks, start, end, duckDb, restDb, drumsOutsideDb, diff, drumRef, strokes, over, crash,
+    grid: { onsets: onsets.length, maxErrMs: Math.round(Math.max(0, ...errs.map((x) => x.e)) * 10) / 10, worst },
+    kitE, after, stats, wav: o.wav ? wavBase64(mixV.buf) : undefined,
+  };
+}

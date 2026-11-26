@@ -243,6 +243,22 @@ try {
     for (const c of ['story:wonder', 'story:frozen', 'story:wake', 'story:join', 'story:threat', 'story:shard', 'story:voice', 'story:camp', 'story:memory', 'story:journey', 'story:dread', 'story:hush', 'story:comic', 'land:meadow', 'land:desert', 'land:ice', 'land:forge', 'land:citadel', 'land:nowhere']) tryIt('cinematic ' + c, () => a.cinematic(c));
     for (const e of ['scorpion', 'whirl', 'echo', 'wolf', 'ember', 'slug', 'mimic', 'knight', 'conductor']) tryIt('enemyDeath ' + e, () => a.enemyDeath(e, t, 0.3));
     for (const u of ['uiHover', 'uiClick', 'uiBack', 'uiOpen', 'uiDeny', 'achievement', 'save', 'studioSting', 'titleReveal', 'victory', 'defeat']) tryIt(u, () => a[u]());
+    // v7: viradas (garbage, then a real one over the song, then one cancelled by a new cue)
+    tryIt('viradaCue garbage', () => a.viradaCue(NaN, undefined, -3, 'x'));
+    tryIt('viradaCue reversed', () => a.viradaCue(t + 2, t + 1, 6, 9));
+    tryIt('viradaHit garbage', () => a.viradaHit(NaN, -1, NaN, 'bogus', Infinity));
+    tryIt('viradaEnd garbage', () => a.viradaEnd(NaN, NaN, undefined, 'yes'));
+    tryIt('virada', () => {
+      const c = a.songClock();
+      const spb = c ? c.spb : 0.6;
+      const s0 = (c ? c.t0 + Math.ceil((a.now() + 0.2 - c.t0) / (4 * spb)) * 4 * spb : t) + 4 * spb;
+      a.viradaCue(s0, s0 + 4 * spb, 6, 1);
+      a.viradaCue(s0, s0 + 4 * spb, 6, 2);
+      [1, 2, 2.5, 3, 3.5, 3.75].forEach((b, i) => a.viradaHit(i, 6, s0 + b * spb, i === 2 ? 'miss' : 'perfect', i / 3 - 1));
+      a.viradaEnd(s0 + 4 * spb, 5, 6, false);
+      a.viradaHit(0, 6, a.now() - 5, 'good', 0);
+      a.viradaEnd(a.now() - 5, 6, 6, true);
+    });
     tryIt('stopMusic', () => a.stopMusic(undefined));
     tryIt('songClock', () => a.songClock());
     await new Promise((r) => setTimeout(r, 2500));
