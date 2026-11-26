@@ -828,7 +828,7 @@ export class JourneyBattle {
     const sh = shieldOf(this.power.power) / DUEL.shield;
     this.shieldFlash = Math.max(0, this.shieldFlash - dt * 2.5);
     const mat = this.shield.material as THREE.MeshBasicMaterial;
-    mat.opacity = fight ? sh * (0.07 + 0.06 * Math.exp(-u * 5)) + this.shieldFlash * 0.35 : 0;
+    mat.opacity = fight ? sh * (0.035 + 0.035 * Math.exp(-u * 5)) + this.shieldFlash * (0.04 + 0.1 * sh) : 0;
     this.shield.visible = mat.opacity > 0.002;
     const tp = this.view.turtle.group.position;
     this.shield.position.set(tp.x, tp.y - 0.5, tp.z);
