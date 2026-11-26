@@ -20,7 +20,10 @@
  */
 import type { MNote } from '../compose';
 import type { BarInfo } from '../compose';
-import type { BarCtx } from '../music';
+import type { EnemyKind } from '../../../sim/defs';
+import type { BarCtx, Player } from '../music';
+import type { Scale } from '../theory';
+import type { BossAt, BossScore } from './bossfight';
 import { LOWBRASS, SUB, type BufInst } from '../synth';
 import { chordTones, type Chord, pcOf } from '../theory';
 import { rand } from '../util';
@@ -67,6 +70,52 @@ export interface TuneOpts {
 export abstract class Battle extends AdaptiveSong {
   protected abstract readonly kit: Kit;
 
+  // ───────────────────────────── boss fights (v5) ─────────────────────────────
+
+  /** makes a boss's score (set by the song registry; kept out of the imports to avoid a cycle) */
+  static bossFactory: ((kind: EnemyKind) => BossScore | null) | null = null;
+  private readonly scores = new Map<EnemyKind, BossScore | null>();
+
+  /** the boss score that owns `bar`, if a boss fight is on */
+  private bossOf(bar: number, p: Player): { sc: BossScore; bs: BossAt } | null {
+    const bs = p.bossAt(bar);
+    if (!bs) return null;
+    let sc = this.scores.get(bs.kind);
+    if (sc === undefined) {
+      sc = Battle.bossFactory ? Battle.bossFactory(bs.kind) : null;
+      this.scores.set(bs.kind, sc);
+    }
+    return sc ? { sc, bs } : null;
+  }
+
+  compose(b: BarCtx): void {
+    const boss = this.bossOf(b.bar, b.p);
+    if (boss) {
+      try {
+        boss.sc.composeBar(b, boss.bs, b.band);
+      } catch {
+        /* a broken bar must not stop the fight */
+      }
+      return;
+    }
+    super.compose(b);
+  }
+
+  chordAt(bar: number, beat: number, p: Player): Chord {
+    const boss = this.bossOf(Math.max(0, bar), p);
+    return boss ? boss.sc.chordAtBar(bar, beat, boss.bs) : super.chordAt(bar, beat, p);
+  }
+
+  keyAt(bar: number, p: Player): Scale {
+    const boss = this.bossOf(Math.max(0, bar), p);
+    return boss ? boss.sc.keyAtBar(bar, boss.bs) : super.keyAt(bar, p);
+  }
+
+  guide(bar: number, beat: number, p: Player): number | null {
+    const boss = this.bossOf(Math.max(0, bar), p);
+    return boss ? boss.sc.guideAtBar(bar, beat, boss.bs) : super.guide(bar, beat, p);
+  }
+
   /** Lend this song's arrangement to another player (the credits medley); call setup(p) first. */
   guest(b: BarCtx, f: BarInfo): void {
     this.st = { ...this.st, mode: 'battle' };
@@ -77,7 +126,7 @@ export abstract class Battle extends AdaptiveSong {
   protected fill(_b: BarCtx): void {}
 
   tail(b: BarCtx): void {
-    if (b.build || b.drop) return;
+    if (b.build || b.drop || b.p.bossAt(b.bar) || b.p.bossAt(b.bar + 1)) return;
     const nextI = b.p.intensityAt(b.bar + 1);
     if (nextI > b.I && !b.p.isBuild(b.bar + 1) && !b.p.dropIndex(b.bar + 1)) {
       this.fill(b);

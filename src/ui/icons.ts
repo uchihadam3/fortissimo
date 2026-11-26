@@ -124,7 +124,8 @@ export const TOWER_ICON: Record<TowerKind, string> = {
 
 // ───────────────────────────── the creatures ─────────────────────────────
 
-const E: Record<EnemyKind, string> = {
+// v5 bosses without an icon yet fall back to the blot (the art agent adds theirs)
+const E: Partial<Record<EnemyKind, string>> & { blot: string } = {
   blot: `<path d="M32 6 C36 16 52 26 52 42 C52 54 43 60 32 60 C21 60 12 54 12 42 C12 26 28 16 32 6 Z" fill="#3b3068" ${INK}/>
     <path d="M32 7 C26 2 22 9 27 12" fill="none" stroke="#54438c" stroke-width="3.4" stroke-linecap="round"/>
     <path d="M18 34 C20 28 24 24 28 22" fill="none" stroke="#6a5aa8" stroke-width="2.4" stroke-linecap="round"/>

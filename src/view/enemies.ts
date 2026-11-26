@@ -1153,6 +1153,11 @@ export const CREATURE_INK: Record<EnemyKind, string> = {
   echo: '#9fe6d4', obelisk: '#4a3d6a', wolf: '#3a4876', shell: '#7fc4ec', phantom: '#d9dfff', muffler: '#c9c4dc', ember: '#ff7a2a',
   slug: '#ff6a1f', shield: '#5c6072', mender: '#7dff9a', mimic: '#2a2346', knight: '#3d2470', conductor: '#6a4ab8',
   bossBlot: '#43357c', bossScarab: '#ffb347', bossMoth: '#8fe2ff', bossGolem: '#ff6a3a', silence: '#1d1a2b',
+  // v5 (placeholders; the art agent refines)
+  toad: '#4b3a8a', drumBeetle: '#6a4a2a', crow: '#3a3a52', sandworm: '#c8935a', croc: '#4f8a6a', sphinx: '#d9b070',
+  yeti: '#b8d8f0', siren: '#7fd4ff', stag: '#cfe8ff', salamander: '#ff8a3a', magmaCrab: '#ff5a2a', smith: '#5a4a5a',
+  gargoyle: '#6a6478', organist: '#4a2a6a', twin: '#2e2450', wyrm: '#d8ff6a', djinn: '#ffcf6a', aurora: '#7affd8',
+  phoenix: '#ff4a8a', abyssKing: '#120e1e',
 };
 
 // ───────────────────────────── the view ─────────────────────────────

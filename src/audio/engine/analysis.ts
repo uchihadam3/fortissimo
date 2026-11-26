@@ -11,6 +11,7 @@ import { Core } from './core';
 import { LOOKAHEAD } from './engine';
 import { Motifs } from './motifs';
 import { Rhythm, type TapQuality } from './rhythm';
+import { bossSpec } from './songs/bossfight';
 import { cleanBand, Director, type Player, type TrackId } from './music';
 import { Sfx } from './sfx';
 import { makeTheme } from './songs';
@@ -1408,4 +1409,119 @@ export async function renderEvents(song: SongId = 'meadow'): Promise<EventStems>
     }
   }
   return { rows };
+}
+
+// ───────────────────────────── boss fights (v5) ─────────────────────────────
+
+/** the song each boss fights in (its level's) */
+export const BOSS_HOME: Partial<Record<EnemyKind, SongId>> = {
+  toad: 'meadow', drumBeetle: 'meadow', crow: 'meadow', bossBlot: 'boss', wyrm: 'meadow',
+  sandworm: 'desert', croc: 'desert', sphinx: 'desert', bossScarab: 'boss', djinn: 'desert',
+  yeti: 'ice', siren: 'ice', stag: 'ice', bossMoth: 'boss', aurora: 'ice',
+  salamander: 'forge', magmaCrab: 'forge', smith: 'forge', bossGolem: 'boss', phoenix: 'forge',
+  gargoyle: 'citadel', organist: 'citadel', twin: 'citadel', silence: 'finale', abyssKing: 'finale',
+};
+const BOSS_LAND: Partial<Record<EnemyKind, WorldId>> = {
+  toad: 'meadow', drumBeetle: 'meadow', crow: 'meadow', bossBlot: 'meadow', wyrm: 'meadow',
+  sandworm: 'desert', croc: 'desert', sphinx: 'desert', bossScarab: 'desert', djinn: 'desert',
+  yeti: 'ice', siren: 'ice', stag: 'ice', bossMoth: 'ice', aurora: 'ice',
+  salamander: 'forge', magmaCrab: 'forge', smith: 'forge', bossGolem: 'forge', phoenix: 'forge',
+  gargoyle: 'citadel', organist: 'citadel', twin: 'citadel', silence: 'citadel', abyssKing: 'citadel',
+};
+
+export interface BossRender {
+  stats: Stats;
+  /** the level's song before the fight, every phase of the fight, the song after it */
+  segments: { name: string; lufs: number; peakDb: number; inChord: number; inScale: number; music: number }[];
+  wav?: string;
+}
+
+/**
+ * A boss fight inside its level's song with the full band firing (intensity 2): two bars of the
+ * song, the boss's phases (`bars` each, with tell → parry/blow duels in each phase), bossTheme(null)
+ * and three bars of the song again.
+ */
+export async function renderBoss(kind: EnemyKind, o: { wav?: boolean; bars?: number; phases?: number } = {}): Promise<BossRender> {
+  const full = await bossRun(kind, o, false);
+  const music = await bossRun(kind, o, true);
+  full.segments.forEach((x, i) => (x.music = music.segments[i].lufs));
+  return full;
+}
+
+/** one render of the fight; `musicOnly` mutes the towers and the player's sounds (the music's own loudness) */
+async function bossRun(kind: EnemyKind, o: { wav?: boolean; bars?: number; phases?: number }, musicOnly: boolean): Promise<BossRender> {
+  const song = BOSS_HOME[kind] ?? 'meadow';
+  const spec = bossSpec(kind);
+  const nPh = o.phases ?? spec?.phases.length ?? 1;
+  const per = o.bars ?? (spec?.cls === 'mini' ? 10 : 8);
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = 4 * spb;
+  const sd = spb / 4;
+  const t0 = 0.2;
+  const b0 = 2;
+  const bEnd = b0 + nPh * per;
+  const bars = bEnd + 3;
+  const seconds = t0 + bars * barDur + 2;
+  const rig = makeRig(seconds);
+  rig.director.world = BOSS_LAND[kind] ?? null;
+  const mix = bandOf({ strings: 2, percussion: 2, bells: 1, brass: 1, voices: 1, low: 1 });
+  rig.director.band = mix;
+  rig.towers.setBand(mix);
+  if (musicOnly) {
+    rig.core.towerBus.gain.value = 0;
+    rig.core.rhythmBus.gain.value = 0;
+  }
+  const p = rig.director.play(song, t0, 0.05, 2);
+  if (!p) throw new Error('no song');
+  rig.at(p.barStart(b0) - 1.5, () => {
+    const ts = rig.director.bossTheme(kind, p.barStart(b0));
+    if (ts !== null) rig.rhythm.bossTransition(ts, true, 1);
+  }, 0);
+  for (let k = 1; k < nPh; k++) {
+    const tb = p.barStart(b0 + k * per);
+    rig.at(tb - 1.5, () => {
+      const ts = rig.director.bossPhase(k + 1, tb);
+      if (ts !== null) rig.rhythm.bossPhaseHit(ts, k + 1);
+    }, 0);
+  }
+  rig.at(p.barStart(bEnd) - 1.5, () => {
+    const ts = rig.director.bossTheme(null, p.barStart(bEnd));
+    if (ts !== null) rig.rhythm.bossTransition(ts, false, 1);
+  }, 0);
+  for (let k = 0; k < nPh; k++) {
+    for (let r = 0; r < 2; r++) {
+      const bar = b0 + k * per + 3 + r * 3;
+      for (let beat = 0; beat < 4; beat++) {
+        const t = p.barStart(bar) + beat * spb;
+        const last = beat === 3;
+        rig.at(t, () => rig.rhythm.bossTell(t, 0.3, last), 0.1);
+        if (last) {
+          const what = (k + r) % 3;
+          rig.at(t, () => (what === 0 ? rig.rhythm.parry(t, 'perfect', 0.3) : what === 1 ? rig.rhythm.parry(t, 'good', 0.3) : rig.rhythm.bossBlow(t, 0.3, 1)), 0.1);
+        }
+      }
+    }
+  }
+  const army = defaultArmy(10).map((x) => ({ ...x, level: 1 }));
+  for (const tw of army) {
+    const lv = TOWERS[tw.kind].levels[tw.level];
+    for (let st = 0; st < bars * 16; st++) {
+      if (lv.pattern[st % lv.pattern.length] !== 'x') continue;
+      const t = t0 + st * sd;
+      rig.at(t, () => rig.towers.shot(tw.kind, tw.level, t, tw.pan, tw.voice), 0.12);
+    }
+  }
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  stats.cats = r.cats;
+  const seg = (name: string, a: number, b: number) => {
+    const m = measureRange(r.buf, p.barStart(a), p.barStart(b));
+    const h = musicOnly ? { inChord: 0, inScale: 0 } : harmonyCheck(r.buf, p, a, b);
+    return { name, lufs: r1(m.lufs), peakDb: r1(m.peakDb), inChord: h.inChord, inScale: h.inScale, music: 0 };
+  };
+  const segments = [seg('song before', 0, b0)];
+  for (let k = 0; k < nPh; k++) segments.push(seg(`phase ${k + 1}`, b0 + k * per, b0 + (k + 1) * per));
+  segments.push(seg('song after', bEnd, bars));
+  return { stats, segments, wav: o.wav && !musicOnly ? wavBase64(r.buf) : undefined };
 }

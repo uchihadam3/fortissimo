@@ -479,6 +479,36 @@ const api: AudioAPI = {
     const tc = E.at(t);
     if (tc !== null) E.rhythm?.powerDrop(tc);
   }),
+  // v5: the duel
+  bossTheme: guard('bossTheme', (kind: EnemyKind | null, t: number) => {
+    const tc = E.at(t);
+    if (tc === null || !E.director) return;
+    const k = typeof kind === 'string' ? kind : null;
+    const was = E.director.current?.bossAt(E.director.current.barAt(tc + 0.01)) ?? null;
+    const tStart = E.director.bossTheme(k, tc);
+    if (tStart === null) return;
+    if (k) E.rhythm?.bossTransition(tStart, true, 1);
+    else if (was) E.rhythm?.bossTransition(tStart, false, 1);
+  }),
+  bossPhase: guard('bossPhase', (n: number, t: number) => {
+    const tc = E.at(t);
+    if (tc === null || !E.director) return;
+    const phase = clamp(Math.round(num(n, 1)), 1, 9);
+    const tStart = E.director.bossPhase(phase, tc);
+    if (tStart !== null && phase > 1) E.rhythm?.bossPhaseHit(tStart, phase);
+  }),
+  bossTell: guard('bossTell', (t: number, pan: number, last: boolean) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.bossTell(tc, num(pan, 0), !!last);
+  }),
+  parry: guard('parry', (t: number, q: 'perfect' | 'good', pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.parry(tc, q === 'perfect' ? 'perfect' : 'good', num(pan, 0));
+  }),
+  bossBlow: guard('bossBlow', (t: number, pan: number, strength: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.bossBlow(tc, num(pan, 0), num(strength, 1));
+  }),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();

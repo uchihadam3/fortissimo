@@ -264,6 +264,34 @@ export interface AudioAPI {
   setPower(p: number): void;
   /** A clear "you broke the run" sound when a miss costs power (a short downward sting). */
   powerDrop(t: number): void;
+  // ── bosses (v5): every boss fight is a duel on the beat ─────────────
+  /**
+   * A boss fight starts: the battle music turns into that boss's fight music from the next bar
+   * line ≥ t (null: back to the level's song). Mini-bosses (end of every main level): a fierce
+   * variant of the land's theme with the creature's own motif and its own rhythm signature.
+   * Guardians (bossBlot, bossScarab, bossMoth, bossGolem, silence): a full theme each, per land.
+   * Legends (wyrm, djinn, aurora, phoenix, abyssKing): unique, epic, unforgettable themes.
+   * Implementation notes: the fight plays INSIDE the level's song — same tempo, same clock, same
+   * bar grid (songClock() does not change), so the duel stays on the beat; the towers' notes follow
+   * the boss's harmony and its tune. A riser leads into the fight's first bar (call it ≥ 1 bar
+   * ahead for the full riser); bossTheme(null) plays a victory flourish on the bar where the song
+   * resumes. Battle songs only (no-op in cinematics). Kinds without a theme are ignored.
+   */
+  bossTheme(kind: EnemyKind | null, t: number): void;
+  /**
+   * The boss enters phase n (1, 2, 3…; mini-bosses have 2, guardians and legends 3) from the next bar
+   * line ≥ t: the music escalates (key lift, double-time drums, choir, brass), with a phase hit.
+   */
+  bossPhase(phase: number, t: number): void;
+  /**
+   * The boss winds up an attack on the beat: one count-in hit at t (called for each warning beat;
+   * `last` = the beat the blow lands — the player must tap it to parry).
+   */
+  bossTell(t: number, pan: number, last: boolean): void;
+  /** The player parried the blow on the beat (perfect: the blow is reflected — a triumphant clang). */
+  parry(t: number, quality: 'perfect' | 'good', pan: number): void;
+  /** The blow landed (not parried): a heavy impact on the colossus. */
+  bossBlow(t: number, pan: number, strength: number): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
    * mood's next beat, in its key (the mood holds its tonic under it).

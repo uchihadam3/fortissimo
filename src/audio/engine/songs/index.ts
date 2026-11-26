@@ -4,7 +4,9 @@
  */
 import type { WorldId } from '../../../sim/defs';
 import { FULL_BAND, type Theme, type TrackId } from '../music';
+import { Battle } from './battle';
 import { BossTheme } from './boss';
+import { makeBossScore } from './bossfight';
 import { AfterglowMood, AfterRestMood, AloneMood, ApproachMood, BloomMood, DawnMood, FallMood, FestivalMood, GreyMood, HopeMood } from './cinema';
 import { CitadelTheme } from './citadel';
 import { CreditsTheme } from './credits';
@@ -15,6 +17,8 @@ import { IceTheme } from './ice';
 import { MeadowTheme } from './meadow';
 import { MapTheme, MenuTheme } from './menu';
 import { makeMood } from './moods';
+
+Battle.bossFactory = makeBossScore;
 
 const WORLDS: WorldId[] = ['meadow', 'desert', 'ice', 'forge', 'citadel'];
 

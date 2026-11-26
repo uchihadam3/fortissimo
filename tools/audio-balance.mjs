@@ -188,6 +188,28 @@ for (const song of songs) {
     if (r.stats.clicks) problems.push(`${song} power: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
   }
 }
+// v5: every boss fight inside its level's song (only with --only boss; --boss toad,crow picks some)
+const ALL_BOSSES = ['toad', 'drumBeetle', 'crow', 'sandworm', 'croc', 'sphinx', 'yeti', 'siren', 'stag', 'salamander', 'magmaCrab', 'smith', 'gargoyle', 'organist', 'twin', 'bossBlot', 'bossScarab', 'bossMoth', 'bossGolem', 'silence', 'wyrm', 'djinn', 'aurora', 'phoenix', 'abyssKing'];
+if (only === 'boss') {
+  const list = opt('--boss', ALL_BOSSES.join(',')).split(',');
+  console.log('\n── boss fights (full band at intensity 2, tells → parries / blows; mix LUFS (music alone) · peak · on chord / on scale) ──');
+  for (const kind of list) {
+    const r = await page.evaluate(([k, w]) => window.__lab.offline.renderBoss(k, { wav: w }), [kind, !!wavDir]);
+    save(`boss-${kind}`, r);
+    const segs = r.segments.map((x) => `${x.name.replace('song ', '')} ${f1(x.lufs)} (m ${f1(x.music)}) ${f1(x.peakDb)} ${(x.inChord * 100).toFixed(0)}%/${(x.inScale * 100).toFixed(0)}%`).join(' · ');
+    console.log(`${kind.padEnd(11)} ${segs} · clicks ${r.stats.clicks} voices ${r.stats.maxVoices}`);
+    const before = r.segments[0];
+    const ph = r.segments.slice(1, -1);
+    if (r.stats.peakDb > -1) problems.push(`${kind}: peak ${f1(r.stats.peakDb)}`);
+    if (r.stats.clicks) problems.push(`${kind}: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
+    for (const x of ph) {
+      if (x.inScale < 0.75) problems.push(`${kind} ${x.name}: only ${(x.inScale * 100).toFixed(0)}% on the scale`);
+      if (x.inChord < 0.6) problems.push(`${kind} ${x.name}: only ${(x.inChord * 100).toFixed(0)}% on chord tones`);
+    }
+    if (ph[0].lufs < before.lufs - 0.5) problems.push(`${kind}: the fight (${f1(ph[0].lufs)}) is quieter than the song (${f1(before.lufs)})`);
+    if (ph.length > 1 && ph[ph.length - 1].music < ph[0].music + 1) problems.push(`${kind}: the last phase does not climb (music ${f1(ph[0].music)} → ${f1(ph[ph.length - 1].music)})`);
+  }
+}
 if (errors.length) console.log('\nERRORS:\n' + [...new Set(errors)].slice(0, 30).join('\n'));
 console.log(problems.length ? `\nPROBLEMS:\n  ${problems.join('\n  ')}` : '\nno problems');
 await browser.close();
