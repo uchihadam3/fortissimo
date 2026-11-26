@@ -14,8 +14,8 @@
  * The player conducts (v3). Every tap of the baton is judged here, against the beat as it is HEARD:
  *   heard = audio.now() − (input delay from the event's time stamp) − clock.t0 − latency − offset
  * which is the view clock (what you hear), so a tap right on a beat you hear is a perfect one,
- * whatever the device's output latency. The tap itself plays at once (or, when it is early, right
- * on the beat it aimed at). Only what comes of the taps reaches the simulation, as recorded actions
+ * whatever the device's output latency. The tap itself sounds on the grid point it was judged
+ * against (the audio engine's request), so the player's percussion always lands in the music. Only what comes of the taps reaches the simulation, as recorded actions
  * (`setGroove`, `solo`, `echo`), so replays and checkpoints stay exact.
  */
 import * as THREE from 'three';
@@ -506,11 +506,13 @@ export class JourneyBattle {
     return audio.now() - lagMs / 1000 - this.clock.t0 - audio.latency() - this.offset;
   }
 
-  /** when a judged tap sounds: right away, or on the beat it aimed at when it came early */
+  /**
+   * when a judged tap sounds: on the grid point it was judged against (the engine plays a time
+   * already past at once), so every tap lands on the music's grid
+   */
   private soundAt(gridT: number, q: TapQuality): number {
-    const now = audio.now();
-    const at = this.ctx(gridT);
-    return q !== 'miss' && at > now ? at : now;
+    void q;
+    return Math.max(this.ctx(gridT), audio.now() - 0.05);
   }
 
   /** a tap of the baton (pointerdown or Space/J) */
@@ -783,7 +785,7 @@ export class JourneyBattle {
     const n = c.matched;
     if (n >= 4) {
       c.wrong++;
-      audio.echoNote(3, audio.now(), false);
+      audio.echoNote(3, this.soundAt(heard, 'miss'), false);
       this.hud.batonHit('miss', this.groove.level);
       return;
     }
@@ -797,7 +799,7 @@ export class JourneyBattle {
     } else {
       c.states[n] = 4;
       c.wrong++;
-      audio.echoNote(n, audio.now(), false);
+      audio.echoNote(n, this.soundAt(c.targets[n], 'miss'), false);
       this.hud.batonHit('miss', this.groove.level);
     }
     if (c.matched === 4 && c.wrong === 0) {
