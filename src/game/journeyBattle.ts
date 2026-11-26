@@ -976,7 +976,10 @@ export class JourneyBattle {
     const beatPos = vt / spb;
     const u = beatPos - Math.floor(beatPos);
     const g = this.groove.level;
-    this.hud.setBeat(beatPos, this.clock.beatsPerBar, g >= RHYTHM.eighthsFrom, g);
+    // a wave drawing near (the last two bars before it): the beat rings burn hotter
+    let tension = 0;
+    for (const w of this.incoming) if (vt < w.at) tension = Math.max(tension, 1 - (w.at - vt) / (2 * s.barDur));
+    this.hud.setBeat(beatPos, this.clock.beatsPerBar, g >= RHYTHM.eighthsFrom, g, Math.max(0, tension));
     if (!this.paused && !this.ended && this.groove.idle(vt, s.barDur)) this.syncGroove();
     // the shell's lanterns and the colour around the colossus pulse with the groove
     this.view.turtle.lights = 1 + g * 0.09 * (1 + 1.5 * Math.exp(-u * 5));

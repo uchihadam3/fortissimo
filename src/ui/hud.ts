@@ -455,9 +455,11 @@ export class Hud {
 
   /**
    * The beat as heard: rings close in on the baton and meet it on every beat (gold on the
-   * downbeat); at high groove a smaller ring marks the eighths too. `beatPos` in beats of the song.
+   * downbeat); at high groove a smaller ring marks the eighths too. `beatPos` in beats of the song;
+   * `tension` (0…1) as a wave draws near: the rings burn hotter.
    */
-  setBeat(beatPos: number, beatsPerBar: number, eighths: boolean, groove: number) {
+  setBeat(beatPos: number, beatsPerBar: number, eighths: boolean, groove: number, tension = 0) {
+    this.batonWrap.classList.toggle('tense', tension > 0.01);
     const u = beatPos - Math.floor(beatPos);
     const beatInBar = ((Math.floor(beatPos) % beatsPerBar) + beatsPerBar) % beatsPerBar;
     const next = (beatInBar + 1) % beatsPerBar;
@@ -472,7 +474,7 @@ export class Hud {
       b.style.opacity = (0.5 * v).toFixed(3);
     } else b.style.display = 'none';
     // the baton breathes with the beat (brighter with the groove)
-    const flash = Math.exp(-u * 7) * (0.5 + 0.12 * groove);
+    const flash = Math.exp(-u * 7) * (0.5 + 0.12 * groove + 0.4 * tension);
     this.batonWrap.style.setProperty('--flash', flash.toFixed(3));
     this.grooveGlow.style.setProperty('--flash', (Math.exp(-u * 4) * (beatInBar === 0 ? 1 : 0.6)).toFixed(3));
   }

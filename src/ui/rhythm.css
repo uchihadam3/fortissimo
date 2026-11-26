@@ -30,6 +30,8 @@
   box-shadow: 0 0 10px rgba(255, 247, 230, .35);
 }
 #baton-wrap .approach.down { border-color: #ffd36b; box-shadow: 0 0 14px rgba(255, 211, 107, .7); border-width: 4px; }
+#baton-wrap.tense .approach { border-color: #ff9a5a; box-shadow: 0 0 14px rgba(255, 120, 70, .75); }
+#baton-wrap.tense .approach.down { border-color: #ff5a4a; }
 #baton-wrap .approach.off { inset: 6px; border-width: 2px; border-color: var(--gc); }
 
 /* judged taps */
