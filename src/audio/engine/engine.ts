@@ -426,6 +426,14 @@ const api: AudioAPI = {
     if (E.live) E.motifs?.join(kind);
   }),
 
+  // v3 rhythm API: no-ops until the audio pass implements them
+  beatTap: guard('beatTap', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
+  setGroove: guard('setGroove', (_level: number) => {}),
+  solo: guard('solo', (_kind: TowerKind, _level: number, _t: number, _pan: number, _voice: number) => {}),
+  callNote: guard('callNote', (_i: number, _t: number) => {}),
+  echoNote: guard('echoNote', (_i: number, _t: number, _ok: boolean) => {}),
+  echoResult: guard('echoResult', (_success: boolean) => {}),
+
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();
   }),

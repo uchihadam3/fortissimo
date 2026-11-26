@@ -208,6 +208,18 @@ export interface AudioAPI {
   movement(index: number, total: number, t: number): void;
   /** A new plate of the shell lights up: a bright little chime at t. */
   plateUnlock(t: number, pan: number): void;
+  // ── rhythm play (v3): the player conducts ─────────────
+  /** The player taps the baton: a percussive hit in the land's palette at t (judged against the beat). */
+  beatTap(t: number, quality: 'perfect' | 'good' | 'miss', pan: number): void;
+  /** Groove 0…4 from the player's run of on-beat taps: the arrangement gains energy layers; 4 = everything. */
+  setGroove(level: number): void;
+  /** A musician's solo (tapped on the beat): one bar of virtuosic flourish for that instrument, from t. */
+  solo(kind: TowerKind, level: number, t: number, pan: number, voice: number): void;
+  /** The Maestro's call in a breather: note i (0–3) of a 4-note pattern at t; echoNote is the player's answer. */
+  callNote(i: number, t: number): void;
+  echoNote(i: number, t: number, ok: boolean): void;
+  /** The player's echo of the call: all four right (success) or not. */
+  echoResult(success: boolean): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
    * mood's next beat, in its key (the mood holds its tonic under it).
