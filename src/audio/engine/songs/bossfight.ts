@@ -298,7 +298,7 @@ export const BOSSES: Partial<Record<EnemyKind, BossSpec>> = {
     lead: ORGAN(0.9), leadShift: 0, leadVel: 0.9, lead2: 'brass', lead2Shift: -12,
     bass: 'R...R...R...R...', bassInst: ORGAN(0.3),
     kick: 'X.......X.......', snare: '....x.......x...', hat: '',
-    stabs: [], pad: ORGAN(0.5), colour: 'tbell', sig: 'toccata', gain: 1.3,
+    stabs: [], pad: ORGAN(0.5), colour: 'tbell', sig: 'toccata', gain: 1.5,
   },
   twin: {
     cls: 'mini', tonic: 62, mode: AEO, lift: [0, 2],
@@ -856,7 +856,11 @@ export class BossScore extends Song {
         const left = f.i % 2 === 0;
         for (const [beat, ch] of [[0, left ? 'bx-left' : 'bx-right'], [0.5, left ? 'bx-left' : 'bx-right'], [2, left ? 'bx-right' : 'bx-left'], [2.5, left ? 'bx-right' : 'bx-left']] as [number, string][]) {
           const c = this.cAt(f, beat);
-          for (const m of [this.tone(c, 50, 0), this.tone(c, 50, 1), this.tone(c, 50, 2)]) b.p.buf('brass', ch, this.T(b, beat, 0.002), m, beat % 1 ? 0.3 : 0.4, 0.4 * b.spb, { release: 0.15 });
+          for (const m of [this.tone(c, 50, 0), this.tone(c, 50, 1), this.tone(c, 50, 2)]) {
+            b.p.buf('brass', ch, this.T(b, beat, 0.002), m, beat % 1 ? 0.3 : 0.4, 0.4 * b.spb, { release: 0.15 });
+            // the second phase: both choirs double at the octave
+            if (ph >= 2) b.p.buf('brass', ch, this.T(b, beat, 0.002), m + 12 <= 77 ? m + 12 : m, beat % 1 ? 0.2 : 0.28, 0.4 * b.spb, { release: 0.15 });
+          }
         }
         break;
       }

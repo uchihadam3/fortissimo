@@ -272,7 +272,7 @@ export class Rhythm {
     const ch = this.ch(pan * 0.7, true);
     if (q === 'miss') {
       // a dull, muted clink (no melody)
-      this.play('tick', this.ch(pan * 0.7), t, 58, 0.5 * PICK, 0.06, { lp: 1800 });
+      this.play('tick', this.ch(pan * 0.7), t, 58, 0.5 * PICK, 0.06, { lp: 1000 });
       this.play('wood', this.ch(pan * 0.7), t, 62, 0.2 * PICK, 0.06, { release: 0.04, lp: 1300, cents: -35 });
       return;
     }
