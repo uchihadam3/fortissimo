@@ -292,6 +292,27 @@ export interface AudioAPI {
   parry(t: number, quality: 'perfect' | 'good', pan: number): void;
   /** The blow landed (not parried): a heavy impact on the colossus. */
   bossBlow(t: number, pan: number, strength: number): void;
+  // ── viradas (v7): the player plays the fill, on marks in the world ─────────────
+  /**
+   * A virada (drum fill) is coming: n marks will be tapped from `start` to `end` (song seconds, both
+   * on the grid; usually the last bar of a phrase). From `start` until `end` the song's own drums
+   * step back (kick/snare/hats ducked or tacet, NOT the rest of the song) so the player's hits are
+   * the fill; at `end` the song comes back with a crash on the downbeat. `level` 0…2 = how big the
+   * virada is (chained viradas grow). Call it ≥ 1 bar before `start`.
+   */
+  viradaCue(start: number, end: number, n: number, level: number): void;
+  /**
+   * The player hit mark i (0…n−1) of the virada at the judged grid time t: one stroke of the fill
+   * (toms/taiko descending + the land's colour, tuned to the chord; perfect brighter), at the level
+   * of the song's drums, never louder. miss = no stroke (a silent gap, maybe a faint muted tick).
+   */
+  viradaHit(i: number, n: number, t: number, quality: 'perfect' | 'good' | 'miss', pan: number): void;
+  /**
+   * The virada ended at t (the downbeat after it). hits = marks hit, n = marks. All hit: a big
+   * crash + a sparkling chord swell with the band for one bar ("VIRADA!"); some: just the crash;
+   * none: the song simply resumes.
+   */
+  viradaEnd(t: number, hits: number, n: number, perfect: boolean): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
    * mood's next beat, in its key (the mood holds its tonic under it).

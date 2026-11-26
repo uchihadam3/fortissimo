@@ -510,6 +510,11 @@ const api: AudioAPI = {
     if (tc !== null) E.rhythm?.bossBlow(tc, num(pan, 0), num(strength, 1));
   }),
 
+  // v7 viradas: no-ops until the audio agent implements them
+  viradaCue: guard('viradaCue', (_start: number, _end: number, _n: number, _level: number) => {}),
+  viradaHit: guard('viradaHit', (_i: number, _n: number, _t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
+  viradaEnd: guard('viradaEnd', (_t: number, _hits: number, _n: number, _perfect: boolean) => {}),
+
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();
   }),
