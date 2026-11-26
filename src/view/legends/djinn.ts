@@ -61,7 +61,7 @@ function sandMat(u: LU, o: { spin: number; seed: number; alpha: number; storm?: 
         float gl = smoothstep(0.86, 0.95, lN(vec3(cos(tw) * 9.0, sin(tw) * 9.0, h * 4.0 - uTime * 5.0)));
         c += vec3(1.0, 0.8, 0.4) * gl * (0.6 + uBeat * 1.5) * (0.5 + uStorm * 2.0);
         c = mix(c, vec3(1.0, 0.3, 0.15), uTell * 0.25 * streak);
-        float A = (0.3 + streak * 0.6 + fine * 0.2) * uAlpha * (0.6 + edge * 0.6) * uAppear;
+        float A = (0.45 + streak * 0.5 + fine * 0.2) * uAlpha * (0.65 + edge * 0.55) * uAppear;
         gl_FragColor = vec4(c, clamp(A, 0.0, 1.0));
       }`,
   });
@@ -276,6 +276,19 @@ export function djinnRig(): Rig {
     whirl.add(m);
     funnels.push(m);
   });
+  // a skirt of dust where the whirlwind scours the ground
+  {
+    const pts: THREE.Vector2[] = [];
+    for (let j = 0; j <= 10; j++) {
+      const q = j / 10;
+      pts.push(new THREE.Vector2(0.3 + q * 2.4, 0.05 + Math.sin(q * Math.PI) * 0.55 * (1 - q * 0.4)));
+    }
+    const skirt = new THREE.Mesh(new THREE.LatheGeometry(pts, 40), sandMat(u, { spin: 2.0, seed: 13, alpha: 0.7 }));
+    mats.push(skirt.material as THREE.Material);
+    skirt.renderOrder = 2;
+    whirl.add(skirt);
+    funnels.push(skirt);
+  }
   // ── the body
   const torsoMesh = new THREE.Mesh(torsoGeo(), skinMat);
   torsoMesh.castShadow = true;
