@@ -58,6 +58,8 @@ class Engine {
   band: BandMix = FULL_BAND;
   /** the player's groove (kept across unlock) */
   groove = 0;
+  /** the player's power 0…1 (kept across unlock; 1 = neutral) */
+  power = 1;
   /** the land of the story (battle songs, ambience, land cues) */
   world: WorldId | null = null;
 
@@ -121,6 +123,7 @@ class Engine {
         this.director = new Director(core, bank, makeTheme);
         this.director.band = this.band;
         this.director.groove = this.groove;
+        this.director.power = this.power;
         this.director.world = this.world;
         this.sfx = new Sfx(core, bank, this.director);
         this.towers = new Towers(core, bank, this.director);
@@ -459,11 +462,23 @@ const api: AudioAPI = {
   echoResult: guard('echoResult', (success: boolean) => {
     if (E.live) E.rhythm?.echoResult(!!success);
   }),
-  // v4 contract: no-ops until the audio agent implements them
-  pickupTap: guard('pickupTap', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number, _run: number) => {}),
-  strike: guard('strike', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
-  setPower: guard('setPower', (_p: number) => {}),
-  powerDrop: guard('powerDrop', (_t: number) => {}),
+  // v4: coins, strikes and the power meter on the beat
+  pickupTap: guard('pickupTap', (t: number, q: 'perfect' | 'good' | 'miss', pan: number, run: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.pickupTap(tc, q === 'perfect' || q === 'miss' ? q : 'good', num(pan, 0), Math.max(0, Math.round(num(run, 0))));
+  }),
+  strike: guard('strike', (t: number, q: 'perfect' | 'good' | 'miss', pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.strike(tc, q === 'perfect' || q === 'miss' ? q : 'good', num(pan, 0));
+  }),
+  setPower: guard('setPower', (p: number) => {
+    E.power = clamp(num(p, 1), 0, 1);
+    E.director?.setPower(E.power);
+  }),
+  powerDrop: guard('powerDrop', (t: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.powerDrop(tc);
+  }),
   // v5 contract (bosses): no-ops until the audio agent implements them
   bossTheme: guard('bossTheme', (_k: EnemyKind | null, _t: number) => {}),
   bossPhase: guard('bossPhase', (_n: number, _t: number) => {}),

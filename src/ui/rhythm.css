@@ -78,7 +78,7 @@
 
 /* the Maestro's call: a little bar of eight eighths above the baton */
 #call {
-  position: absolute; left: 0; bottom: calc(100% + 18px); width: 168px; height: 34px; border-radius: 17px;
+  position: absolute; left: 0; bottom: 166px; /* above the power meter (150px tall), never over it */ width: 168px; height: 34px; border-radius: 17px;
   background: var(--panel); box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .35), 0 6px 16px rgba(0, 0, 0, .35);
   opacity: 0; transform: translateY(8px) scale(.9); transition: opacity .3s, transform .3s; pointer-events: none;
 }
@@ -106,7 +106,7 @@
 @media (max-width: 720px), (max-height: 520px) {
   #baton-wrap { --size: 78px; }
   #baton .glyph { inset: 16px; }
-  #call { width: 148px; height: 30px; bottom: calc(100% + 14px); }
+  #call { width: 148px; height: 30px; bottom: 130px; }
   #call .notes i { top: 6px; width: 18px; height: 18px; margin-left: -9px; }
   #call .track b { top: 13px; }
 }

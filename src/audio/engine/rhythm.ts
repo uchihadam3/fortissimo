@@ -16,7 +16,7 @@ import type { TowerKind, WorldId } from '../../sim/defs';
 import type { Core } from './core';
 import { Fx } from './fx';
 import type { Director } from './music';
-import { BufferBank, Channel, type BufInst, LOWBRASS, oscStack, playBuf } from './synth';
+import { BufferBank, Channel, type BufInst, LOWBRASS, ORGAN, oscStack, playBuf } from './synth';
 import { bassNote, chord, chordTones, type Chord, pcOf } from './theory';
 import { clamp, rand } from './util';
 
@@ -28,7 +28,46 @@ const SOLO: Record<TowerKind, number> = { harp: 0.95, drum: 1, bell: 0.27, shake
 /** the Maestro's call and the player's echo */
 const CALL = 0.5;
 /** level of the baton taps */
-const TAP = 0.3;
+const TAP = 0.36;
+/** level of the coin pickups (v4) */
+const PICK = 0.32;
+/** level of the colossus' strikes (v4) */
+const STRIKE = 0.5;
+
+/** each land's pickup voice (a coin collected on the beat rings a note of the song) */
+interface PickVoice {
+  inst: BufInst | 'organ';
+  /** a second, softer layer an octave up (or the same pitch) */
+  layer: BufInst | null;
+  layerShift: number;
+  lo: number;
+  hi: number;
+  /** the strike's land colour */
+  colour: BufInst;
+  colourLo: number;
+  colourHi: number;
+}
+
+const PICKS: Record<WorldId | 'menu', PickVoice> = {
+  // the meadow: kalimba under a glockenspiel (celesta) an octave up
+  meadow: { inst: 'kalimba', layer: 'celesta', layerShift: 12, lo: 72, hi: 88, colour: 'tamb', colourLo: 60, colourHi: 60 },
+  // the dunes: a santur-like pluck (koto) with the oud an octave down
+  desert: { inst: 'koto', layer: 'oud', layerShift: -12, lo: 69, hi: 86, colour: 'tek', colourLo: 60, colourHi: 60 },
+  // ice: celesta and glass
+  ice: { inst: 'celesta', layer: 'glass', layerShift: 12, lo: 74, hi: 90, colour: 'glass', colourLo: 84, colourHi: 96 },
+  // the forge: anvil-tuned metal, a celesta to make the pitch clear
+  forge: { inst: 'anvil', layer: 'celesta', layerShift: 0, lo: 72, hi: 88, colour: 'anvil', colourLo: 76, colourHi: 88 },
+  // the citadel: an organ pipe and the choir's 'ah'
+  citadel: { inst: 'organ', layer: 'choirx', layerShift: 0, lo: 67, hi: 82, colour: 'tbell', colourLo: 62, colourHi: 74 },
+  menu: { inst: 'kalimba', layer: 'celesta', layerShift: 12, lo: 72, hi: 88, colour: 'tamb', colourLo: 60, colourHi: 60 },
+};
+
+const pingpong = (i: number, n: number): number => {
+  if (n <= 1) return 0;
+  const p = 2 * n - 2;
+  const k = ((i % p) + p) % p;
+  return k < n ? k : p - k;
+};
 
 /** each land's baton: the drum it taps, the click on top, the pitched voice and the sparkle */
 interface Palette {
@@ -67,6 +106,8 @@ export class Rhythm {
   private lastTap = -1;
   private tapRun = 0;
   private lastSolo = -1;
+  private lastDrop = -1e9;
+  private drops: number[] = [];
   /** a trim for everything played (the verdict of the echo plays a little softer) */
   private level = 1;
 
@@ -78,7 +119,7 @@ export class Rhythm {
     this.fx = new Fx(core, bank);
     this.chs = PANS.map((pan) => new Channel(core, core.rhythmBus, core.sfxWet, { pan, wet: 0.12, gain: 1 }));
     this.wetChs = PANS.map((pan) => new Channel(core, core.rhythmBus, core.sfxWet, { pan, wet: 0.35, gain: 1 }));
-    for (const [inst, lo, hi] of [['tdrum', 47, 67], ['rim', 60, 60], ['tek', 60, 60], ['tamb', 60, 60], ['celesta', 72, 98], ['glass', 76, 98], ['clap', 60, 60], ['crash', 60, 60], ['snare', 60, 60], ['tom', 40, 56], ['timp', 40, 53], ['tbass', 40, 64], ['choirx', 55, 80], ['choir', 55, 80], ['brass', 45, 75], ['harp', 48, 96], ['zap', 70, 99], ['tbell', 60, 84], ['shaker', 60, 60], ['anvil', 76, 92], ['boom', 26, 40]] as [BufInst, number, number][]) bank.warm(inst, lo, hi, 4);
+    for (const [inst, lo, hi] of [['tdrum', 47, 67], ['rim', 60, 60], ['tek', 60, 60], ['tamb', 60, 60], ['celesta', 72, 98], ['glass', 76, 98], ['clap', 60, 60], ['crash', 60, 60], ['snare', 60, 60], ['tom', 40, 56], ['timp', 40, 53], ['tbass', 40, 64], ['choirx', 55, 80], ['choir', 55, 80], ['brass', 45, 75], ['harp', 48, 96], ['zap', 70, 99], ['tbell', 60, 84], ['shaker', 60, 60], ['anvil', 72, 92], ['boom', 26, 40], ['kalimba', 72, 91], ['koto', 69, 88], ['oud', 57, 76], ['wood', 50, 62], ['tick', 60, 60], ['choiroo', 48, 66]] as [BufInst, number, number][]) bank.warm(inst, lo, hi, 4);
   }
 
   // ───────────────────────────── helpers ─────────────────────────────
@@ -155,25 +196,25 @@ export class Rhythm {
     const beat = this.beatOf(t);
     const root = this.rootIn(c, P.bodyLo, P.bodyHi);
     if (q === 'miss') {
-      // a soft, muted thud: no pitch to speak of, no sparkle
-      this.play('tom', ch, t, 45, 0.22 * TAP, 0.2, { release: 0.08, lp: 520 });
-      this.play(P.body, ch, t, root - 5, 0.1 * TAP, 0.15, { release: 0.06, lp: 900 });
+      // a dead, muted thunk: no pitch to speak of, no click, no sparkle — unmistakably not a hit
+      this.play('tom', ch, t, 43, 0.3 * TAP, 0.16, { release: 0.05, lp: 420 });
+      this.play('wood', ch, t, 50, 0.3 * TAP, 0.08, { release: 0.04, lp: 1100, cents: -40 });
       return;
     }
     const perfect = q === 'perfect';
     // calibrated: over a full band at intensity 1 a tap on every beat adds ≈ +1.5 LU (it leads the
     // beat, it does not drown the band)
-    const v = (perfect ? 1 : 0.8) * TAP;
+    const v = (perfect ? 1 : 0.92) * TAP;
     const downbeat = beat === 0;
     // the drum: tuned to the chord root, the downbeat a fifth-free octave lower accent
     this.play(P.body, ch, t, downbeat ? root : chordTones(c, root, root + 8)[beat % 2 === 1 ? 1 : 0] ?? root, 0.62 * v * (downbeat ? 1.1 : 1), 0.4, { release: 0.1 });
     this.play('tom', ch, t, Math.max(41, root - 12), 0.18 * v, 0.3, { release: 0.1 });
-    this.play(P.click, ch, t, P.clickMidi + rand(-0.1, 0.1), (perfect ? 0.5 : 0.36) * v, 0.15);
+    this.play(P.click, ch, t, P.clickMidi + rand(-0.1, 0.1), (perfect ? 0.5 : 0.46) * v, 0.15);
     // the pitched voice on a chord tone (walks up the chord with the run)
     const tones = chordTones(c, P.toneLo, P.toneHi);
     if (tones.length) {
       const m = tones[(this.tapRun + (downbeat ? 0 : beat)) % Math.min(tones.length, 4)];
-      this.play(P.tone, this.ch(pan * 0.5, true), t, m, (perfect ? 0.34 : 0.24) * TAP * (P.tone === 'tbell' ? 0.8 : 1), perfect ? 0.9 : 0.5, { release: 0.4, lp: perfect ? undefined : 5000 });
+      this.play(P.tone, this.ch(pan * 0.5, true), t, m, (perfect ? 0.34 : 0.3) * TAP * (P.tone === 'tbell' ? 0.8 : 1), perfect ? 0.9 : 0.5, { release: 0.4, lp: perfect ? undefined : 5000 });
       if (perfect) {
         // the sparkle: two chord tones flicked up an octave above, and a jingle
         const hi = chordTones(c, m + 7, m + 19);
@@ -211,6 +252,121 @@ export class Rhythm {
     this.play('tdrum', dry, tLand, this.rootIn(c, 52, 63), 0.7, 0.4);
     chordTones(c, 55, 70).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.35 : -0.35), tLand, m, 0.3, 0.55 * g.spb, { release: 0.2 }));
     chordTones(c, 62, 76).slice(0, 3).forEach((m, k) => this.play('choirx', this.ch(k - 1, true), tLand + 0.01, m, 0.26, 0.4 * g.spb, { release: 0.15 }));
+  }
+
+
+  // ───────────────────────────── v4: coins, strikes, power ─────────────────────────────
+
+  private get pick(): PickVoice {
+    return PICKS[this.director.world ?? 'menu'] ?? PICKS.menu;
+  }
+
+  /**
+   * A coin collected on the beat rings a note of the song: the run climbs the scale (up an octave
+   * and back), strong beats land on chord tones — collecting in rhythm writes a little melody.
+   */
+  pickupTap(t: number, q: TapQuality, pan: number, run: number): void {
+    const V = this.pick;
+    const ch = this.ch(pan * 0.7, true);
+    if (q === 'miss') {
+      // a dull, muted clink (no melody)
+      this.play('tick', this.ch(pan * 0.7), t, 58, 0.5 * PICK, 0.06, { lp: 1800 });
+      this.play('wood', this.ch(pan * 0.7), t, 62, 0.2 * PICK, 0.06, { release: 0.04, lp: 1300, cents: -35 });
+      return;
+    }
+    const c = this.chordAt(t);
+    const k = this.director.keyAt(t);
+    const beat = this.beatOf(t);
+    const n = k ? k.steps.length : 7;
+    let m: number;
+    if (k) {
+      // the run's degree above the tonic placed in the voice's register
+      let base = k.deg(0);
+      while (base < V.lo) base += 12;
+      while (base > V.lo + 11) base -= 12;
+      const d0 = k.degreeOf(base);
+      m = k.deg(d0 + pingpong(Math.max(0, run), n + 1));
+      if (beat % 2 === 0 || !k.has(m)) m = this.nearestTone(c, m);
+    } else {
+      const tones = chordTones(c, V.lo, V.hi);
+      m = tones[pingpong(Math.max(0, run), tones.length)] ?? V.lo;
+    }
+    while (m > V.hi) m -= 12;
+    const perfect = q === 'perfect';
+    const v = (perfect ? 1 : 0.8) * PICK;
+    const dur = perfect ? 0.8 : 0.5;
+    if (V.inst === 'organ') oscStack(this.core, ch, Math.max(this.core.now, t), m, 0.8 * v * this.level, dur * 0.6, { ...ORGAN(0.7), attack: 0.006, release: 0.25, cat: 'rhythm', cap: 40 });
+    else this.play(V.inst, ch, t, m, (V.inst === 'anvil' ? 0.5 : 0.75) * v, dur, { release: 0.4 });
+    if (V.layer) {
+      const lm = m + V.layerShift;
+      this.play(V.layer, ch, t, lm > 98 ? lm - 12 : lm, (V.layer === 'choirx' ? 0.4 : 0.32) * v, V.layer === 'choirx' ? 0.35 : dur, { release: 0.3 });
+    }
+    if (perfect) {
+      // the sparkle: a glint an octave (and a chord tone) above, and a bright tick of air
+      const hi = chordTones(c, m + 12, m + 19);
+      this.play('glass', this.ch(-pan * 0.5, true), t + 0.03, hi[0] !== undefined && hi[0] <= 98 ? hi[0] : m, 0.22 * v, 0.6, { release: 0.5 });
+      this.fx.burst(ch.input, t, { noise: 'white', type: 'highpass', f: 8000, a: 0.0006, d: 0.03, g: 0.05 * PICK, cat: 'rhythm' });
+    }
+  }
+
+  /** nearest chord tone (prefers below on ties) */
+  private nearestTone(c: Chord, m: number): number {
+    for (let d = 0; d < 12; d++) {
+      if (c.pcs.includes(pcOf(m - d))) return m - d;
+      if (c.pcs.includes(pcOf(m + d))) return m + d;
+    }
+    return m;
+  }
+
+  /**
+   * The colossus strikes a creature on the beat: timpani on the chord root, a short sub thump, the
+   * battle drum's crack for the mids (what a phone speaker plays) and the land's colour; perfect adds
+   * a snare crack and a short cymbal. miss = a thin swish.
+   */
+  strike(t: number, q: TapQuality, pan: number): void {
+    const P = this.pick;
+    if (q === 'miss') {
+      this.fx.burst(this.ch(pan * 0.6).input, t, { noise: 'white', type: 'bandpass', f: 4200, f1: 1100, q: 1.6, a: 0.025, d: 0.12, g: 0.06 * STRIKE, cat: 'rhythm' });
+      return;
+    }
+    const perfect = q === 'perfect';
+    const v = (perfect ? 1 : 0.8) * STRIKE;
+    const c = this.chordAt(t);
+    const low = this.ch(pan * 0.25);
+    const mid = this.ch(pan * 0.5);
+    this.play('timp', low, t, this.rootIn(c, 40, 51), 0.6 * v, 0.9, { release: 0.4 });
+    this.play('boom', low, t, bassNote(c, 28), 0.35 * v, 0.22, { release: 0.08 });
+    this.play('tdrum', mid, t, this.rootIn(c, 52, 63), 1.0 * v, 0.3, { release: 0.1 });
+    this.play('rim', mid, t, 60, 0.45 * v, 0.1);
+    this.play('snare', mid, t, 60, (perfect ? 0.6 : 0.35) * v, 0.2, { release: 0.06 });
+    const col = P.colourLo === P.colourHi ? P.colourLo : chordTones(c, P.colourLo, P.colourHi)[0] ?? P.colourLo;
+    this.play(P.colour, this.ch(pan * 0.6, true), t, col, (P.colour === 'tamb' || P.colour === 'tek' ? 0.5 : 0.3) * v, 0.4, { release: 0.25 });
+    if (perfect) {
+      this.play('clap', mid, t, 60, 0.3 * v, 0.2, { release: 0.06 });
+      this.play('crash', this.ch(-pan * 0.4, true), t, 61, 0.22 * v, 0.7, { release: 0.35 });
+    }
+  }
+
+  /**
+   * "You broke the run": a short, soft downward slide that lands on the chord root (a horn and a
+   * low hum sighing down a fifth, a falling whoosh, a muted thud) while the music sags for a moment.
+   * At most one per ¾ bar; when they come in a row each one is softer.
+   */
+  powerDrop(t: number): void {
+    const g = this.grid();
+    if (t - this.lastDrop < g.barDur * 0.75) return;
+    this.lastDrop = t;
+    this.drops = this.drops.filter((x) => x > t - 4 * g.barDur);
+    this.drops.push(t);
+    const v = Math.pow(0.7, this.drops.length - 1);
+    const c = this.chordAt(t);
+    const root = this.rootIn(c, 55, 66);
+    const ch = this.ch(0, true);
+    this.play('brass', ch, t, root, 0.36 * v, 0.42, { release: 0.25, bend: 700, bendTime: 0.32 });
+    this.play('choiroo', ch, t, root - 12 >= 48 ? root - 12 : root, 0.3 * v, 0.45, { release: 0.3, bend: 700, bendTime: 0.36 });
+    this.fx.burst(ch.input, t, { noise: 'pink', type: 'bandpass', f: 2400, f1: 320, q: 1.1, a: 0.015, d: 0.4, g: 0.07 * v, cat: 'rhythm' });
+    this.play('tom', this.ch(0), t + 0.3, 43, 0.25 * v, 0.2, { release: 0.08, lp: 500 });
+    this.core.duck(0.22 * v, 0.45);
   }
 
   // ───────────────────────────── solos ─────────────────────────────

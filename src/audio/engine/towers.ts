@@ -250,7 +250,7 @@ export class Towers {
 
   private bus(wet: WetClass, pan: number, mul: number): Channel {
     // a lone musician sits near the middle; the full band (harmony 5) spreads wide
-    const width = 0.7 + 0.12 * this.harmony;
+    const width = (0.7 + 0.12 * this.harmony) * (0.85 + 0.2 * this.director.power);
     const p = clamp((Number.isFinite(pan) ? pan : 0) * mul * width, -1, 1);
     const i = clamp(Math.round((p + 1) * 2), 0, 4);
     return this.buses[wet][i];
