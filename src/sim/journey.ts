@@ -20,11 +20,11 @@ import {
 import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng, hashString } from '../core/rng';
-import { RHYTHM, SOLO, ECHO } from './rhythm';
+import { RHYTHM, SOLO, ECHO, CRESCENDO, COIN_VALUE, STRIKE, grooveOf, powerMul, type TapQuality } from './rhythm';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
-export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo';
+export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo' | 'coin' | 'strike';
 export type LandmarkKind = 'bell' | 'chimes' | 'organ' | 'harp' | 'spire';
 
 /** sub-steps per 16th note (fixed integration grid) */
@@ -148,6 +148,8 @@ export interface Enemy {
   mimicKind: TowerKind | null;
   /** the last 16th step a bell tolled on it (bells do not stack) */
   bellStep: number;
+  /** v4: struck by the colossus (a tap on the beat): not again until */
+  struckUntil: number;
   /** guardians: angle around the colossus they stalk at, and whether they charge */
   orbit: number;
   charging: boolean;
@@ -275,7 +277,12 @@ export type SimEvent =
   /** the Maestro's call was echoed right: bonus notes, and a chord waits for the next movement */
   | { t: number; type: 'echoWin'; index: number; coins: number }
   /** the chord blast of a right echo */
-  | { t: number; type: 'chord'; hits: number[] };
+  | { t: number; type: 'chord'; hits: number[] }
+  // ── v4: everything on the beat ──
+  /** the colossus strikes a creature tapped on the beat */
+  | { t: number; type: 'strike'; enemy: Enemy; perfect: boolean; amount: number }
+  /** a movement was played with a high power: a crescendo star (stars = how many now) */
+  | { t: number; type: 'crescendo'; movement: number; stars: number; average: number };
 
 export interface SimStats {
   kills: number;
@@ -301,6 +308,13 @@ export interface SimStats {
   groovePeak: number;
   grooveSum: number;
   walkBars: number;
+  /** v4: power summed over the bars walked (average = powerSum / walkBars), the player's judged taps and hits */
+  powerSum: number;
+  judged: number;
+  hits: number;
+  strikes: number;
+  /** golden notes taken on the beat */
+  onBeatNotes: number;
 }
 
 /** A player input, with the sub-step it happened at. */
@@ -308,12 +322,14 @@ export type SimAction =
   | { sub: number; a: 'build'; slot: number; kind: TowerKind }
   | { sub: number; a: 'upgrade'; slot: number }
   | { sub: number; a: 'sell'; slot: number }
-  | { sub: number; a: 'collect'; id: number }
+  | { sub: number; a: 'collect'; id: number; q?: TapQuality }
   | { sub: number; a: 'ff' }
   | { sub: number; a: 'go' }
   // v3: what the player's rhythm did (judged by the controller, recorded here)
   | { sub: number; a: 'groove'; level: number }
-  | { sub: number; a: 'solo'; slot: number; perfect: boolean }
+  | { sub: number; a: 'solo'; slot: number; perfect: boolean; q?: TapQuality }
+  | { sub: number; a: 'power'; p: number; judged: number; hits: number }
+  | { sub: number; a: 'strike'; id: number; perfect: boolean }
   | { sub: number; a: 'echo' };
 
 /** Where a fallen journey can start again: the beginning of a movement's breather. */
@@ -368,7 +384,7 @@ export class Journey {
   shots: Shot[] = [];
   pickups: Pickup[] = [];
   events: SimEvent[] = [];
-  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0 };
+  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0, powerSum: 0, judged: 0, hits: 0, strikes: 0, onBeatNotes: 0 };
   /** the colossus */
   turtle = { s: 0, x: 0, z: 0, dx: 0, dz: -1 };
   walking = false;
@@ -413,8 +429,15 @@ export class Journey {
   private anyDead = false;
   /** the Silence steals an instrument for a while */
   stolen: { kind: TowerKind; until: number } | null = null;
-  /** v3: the groove the player's baton keeps (0…4) */
-  groove = 0;
+  /** v4: the player's rhythm power (0…100, whole numbers) and its groove level (0…4) */
+  power = 0;
+  get groove(): number {
+    return grooveOf(this.power);
+  }
+  /** crescendo stars earned (movements played with a high power) */
+  crescendo = 0;
+  private mvPower = 0;
+  private mvBars = 0;
   /** a choir's solo lifts the whole band until then */
   soloBuffUntil = 0;
   soloBuffMul = 1;
@@ -656,16 +679,19 @@ export class Journey {
     return true;
   }
 
-  collect(id: number): number {
+  /** a golden note is tapped; `q`, the timing of the tap: on the beat it is worth more, off it half */
+  collect(id: number, q?: TapQuality): number {
     const p = this.pickups.find((x) => x.id === id);
     if (!p || p.taken || p.lost || this.outcome !== 'playing') return 0;
     p.taken = true;
-    this.coins += p.value;
-    this.stats.earned += p.value;
+    const v = q ? Math.max(1, Math.round(p.value * COIN_VALUE[q])) : p.value;
+    this.coins += v;
+    this.stats.earned += v;
     this.stats.collected++;
-    this.log.push({ sub: this.sub, a: 'collect', id });
+    if (q && q !== 'miss') this.stats.onBeatNotes++;
+    this.log.push(q ? { sub: this.sub, a: 'collect', id, q } : { sub: this.sub, a: 'collect', id });
     this.emit({ t: this.time, type: 'collect', pickup: p });
-    return p.value;
+    return v;
   }
 
   ffReady(): boolean {
@@ -701,16 +727,21 @@ export class Journey {
         return !!t && this.sell(t) > 0;
       }
       case 'collect':
-        return this.collect(a.id) > 0;
+        return this.collect(a.id, a.q) > 0;
       case 'ff':
         return !!this.unleash();
       case 'go':
         return this.begin();
       case 'groove':
-        return this.setGroove(a.level);
+        // (v3 checkpoints: a groove level is the power at its threshold)
+        return this.setPower(a.level > 0 ? RHYTHM.thresholds[Math.min(4, a.level) - 1] : 0, this.stats.judged, this.stats.hits);
+      case 'power':
+        return this.setPower(a.p, a.judged, a.hits);
+      case 'strike':
+        return this.strike(a.id, a.perfect) > 0;
       case 'solo': {
         const t = this.towerAt(a.slot);
-        return !!t && this.solo(t, a.perfect) !== null;
+        return !!t && this.solo(t, a.q ?? (a.perfect ? 'perfect' : 'good')) !== null;
       }
       case 'echo':
         return this.echo() > 0;
@@ -719,14 +750,46 @@ export class Journey {
 
   // ───────────────────────────── the player's rhythm (v3) ─────────────────────────────
 
-  /** The groove the baton keeps changed (judged by the controller). */
-  setGroove(level: number): boolean {
-    const l = Math.max(0, Math.min(RHYTHM.maxGroove, Math.round(level)));
-    if (l === this.groove || this.outcome !== 'playing') return false;
-    this.groove = l;
-    this.stats.groovePeak = Math.max(this.stats.groovePeak, l);
-    this.log.push({ sub: this.sub, a: 'groove', level: l });
+  /**
+   * The player's rhythm power changed, and the tally of judged taps (all judged by the controller).
+   * Power is kept in whole numbers so a journey only records what matters.
+   */
+  setPower(power: number, judged: number, hits: number): boolean {
+    const p = Math.max(0, Math.min(100, Math.round(power)));
+    if (this.outcome !== 'playing' || (p === this.power && judged === this.stats.judged && hits === this.stats.hits)) return false;
+    this.power = p;
+    this.stats.judged = Math.max(0, judged | 0);
+    this.stats.hits = Math.max(0, Math.min(this.stats.judged, hits | 0));
+    this.stats.groovePeak = Math.max(this.stats.groovePeak, this.groove);
+    this.log.push({ sub: this.sub, a: 'power', p, judged: this.stats.judged, hits: this.stats.hits });
     return true;
+  }
+
+  /** a creature tapped on the beat: the colossus strikes it (returns the damage dealt; 0: it cannot) */
+  strike(id: number, perfect: boolean): number {
+    const e = this.enemyById(id);
+    if (!e || !e.alive || e.burrowed || this.outcome !== 'playing' || e.struckUntil > this.time + 1e-9) return 0;
+    const T = this.turtle;
+    const d = Math.hypot(e.x - T.x, e.z - T.z);
+    if (d > STRIKE.reach) return 0;
+    e.struckUntil = this.time + STRIKE.cooldownBars * this.barDur;
+    const base = e.def.boss ? 60 + e.maxHp * STRIKE.bossShare : STRIKE.flat + e.maxHp * STRIKE.share;
+    const amount = base * (perfect ? STRIKE.perfect : 1) * (1 + this.power / 100);
+    if (!e.def.boss && !e.structure) {
+      e.kx += ((e.x - T.x) / (d || 1)) * STRIKE.push;
+      e.kz += ((e.z - T.z) / (d || 1)) * STRIKE.push;
+    }
+    this.stats.strikes++;
+    this.log.push({ sub: this.sub, a: 'strike', id, perfect });
+    this.emit({ t: this.time, type: 'strike', enemy: e, perfect, amount });
+    const hp = e.hp + e.shield;
+    this.damage(e, amount, 'bass', null, this.time);
+    return Math.max(1e-6, hp - Math.max(0, e.hp) - Math.max(0, e.shield));
+  }
+
+  /** can this creature be struck now? */
+  canStrike(e: Enemy): boolean {
+    return e.alive && !e.burrowed && e.struckUntil <= this.time + 1e-9 && Math.hypot(e.x - this.turtle.x, e.z - this.turtle.z) <= STRIKE.reach;
   }
 
   canSolo(t: Tower): boolean {
@@ -737,15 +800,17 @@ export class Journey {
    * A charged musician tapped on the beat: its solo starts on the next beat and lasts one bar.
    * Returns [start, end] in sim time (null: it cannot solo now).
    */
-  solo(t: Tower, perfect: boolean): [number, number] | null {
+  solo(t: Tower, q: TapQuality | boolean): [number, number] | null {
     if (!this.canSolo(t)) return null;
+    const qq: TapQuality = q === true ? 'perfect' : q === false ? 'good' : q;
+    const perfect = qq === 'perfect';
     const from = Math.ceil(this.step / 4) * 4;
     t.solo = 0;
     t.soloFrom = from;
-    t.soloQ = perfect ? SOLO.perfect : 1;
+    t.soloQ = SOLO[qq];
     this.stats.solos++;
     if (perfect) this.stats.perfectSolos++;
-    this.log.push({ sub: this.sub, a: 'solo', slot: t.slot, perfect });
+    this.log.push({ sub: this.sub, a: 'solo', slot: t.slot, perfect, q: qq });
     const start = this.stepTime(from), end = this.stepTime(from + SOLO.steps);
     this.emit({ t: start, type: 'solo', tower: t, perfect, until: end });
     return [start, end];
@@ -1239,9 +1304,12 @@ export class Journey {
       }
       if (this.walking) {
         this.stats.grooveSum += this.groove;
+        this.stats.powerSum += this.power;
         this.stats.walkBars++;
-        // every playing musician charges its solo a little each bar (more with a good groove)
-        const g = SOLO.perBar * (1 + SOLO.grooveCharge * this.groove);
+        this.mvPower += this.power;
+        this.mvBars++;
+        // every playing musician charges its solo a little each bar (much more with a high power)
+        const g = SOLO.perBar * (1 + (SOLO.powerCharge * this.power) / 100);
         for (const tw of this.towers) if (!tw.muted) this.chargeSolo(tw, g, t);
       }
       this.chordCheck(jb, t);
@@ -1287,6 +1355,7 @@ export class Journey {
   /** a breather begins: calm before movement k, and one more plate of the shell lights up */
   private breather(k: number, t: number) {
     const m = this.movements[k];
+    this.judgeMovement(k - 1, t);
     this.movement = k;
     this.emit({ t, type: 'breather', index: k, bars: m.rest });
     const n = m.plates ?? 1;
@@ -1322,7 +1391,7 @@ export class Journey {
       armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? VIRTUOSO.speed : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
       revealedUntil: 0, alive: true, leaked: false, spawnT: t, burrowed: false, invulnUntil: 0, phase: 0, hitT: -1, wave,
       structure: kind === 'obelisk', kx: 0, kz: 0, lives: def.lives + (elite ? 1 : 0), bounty: Math.round(def.bounty * (elite ? 3 : echoed ? 0.5 : 1)),
-      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1,
+      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1, struckUntil: 0,
     };
     if (def.boss) {
       const T = this.turtle;
@@ -1500,7 +1569,7 @@ export class Journey {
   }
 
   private towerMul(tw: Tower, t: number): number {
-    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1) * (1 + RHYTHM.grooveDamage[this.groove]) * (t < this.soloBuffUntil ? this.soloBuffMul : 1);
+    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1) * powerMul(this.power) * (1 + CRESCENDO.damage * this.crescendo) * (t < this.soloBuffUntil ? this.soloBuffMul : 1);
   }
 
   private towerStep(tw: Tower, k: number, t: number) {
@@ -1792,9 +1861,9 @@ export class Journey {
     if (tw) {
       tw.damage += dealt + shielded;
       this.stats.damageByKind[tw.kind] = (this.stats.damageByKind[tw.kind] ?? 0) + dealt + shielded;
-      if (!e.structure) this.chargeSolo(tw, (dealt + shielded) / this.soloNeed(tw), t);
+      if (!e.structure) this.chargeSolo(tw, ((dealt + shielded) / this.soloNeed(tw)) * (1 + this.power / 100), t);
     }
-    if (this.ffDropT === null && !e.structure) this.ff = Math.min(1, this.ff + ((dealt + shielded) / this.ffNeed) * (1 + RHYTHM.grooveFF * this.groove));
+    if (this.ffDropT === null && !e.structure) this.ff = Math.min(1, this.ff + ((dealt + shielded) / this.ffNeed) * (1 + (RHYTHM.powerFF * this.power) / 100));
     this.emit({ t, type: 'damage', enemy: e, amount: dealt, shielded, hp: Math.max(0, e.hp) / e.maxHp, shield: s && s.maxShield > 0 ? s.shield / s.maxShield : 0, shieldOwner: s ? s.id : 0 });
     if (e.def.boss) this.bossDamaged(e, t);
     if (e.hp <= 0.0001) this.kill(e, t, tw);
@@ -1986,9 +2055,25 @@ export class Journey {
 
   // ───────────────────────────── end ─────────────────────────────
 
+  /** a movement ends: played at a high average power, it earns a crescendo star */
+  private judgeMovement(k: number, t: number) {
+    const avg = this.mvBars ? this.mvPower / this.mvBars : 0;
+    this.mvPower = 0;
+    this.mvBars = 0;
+    if (avg < CRESCENDO.average) return;
+    this.crescendo++;
+    this.emit({ t, type: 'crescendo', movement: k, stars: this.crescendo, average: avg });
+  }
+
+  /** hits / judged taps of the player (0 before any) */
+  get accuracy(): number {
+    return this.stats.judged ? this.stats.hits / this.stats.judged : 0;
+  }
+
   private checkEnd(t: number) {
     if (this.outcome !== 'playing' || this.mode === 'endless') return;
     if (!this.arrived) return;
+    this.judgeMovement(this.movements.length - 1, t);
     // arrival: the landmark rings and the Silence around it scatters
     for (const e of this.enemies) {
       if (e.alive) {
@@ -2002,10 +2087,12 @@ export class Journey {
     this.emit({ t, type: 'victory' });
   }
 
+  /** ★ by the lives kept; the third also asks for the rhythm: a good accuracy, about a tap per bar */
   stars(): number {
     if (this.outcome !== 'victory') return 0;
     const lost = this.maxLives - this.lives;
-    if (lost <= Math.floor(this.maxLives * 0.1)) return 3;
+    const rhythm = this.accuracy >= CRESCENDO.accuracy && this.stats.judged >= this.stats.walkBars;
+    if (lost <= Math.floor(this.maxLives * 0.1)) return rhythm ? 3 : 2;
     if (lost <= Math.floor(this.maxLives * 0.5)) return 2;
     return 1;
   }
@@ -2015,7 +2102,7 @@ export class Journey {
     const r = (v: number) => Math.round(v * 1e6) / 1e6;
     const en = this.enemies.filter((e) => e.alive).map((e) => `${e.id}:${e.kind}:${r(e.x)},${r(e.z)}:${r(e.hp)}`).join('|');
     const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}:${r(t.solo)}${t.soloFrom >= 0 ? 's' : ''}`).join('|');
-    return `g${this.groove} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
+    return `pw${this.power} cr${this.crescendo} st${this.stats.strikes} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
   }
 
   private dist2(a: { x: number; z: number }, b: { x: number; z: number }) {

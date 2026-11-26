@@ -110,3 +110,101 @@
   #call .notes i { top: 6px; width: 18px; height: 18px; margin-left: -9px; }
   #call .track b { top: 13px; }
 }
+
+/* ───────── v4: the power meter, the verdict of every tap, the rhythm of the journey ───────── */
+
+/* the perfect window: the closing ring turns gold right on the beat */
+#baton-wrap.now .approach:not(.off) { border-color: #ffd36b; box-shadow: 0 0 18px rgba(255, 211, 107, .95); }
+
+#power {
+  --pc: #ffd36b;
+  position: absolute; left: calc(100% + 12px); bottom: 0; height: 150px; display: flex; gap: 8px; align-items: flex-end; pointer-events: none;
+}
+#power.g0 { --pc: #ff8a5a; }
+#power.g1 { --pc: #ffd36b; }
+#power.g2 { --pc: #ffb347; }
+#power.g3 { --pc: #ff7ab8; }
+#power.g4 { --pc: #9fe8ff; }
+#power .bar {
+  position: relative; width: 22px; height: 100%; border-radius: 11px; overflow: hidden;
+  background: rgba(20, 14, 36, .78); box-shadow: inset 0 0 0 2px rgba(255, 247, 230, .25), 0 6px 16px rgba(0, 0, 0, .4);
+}
+#power .fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+  background: linear-gradient(to top, #ff7a4a 0, #ffd36b 45px, #ffb347 70px, #ff7ab8 110px, #9fe8ff 150px);
+  background-size: 100% 150px; background-position: bottom; background-repeat: no-repeat;
+  box-shadow: 0 0 14px var(--pc); transition: height .12s ease-out;
+}
+#power .bar i { position: absolute; left: 3px; right: 3px; height: 2px; margin-bottom: -1px; background: rgba(255, 255, 255, .55); border-radius: 1px; }
+#power .side { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+#power .mult {
+  font-family: var(--round, inherit); font-weight: 900; font-size: 26px; line-height: 1; color: var(--pc);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, .6), 0 0 12px var(--pc); font-variant-numeric: tabular-nums;
+}
+#power .combo {
+  font-weight: 900; font-size: 40px; line-height: 1; color: #fff7e6; text-shadow: 0 3px 0 rgba(0, 0, 0, .55), 0 0 14px rgba(255, 233, 168, .7);
+  font-variant-numeric: tabular-nums; transform-origin: 20% 80%;
+}
+#power .combo.zero { opacity: .35; }
+#power .combo.pop { animation: combopop .28s ease-out; }
+@keyframes combopop { 0% { transform: scale(1.45); color: var(--pc); } 100% { transform: scale(1); } }
+#power .cresc { display: flex; gap: 2px; margin-top: 4px; }
+#power .cresc i { width: 16px; height: 16px; display: block; color: rgba(255, 247, 230, .2); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .6)); }
+#power .cresc i svg { width: 100%; height: 100%; display: block; }
+#power .cresc i.on { color: #ffd36b; filter: drop-shadow(0 0 6px #ffd36b); }
+#power .cresc i.pop { animation: crescpop .9s cubic-bezier(.2, 1.8, .4, 1); }
+@keyframes crescpop { 0% { transform: scale(3); } 100% { transform: scale(1); } }
+#power.miss .bar { animation: powermiss .45s ease; }
+#power.miss .combo { animation: hitmiss .4s ease; color: #ff5a6a; }
+@keyframes powermiss {
+  0% { box-shadow: inset 0 0 0 3px #ff5a6a, 0 0 26px 6px rgba(255, 70, 90, .9); transform: translateX(0); }
+  20% { transform: translateX(-5px); } 45% { transform: translateX(5px); } 70% { transform: translateX(-3px); }
+  100% { box-shadow: inset 0 0 0 2px rgba(255, 247, 230, .25), 0 6px 16px rgba(0, 0, 0, .4); transform: none; }
+}
+#power.cresc .bar { animation: powercresc 1s ease-out; }
+@keyframes powercresc { 0% { box-shadow: 0 0 40px 12px #ffd36b; } 100% { box-shadow: 0 6px 16px rgba(0, 0, 0, .4); } }
+
+/* the verdict where the finger was */
+#floats .judge {
+  position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; pointer-events: none;
+  animation: judge .7s ease-out forwards;
+}
+#floats .judge svg { width: 100%; height: 100%; display: block; }
+#floats .judge.perfect { color: #ffd36b; filter: drop-shadow(0 0 10px #ffd36b) drop-shadow(0 2px 2px rgba(0, 0, 0, .5)); }
+#floats .judge.good { color: #f2f7ff; width: 36px; height: 36px; margin: -18px 0 0 -18px; filter: drop-shadow(0 0 6px #cfe8ff) drop-shadow(0 2px 2px rgba(0, 0, 0, .5)); }
+#floats .judge.miss { color: #ff4a5e; width: 40px; height: 40px; margin: -20px 0 0 -20px; filter: drop-shadow(0 0 10px rgba(255, 60, 80, .9)); animation: judgemiss .7s ease-out forwards; }
+#floats .judge b { position: absolute; left: 100%; top: -4px; font-weight: 900; font-size: 20px; color: #fff7e6; text-shadow: 0 2px 0 rgba(0, 0, 0, .6); }
+@keyframes judge { 0% { transform: scale(.4); opacity: 1; } 25% { transform: scale(1.25); } 100% { transform: translateY(-46px) scale(1); opacity: 0; } }
+@keyframes judgemiss { 0% { transform: scale(1.6) rotate(-20deg); opacity: 1; } 30% { transform: scale(1) rotate(8deg); } 100% { transform: translateY(18px) scale(.9); opacity: 0; } }
+
+/* a musician at the top level: its crown instead of a useless upgrade button */
+#radial .rb-crown { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; color: #ffd36b; filter: drop-shadow(0 0 10px rgba(255, 211, 107, .9)); pointer-events: none; }
+#radial .rb-crown svg { width: 100%; height: 100%; display: block; }
+
+/* the end of a journey: the accuracy %, the longest combo, the crescendo stars */
+#rhythm-sum {
+  position: absolute; left: 50%; top: 24%; transform: translate(-50%, -20px) scale(.9); opacity: 0; transition: opacity .5s, transform .6s cubic-bezier(.2, 1.5, .4, 1);
+  display: flex; gap: 18px; align-items: center; padding: 12px 22px; border-radius: 22px; background: rgba(20, 14, 36, .82);
+  box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .5), 0 12px 30px rgba(0, 0, 0, .5); pointer-events: none;
+}
+#rhythm-sum.on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+#rhythm-sum > div { display: flex; align-items: center; gap: 6px; }
+#rhythm-sum .ico { width: 34px; height: 34px; display: block; color: #fff2c2; }
+#rhythm-sum .ico svg { width: 100%; height: 100%; display: block; }
+#rhythm-sum b { font-weight: 900; font-size: 34px; color: #fff7e6; font-variant-numeric: tabular-nums; }
+#rhythm-sum.great .acc b { color: #ffd36b; text-shadow: 0 0 14px #ffd36b; }
+#rhythm-sum .cresc { gap: 3px; }
+#rhythm-sum .cresc i { width: 22px; height: 22px; display: block; color: rgba(255, 247, 230, .2); }
+#rhythm-sum .cresc i svg { width: 100%; height: 100%; display: block; }
+#rhythm-sum .cresc i.on { color: #ffd36b; filter: drop-shadow(0 0 6px #ffd36b); }
+
+@media (max-width: 720px), (max-height: 520px) {
+  #power { height: 118px; left: calc(100% + 10px); gap: 6px; }
+  #power .bar { width: 18px; }
+  #power .fill { background-size: 100% 118px; background-image: linear-gradient(to top, #ff7a4a 0, #ffd36b 35px, #ffb347 55px, #ff7ab8 86px, #9fe8ff 118px); }
+  #power .mult { font-size: 21px; }
+  #power .combo { font-size: 32px; }
+  #power .cresc i { width: 13px; height: 13px; }
+  #rhythm-sum { gap: 12px; padding: 10px 16px; }
+  #rhythm-sum b { font-size: 26px; }
+}

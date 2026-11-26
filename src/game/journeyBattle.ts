@@ -16,7 +16,11 @@
  * which is the view clock (what you hear), so a tap right on a beat you hear is a perfect one,
  * whatever the device's output latency. The tap itself sounds on the grid point it was judged
  * against (the audio engine's request), so the player's percussion always lands in the music. Only what comes of the taps reaches the simulation, as recorded actions
- * (`setGroove`, `solo`, `echo`), so replays and checkpoints stay exact.
+ * (`setPower`, `solo`, `collect`, `strike`, `echo`), so replays and checkpoints stay exact.
+ *
+ * v4, everything on the beat: the baton (or any empty spot of the screen), the golden notes, the
+ * creatures (the colossus strikes them), the glowing musicians (always their solo: weaker off the
+ * beat) and the Maestro's echo all go through one judge and feed one power meter.
  */
 import * as THREE from 'three';
 import { audio } from './sound';
@@ -29,7 +33,8 @@ import { Hud } from '../ui/hud';
 import type { BandMix, SongClock } from '../audio/api';
 import { JourneyTutorial } from './journeyTutorial';
 import { ICON } from '../ui/icons';
-import { Groove, RHYTHM, callBars, callPattern, nearestGrid, quality, type TapQuality } from '../sim/rhythm';
+import { Power, RHYTHM, CRESCENDO, callBars, callPattern, grooveOf, powerMul, quality, type TapQuality, type TapTarget } from '../sim/rhythm';
+import type { Enemy } from '../sim/journey';
 import { TowerView } from '../view/towers';
 import type { Tower } from '../sim/journey';
 
@@ -51,6 +56,15 @@ export interface BattleResult {
   /** the movement it reached (0-based) and how many there are */
   movement?: number;
   movements?: number;
+  /**
+   * v4: the rhythm — hits / judged taps (0…1), how many taps were judged, the longest combo and the
+   * crescendo stars earned (of `movements`). INTEGRATION: the results screen can show the accuracy %
+   * (the battle HUD already shows it over the celebration).
+   */
+  accuracy?: number;
+  judged?: number;
+  bestCombo?: number;
+  crescendo?: number;
 }
 
 export interface BattleOptions {
@@ -133,8 +147,12 @@ export class JourneyBattle {
   private bannered = new Set<EnemyKind>();
   /** started from a checkpoint */
   readonly resumed: boolean;
-  /** v3: the player's groove (the baton), the Maestro's calls, the solo glows */
-  readonly groove: Groove;
+  /** v4: the player's power meter (fed by every judged tap), the Maestro's calls, the solo glows */
+  readonly power: Power;
+  /** consecutive golden notes taken on the beat (their melody climbs) */
+  private noteRun = 0;
+  private lastAudioPower = -1;
+  private lastGrooveLevel = 0;
   private calls: Call[] = [];
   private glows = new Map<number, Glow>();
   private soloEnds = new Map<number, number>();
@@ -179,16 +197,22 @@ export class JourneyBattle {
     audio.setBand(bandMix(this.sim.band));
     this.hud.setHarmony(this.sim.band.harmony);
     this.view.setDuets(this.sim.band.duets);
-    // the baton: the groove carries over from a checkpoint
-    this.groove = new Groove(this.sim.groove);
-    audio.setGroove(this.sim.groove);
-    this.hud.setGroove(this.groove.level, this.groove.progress);
-    TowerView.groove = this.groove.level;
-    // with a groove, the colossus stomps harder
+    // the power carries over from a checkpoint
+    this.power = new Power(this.sim.power);
+    this.power.perfects = this.sim.stats.hits;
+    this.power.misses = this.sim.stats.judged - this.sim.stats.hits;
+    this.power.floor = CRESCENDO.floor * this.sim.crescendo;
+    this.lastGrooveLevel = this.power.level;
+    audio.setGroove(this.power.level);
+    this.sendPower();
+    this.hud.setGroove(this.power.level, 0);
+    this.hud.setPower(this.power.power, 0, powerMul(this.power.power), this.sim.crescendo, this.sim.movements.length);
+    TowerView.groove = this.power.power / 25;
+    // with power, the colossus stomps harder
     const step = this.view.turtle.onStep;
     this.view.turtle.onStep = (pos, front) => {
       step(pos, front);
-      const g = this.groove.level;
+      const g = this.power.level;
       if (g <= 0) return;
       this.view.fx.dust(pos.clone().setY(pos.y + 0.2), this.view.look.land.dirt, 4 * g);
       this.view.shake((front ? 0.025 : 0.015) * g);
@@ -331,29 +355,47 @@ export class JourneyBattle {
     if (this.paused || this.ended || this.cardOpen) return;
     const ndcX = (x / window.innerWidth) * 2 - 1, ndcY = -(y / window.innerHeight) * 2 + 1;
     const p = this.view.pick(ndcX, ndcY);
-    if (!p) {
-      if (this.sel) {
-        this.deselect();
-        audio.uiBack();
-      }
+    if (p) {
+      this.pick(p, ts, x, y);
       return;
     }
-    this.pick(p, ts);
+    // a creature under the finger: the colossus strikes it (on the beat)
+    const foe = this.creatureAt(x, y);
+    if (foe) {
+      this.strikeTap(foe, ts, x, y);
+      return;
+    }
+    // empty ground: a menu closes; otherwise it is the baton
+    if (this.sel) {
+      this.deselect();
+      audio.uiBack();
+      return;
+    }
+    this.baton(ts, x, y);
   }
 
-  pick(p: Pick, ts?: number) {
-    if (p.type === 'pickup') {
-      const v = this.sim.collect(p.id);
-      if (v > 0) {
-        const pv = this.view.pickups.get(p.id);
-        if (pv) {
-          const s = this.view.screen(pv.group.position.clone().setY(pv.group.position.y + 2));
-          this.hud.flyCoins(s.x, s.y, Math.min(6, Math.ceil(v / 3)));
-          this.hud.floatNum(s.x, s.y - 30, `+${v}`);
-        }
-        audio.coin(audio.now(), 0, v);
-        this.tutorial?.notify('pickup');
+  /** the living creature drawn nearest to a screen point (within a finger's reach) */
+  private creatureAt(x: number, y: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bd = Math.max(44, Math.min(window.innerWidth, window.innerHeight) * 0.07);
+    for (const e of this.sim.enemies) {
+      if (!e.alive || e.burrowed) continue;
+      const v = this.view.enemies.get(e.id);
+      if (!v || !v.visibleNow || v.goneAt !== null) continue;
+      const s = this.view.screen(v.pos.clone().setY(v.pos.y + 1.2 * (e.def.boss ? 2.5 : 1)));
+      if (s.behind) continue;
+      const d = Math.hypot(s.x - x, s.y - y) - (e.def.boss ? 40 : 0);
+      if (d < bd) {
+        bd = d;
+        best = e;
       }
+    }
+    return best;
+  }
+
+  pick(p: Pick, ts?: number, x?: number, y?: number) {
+    if (p.type === 'pickup') {
+      this.noteTap(p.id, ts, x, y);
       return;
     }
     if (p.type === 'slot') {
@@ -364,8 +406,8 @@ export class JourneyBattle {
         return;
       }
       const tid = this.view.towerOnSlot(p.id);
-      // a glowing musician tapped on the beat plays its solo (off the beat: its menu, as always)
-      if (tid !== null && this.trySolo(tid, ts)) return;
+      // a glowing musician ALWAYS plays its solo (on the beat at full strength); otherwise its menu
+      if (tid !== null && this.trySolo(tid, ts, x, y)) return;
       if (tid !== null) this.selectTower(p.id, tid);
       else this.selectSlot(p.id);
     }
@@ -498,7 +540,7 @@ export class JourneyBattle {
     this.consume(this.sim.drain());
   }
 
-  // ───────────────────────────── the baton (v3) ─────────────────────────────
+  // ───────────────────────────── everything on the beat (v3–v4) ─────────────────────────────
 
   /** what the player is hearing at a tap (song seconds on the view clock), from the event's time stamp */
   heardAt(ts?: number): number {
@@ -515,27 +557,95 @@ export class JourneyBattle {
     return Math.max(this.ctx(gridT), audio.now() - 0.05);
   }
 
-  /** a tap of the baton (pointerdown or Space/J) */
-  baton(ts?: number) {
+  /**
+   * One judged tap (whatever it hit): the meter and the combo move, the verdict bursts where the
+   * finger was (✦ perfect, ✓ good, ✕ miss), a miss flashes the meter red and costs a sting.
+   */
+  private judged(q: TapQuality, gridT: number, x?: number, y?: number) {
+    const b = x === undefined || y === undefined ? this.hud.batonCenter() : { x, y };
+    if (b) this.hud.judgeAt(b.x, b.y, q, this.power.combo);
+    if (q === 'miss') {
+      audio.powerDrop(this.soundAt(gridT, q));
+      this.hud.powerMiss();
+    }
+    this.tapFeedback(q);
+    this.syncPower();
+  }
+
+  /** a tap of the baton (its button, Space/J, or an empty spot of the screen) */
+  baton(ts?: number, x?: number, y?: number) {
     if (this.paused || this.ended || this.cardOpen || this.disposed) return;
     const heard = this.heardAt(ts);
     this.tutorial?.notify('baton');
     const c = this.echoCall(heard);
     if (c) {
-      this.echoTap(c, heard);
+      this.echoTap(c, heard, x, y);
       return;
     }
-    const r = this.groove.tap(heard, this.sim.spb);
-    audio.beatTap(this.soundAt(r.at, r.q), r.q, -0.35);
-    this.tapFeedback(r.q);
-    this.syncGroove();
+    const r = this.power.tap(heard, this.sim.spb, 'baton');
+    audio.beatTap(this.soundAt(r.at, r.q), r.q, x === undefined ? -0.35 : (x / window.innerWidth) * 1.4 - 0.7);
+    this.judged(r.q, r.at, x, y);
   }
 
-  /** what the world does on a judged tap: sparks on the baton and the shell, a punch on a perfect */
+  /** a golden note tapped: on the beat it is worth more and its melody climbs; off the beat, half */
+  private noteTap(id: number, ts?: number, x?: number, y?: number) {
+    const pk = this.sim.pickups.find((p) => p.id === id);
+    if (!pk || pk.taken || pk.lost) return;
+    const heard = this.heardAt(ts);
+    const r = this.power.tap(heard, this.sim.spb, 'coin');
+    const v = this.sim.collect(id, r.q);
+    if (v <= 0) return;
+    this.noteRun = r.q === 'miss' ? 0 : this.noteRun + 1;
+    const pan = this.view.pan(pk.x, pk.z);
+    audio.pickupTap(this.soundAt(r.at, r.q), r.q, pan, Math.max(0, this.noteRun - 1));
+    const pv = this.view.pickups.get(id);
+    const s = pv ? this.view.screen(pv.group.position.clone().setY(pv.group.position.y + 2)) : { x: x ?? 0, y: y ?? 0 };
+    this.hud.flyCoins(s.x, s.y, Math.min(6, Math.ceil(v / 3)));
+    this.hud.floatNum(s.x, s.y - 30, `+${v}`);
+    this.judged(r.q, r.at, x ?? s.x, y ?? s.y);
+    this.tutorial?.notify('pickup');
+    if (r.q !== 'miss') this.tutorial?.notify('coinBeat');
+    this.consume(this.sim.drain());
+  }
+
+  /** a creature tapped: on the beat the colossus strikes it; off the beat, a swish */
+  private strikeTap(e: Enemy, ts?: number, x?: number, y?: number) {
+    if (this.paused || this.ended || this.cardOpen) return;
+    const heard = this.heardAt(ts);
+    const r = this.power.tap(heard, this.sim.spb, 'creature');
+    const pan = this.view.pan(e.x, e.z);
+    audio.strike(this.soundAt(r.at, r.q), r.q, pan);
+    if (r.q !== 'miss' && this.sim.strike(e.id, r.q === 'perfect') > 0) {
+      this.tutorial?.notify('strike');
+      this.consume(this.sim.drain());
+    }
+    this.judged(r.q, r.at, x, y);
+  }
+
+  /** the colossus strikes: a bolt of light from the Heart, a ring of force where it lands */
+  private strikeFx(e: Enemy, perfect: boolean) {
+    const v = this.view;
+    const ev = v.enemies.get(e.id);
+    const heart = v.turtle.heartWorld(new THREE.Vector3());
+    const to = ev ? ev.pos.clone().setY(ev.pos.y + 1.2) : new THREE.Vector3(e.x, v.land.heightAt(e.x, e.z) + 1.2, e.z);
+    const col = perfect ? '#ffe9a8' : '#fff7e6';
+    v.fx.lightning([heart.clone().setY(heart.y + 0.5), heart.clone().lerp(to, 0.5).setY(Math.max(heart.y, to.y) + 3), to], col);
+    v.fx.ring(new THREE.Vector3(to.x, v.land.heightAt(to.x, to.z) + 0.2, to.z), perfect ? 4 : 3, '#ffd36b', 0.4, 0.12);
+    v.fx.burst(to, col, perfect ? 30 : 18, 4, 0.22, 0.6);
+    v.fx.flash(to, perfect ? 2.2 : 1.6, '#ffe9a8', 0.25);
+    ev?.hit();
+    v.shake(perfect ? 0.22 : 0.12);
+    v.turtle.rear = Math.max(v.turtle.rear, 0.3);
+  }
+
+  /** what the world does on a judged tap: sparks on the shell, every musician answers, a punch on a perfect */
   private tapFeedback(q: TapQuality) {
-    const g = this.groove.level;
+    const g = this.power.level;
     this.hud.batonHit(q, g);
-    if (q === 'miss') return;
+    if (q === 'miss') {
+      this.view.shake(0.06);
+      return;
+    }
     const v = this.view;
     const heart = v.turtle.heartWorld(new THREE.Vector3());
     const col = GROOVE_COLOR[g];
@@ -550,21 +660,35 @@ export class JourneyBattle {
     }
   }
 
-  /** the groove the baton keeps → the simulation (recorded), the music, the HUD */
-  private syncGroove() {
-    const l = this.groove.level;
-    const prev = this.sim.groove;
-    if (l !== prev) {
-      this.sim.setGroove(l);
+  /** the music grows with the power (and the crescendo stars) */
+  private sendPower(force = false) {
+    const p = Math.max(0, Math.min(1, this.power.power / 100 + 0.04 * this.sim.crescendo));
+    if (!force && Math.abs(p - this.lastAudioPower) < 0.005) return;
+    this.lastAudioPower = p;
+    audio.setPower(p);
+  }
+
+  /** the power → the simulation (recorded), the music, the HUD, the musicians */
+  private syncPower() {
+    const pw = this.power;
+    this.sim.setPower(pw.power, pw.judged, pw.perfects + pw.goods);
+    this.sendPower();
+    const l = pw.level;
+    if (l !== this.lastGrooveLevel) {
+      const prev = this.lastGrooveLevel;
+      this.lastGrooveLevel = l;
       audio.setGroove(l);
-      TowerView.groove = l;
       if (l > prev) this.grooveUp(l);
       this.tutorial?.notify('groove');
     }
-    this.hud.setGroove(l, this.groove.progress);
+    TowerView.groove = pw.power / 25;
+    const lo = l > 0 ? RHYTHM.thresholds[l - 1] : 0;
+    const hi = l < 4 ? RHYTHM.thresholds[l] : 100;
+    this.hud.setGroove(l, Math.max(0, Math.min(1, (pw.power - lo) / Math.max(1, hi - lo))));
+    this.hud.setPower(pw.power, pw.combo, powerMul(pw.power) * (1 + CRESCENDO.damage * this.sim.crescendo), this.sim.crescendo, this.sim.movements.length);
   }
 
-  /** the groove rises: a ring of colour from the shell; at 4 everything kicks in */
+  /** a groove threshold is crossed: a ring of colour from the shell; at the top everything kicks in */
   private grooveUp(l: number) {
     const v = this.view;
     const tp = v.turtle.group.position;
@@ -586,22 +710,20 @@ export class JourneyBattle {
 
   // ───────────────────────────── solos ─────────────────────────────
 
-  /** a tap on a musician: if it glows and the tap is on the beat, its solo (true) */
-  private trySolo(id: number, ts?: number): boolean {
+  /**
+   * A tap on a musician: if it glows, its solo ALWAYS plays (true) — on the beat at full strength
+   * (perfect stronger), off the beat weaker and a miss on the meter. Not glowing: false (its menu).
+   */
+  private trySolo(id: number, ts?: number, x?: number, y?: number): boolean {
     const tw = this.sim.towers.find((t) => t.id === id);
     if (!tw || !this.sim.canSolo(tw)) return false;
     const heard = this.heardAt(ts);
-    const g = nearestGrid(heard, this.sim.spb, this.groove.level);
-    const q = quality(g.delta);
-    if (q === 'miss') return false;
-    this.groove.judge(q);
-    this.groove.lastTap = heard;
-    const r = this.sim.solo(tw, q === 'perfect');
-    if (!r) return false;
+    const r = this.power.tap(heard, this.sim.spb, 'musician');
+    const ok = this.sim.solo(tw, r.q);
+    if (!ok) return false;
     this.deselect();
-    audio.beatTap(this.soundAt(g.at, q), q, this.view.pan(tw.x, tw.z));
-    this.hud.batonHit(q, this.groove.level);
-    this.syncGroove();
+    audio.beatTap(this.soundAt(r.at, r.q), r.q, this.view.pan(tw.x, tw.z));
+    this.judged(r.q, r.at, x, y);
     this.tutorial?.notify('solo');
     this.consume(this.sim.drain());
     return true;
@@ -736,8 +858,10 @@ export class JourneyBattle {
         gl.beamMat.opacity = 0.16 + beat * 0.22;
         gl.beam.scale.set(1, 1 + beat * 0.15, 1);
       } else {
-        gl.ringMat.opacity = tw.muted ? 0 : Math.min(0.3, tw.solo * 0.3);
-        gl.ring.scale.setScalar(0.6 + 0.4 * tw.solo);
+        // the power shows on every musician: an aura on the beat, brighter the fuller the meter
+        const aura = (this.power.power / 100) * (0.25 + 0.4 * beat);
+        gl.ringMat.opacity = tw.muted ? 0 : Math.max(Math.min(0.3, tw.solo * 0.3), aura);
+        gl.ring.scale.setScalar(Math.max(0.6 + 0.4 * tw.solo, 0.9 + 0.35 * beat * (this.power.power / 100)));
         gl.beamMat.opacity = 0;
       }
       gl.beam.visible = gl.beamMat.opacity > 0.001;
@@ -779,14 +903,14 @@ export class JourneyBattle {
     return heard >= c.echoStart - RHYTHM.good && heard <= c.echoStart + this.sim.barDur + RHYTHM.good ? c : null;
   }
 
-  private echoTap(c: Call, heard: number) {
+  private echoTap(c: Call, heard: number, x?: number, y?: number) {
     c.taps++;
-    this.groove.lastTap = heard;
+    this.power.lastTap = heard;
     const n = c.matched;
     if (n >= 4) {
       c.wrong++;
       audio.echoNote(3, this.soundAt(heard, 'miss'), false);
-      this.hud.batonHit('miss', this.groove.level);
+      this.judged('miss', heard, x, y);
       return;
     }
     const d = heard - c.targets[n];
@@ -795,23 +919,17 @@ export class JourneyBattle {
       c.states[n] = 3;
       c.matched++;
       audio.echoNote(n, this.soundAt(c.targets[n], q), true);
-      this.tapFeedback(q);
     } else {
       c.states[n] = 4;
       c.wrong++;
       audio.echoNote(n, this.soundAt(c.targets[n], 'miss'), false);
-      this.hud.batonHit('miss', this.groove.level);
     }
+    this.judged(q, c.targets[n], x, y);
     if (c.matched === 4 && c.wrong === 0) {
       c.won = true;
       audio.echoResult(true);
       this.hud.maestroResult(true);
-      if (this.sim.echo() > 0) {
-        this.groove.set(this.groove.level + 1);
-        this.groove.lastTap = heard;
-        this.syncGroove();
-        this.consume(this.sim.drain());
-      }
+      if (this.sim.echo() > 0) this.consume(this.sim.drain());
       this.tutorial?.notify('echo');
     }
   }
@@ -971,28 +1089,48 @@ export class JourneyBattle {
     // (the simulation drops its dead creatures itself, deterministically)
   }
 
-  /** the baton's beat rings, the groove fading when the baton rests, the shell's lights, glows, calls */
+  /**
+   * Every frame, on the beat as heard: the baton's rings (gold in the perfect window), the power
+   * fading when nobody plays, the shell's lanterns and every musician pulsing on the beat, the
+   * golden notes bumping on each beat (bigger on the downbeat), the glows, the Maestro's calls.
+   */
   private updateRhythm(vt: number) {
     const s = this.sim;
     const spb = this.clock.spb;
     const beatPos = vt / spb;
     const u = beatPos - Math.floor(beatPos);
-    const g = this.groove.level;
+    const g = this.power.level;
+    const pw = this.power.power;
     // a wave drawing near (the last two bars before it): the beat rings burn hotter
     let tension = 0;
     for (const w of this.incoming) if (vt < w.at) tension = Math.max(tension, 1 - (w.at - vt) / (2 * s.barDur));
     this.hud.setBeat(beatPos, this.clock.beatsPerBar, g >= RHYTHM.eighthsFrom, g, Math.max(0, tension));
-    if (!this.paused && !this.ended && this.groove.idle(vt, s.barDur)) this.syncGroove();
-    // the shell's lanterns and the colour around the colossus pulse with the groove
-    this.view.turtle.lights = 1 + g * 0.09 * (1 + 1.5 * Math.exp(-u * 5));
+    if (!this.paused && !this.ended && this.power.idle(vt, spb)) this.syncPower();
+    // the shell's lanterns pulse on every beat, brighter with the power
+    const pulse = Math.exp(-u * 5);
+    this.view.turtle.lights = 1 + 0.12 * pulse + (pw / 100) * 0.4 * (1 + 1.5 * pulse);
     if (g >= 3) this.view.ffGlow = Math.max(this.view.ffGlow, (g - 2) * 0.22 * Math.exp(-u * 3));
+    // golden notes bump on every beat (the downbeat most): tap them right then
+    const downbeat = ((Math.floor(beatPos) % this.clock.beatsPerBar) + this.clock.beatsPerBar) % this.clock.beatsPerBar === 0;
+    const bump = 1 + Math.exp(-u * 7) * (downbeat ? 0.45 : 0.22);
+    for (const pv of this.view.pickups.values()) if (!pv.gone) pv.group.scale.setScalar(bump);
     const beat = Math.floor(beatPos);
     if (beat !== this.lastBeat) {
       this.lastBeat = beat;
-      // groove 4: every downbeat rings out over the land
-      if (g >= 4 && !this.paused && beat % this.clock.beatsPerBar === 0) {
-        const tp = this.view.turtle.group.position;
-        this.view.fx.ring(new THREE.Vector3(tp.x, this.view.land.heightAt(tp.x, tp.z) + 0.3, tp.z), 16, GROOVE_COLOR[4], 0.7, 0.035);
+      if (!this.paused && !this.ended) {
+        // the downbeat glints on every note still on the road
+        if (downbeat) {
+          for (const pv of this.view.pickups.values()) {
+            if (pv.gone || !pv.group.visible) continue;
+            const p = pv.group.position;
+            this.view.fx.ring(new THREE.Vector3(p.x, this.view.land.heightAt(p.x, p.z) + 0.15, p.z), 2.4, '#ffd36b', 0.35, 0.08);
+          }
+        }
+        // the top of the meter: every downbeat rings out over the land
+        if (g >= 4 && downbeat) {
+          const tp = this.view.turtle.group.position;
+          this.view.fx.ring(new THREE.Vector3(tp.x, this.view.land.heightAt(tp.x, tp.z) + 0.3, tp.z), 16, GROOVE_COLOR[4], 0.7, 0.035);
+        }
       }
     }
     if (this.soloCineUntil >= 0 && vt >= this.soloCineUntil) {
@@ -1015,6 +1153,15 @@ export class JourneyBattle {
         case 'impact': {
           const s = ev.shot;
           if (s.kind === 'drum' || s.kind === 'bass' || ((s.kind === 'harp' || s.kind === 'crystal') && ev.hit)) audio.impact(s.kind, at, this.view.pan(s.tx, s.tz), s.hits.length);
+          // the stronger the power, the brighter every hit of the band
+          const pw = this.power.power;
+          if (ev.hit && pw >= 35) {
+            const tx = s.tx, tz = s.tz;
+            this.later(ev.t, () => {
+              const p = new THREE.Vector3(tx, this.view.land.heightAt(tx, tz) + 1.2, tz);
+              this.view.fx.burst(p, GROOVE_COLOR[grooveOf(pw)], Math.round(pw / 18), 2 + pw / 40, 0.12 + pw / 900, 0.4);
+            });
+          }
           break;
         }
         case 'pulse':
@@ -1176,6 +1323,22 @@ export class JourneyBattle {
         case 'soloHit':
           this.later(ev.t, () => this.soloHit(ev));
           break;
+        case 'strike':
+          this.later(ev.t, () => this.strikeFx(ev.enemy, ev.perfect));
+          break;
+        case 'crescendo': {
+          this.power.floor = CRESCENDO.floor * ev.stars;
+          this.sendPower(true);
+          this.later(ev.t, () => {
+            this.hud.crescendo(ev.stars, this.sim.movements.length);
+            const v = this.view;
+            const heart = v.turtle.heartWorld(new THREE.Vector3());
+            v.fx.burst(heart, '#ffd36b', 60, 5, 0.26, 1.2, true, -1);
+            v.fx.ring(heart.clone().setY(v.land.heightAt(heart.x, heart.z) + 0.3), 24, '#fff1c2', 1.2, 0.05);
+            v.bloomWave({ x: v.turtle.group.position.x, z: v.turtle.group.position.z });
+          });
+          break;
+        }
         case 'echoWin': {
           const coins = ev.coins;
           this.later(ev.t, () => {
@@ -1325,6 +1488,7 @@ export class JourneyBattle {
   private finish(outcome: 'victory' | 'defeat', t: number) {
     if (this.ended) return;
     this.ended = true;
+    this.hud.rhythmSummary(this.sim.accuracy, this.sim.stats.judged, this.power.best, this.sim.crescendo, this.sim.movements.length);
     this.soloCineUntil = -1;
     this.calls = [];
     this.deselect();
@@ -1346,6 +1510,7 @@ export class JourneyBattle {
         this.resolveEnd({
           outcome, stars: this.sim.stars(), lives: this.sim.lives, time: this.journeyTime(), kills: this.sim.stats.kills, collected: this.sim.stats.collected,
           checkpoint, movement: Math.max(0, this.sim.movement), movements: this.sim.movements.length,
+          accuracy: this.sim.accuracy, judged: this.sim.stats.judged, bestCombo: this.power.best, crescendo: this.sim.crescendo,
         });
       }, outcome === 'victory' ? 5600 : 2600);
     }, 200);
@@ -1381,6 +1546,7 @@ export class JourneyBattle {
   dispose() {
     this.disposed = true;
     audio.setGroove(0);
+    audio.setPower(0);
     TowerView.groove = 0;
     this.detach();
     this.removeUpdate();

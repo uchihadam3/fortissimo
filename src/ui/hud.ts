@@ -74,7 +74,9 @@ export class Hud {
         <div class="approach"></div><div class="approach off"></div>
         <button id="baton" aria-label="baton"><svg class="groove" viewBox="0 0 100 100">${[0, 1, 2, 3].map((i) => `<circle class="seg" cx="50" cy="50" r="45" stroke-dasharray="${SEG.toFixed(1)} 400" transform="rotate(${-90 + 4.5 + i * 90} 50 50)"/>`).join('')}<circle class="prog" cx="50" cy="50" r="37" stroke-dasharray="232.5" stroke-dashoffset="232.5" transform="rotate(-90 50 50)"/></svg><div class="glyph">${BATON}</div></button>
         <div class="sparks"></div>
+        <div id="power"><div class="bar"><div class="fill"></div><i style="bottom:20%"></i><i style="bottom:45%"></i><i style="bottom:70%"></i><i style="bottom:90%"></i></div><div class="side"><b class="mult">×1.00</b><b class="combo">0</b><div class="cresc"></div></div></div>
       </div>
+      <div id="rhythm-sum"></div>
     </div>`);
     parent.appendChild(this.root);
     const $ = (s: string) => this.root.querySelector(s) as HTMLElement;
@@ -97,6 +99,7 @@ export class Hud {
     this.sparks = $('#baton-wrap .sparks');
     this.callEl = $('#call');
     this.grooveGlow = $('#groove-glow');
+    this.powerEl = $('#power');
     // the baton answers on pointerdown (timing matters), with the event's own time stamp
     this.batonEl.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -343,13 +346,18 @@ export class Hud {
 
   openTower(x: number, y: number, level: number, upCost: number | null, affordable: boolean, sellValue: number, onUp: () => void, onSell: () => void) {
     this.radial.innerHTML = '<div class="ring-bg"></div>';
-    const up = h(`<button class="rb ${upCost === null ? 'max' : 'up'} ${upCost !== null && !affordable ? 'poor' : ''}">${upCost === null ? ICON.crown : ICON.up}${upCost !== null ? `<span class="price"><i>${ICON.coin}</i>${upCost}</span>` : ''}</button>`) as HTMLButtonElement;
+    // (a musician at its top level has nothing to grow into: only its crown, not a button)
+    const up = upCost === null
+      ? h(`<div class="rb-crown">${ICON.crown}</div>`)
+      : (h(`<button class="rb up ${!affordable ? 'poor' : ''}">${ICON.up}<span class="price"><i>${ICON.coin}</i>${upCost}</span></button>`) as HTMLButtonElement);
     up.style.left = '0px';
     up.style.top = '-88px';
-    up.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (upCost !== null) onUp();
-    });
+    if (upCost !== null) {
+      up.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onUp();
+      });
+    }
     const sell = h(`<button class="rb sell">${ICON.sell}<span class="price"><i>${ICON.coin}</i>+${sellValue}</span></button>`) as HTMLButtonElement;
     sell.style.left = '0px';
     sell.style.top = '88px';
@@ -467,6 +475,8 @@ export class Hud {
     a.style.transform = `scale(${(1 + 0.7 * (1 - u)).toFixed(3)})`;
     a.style.opacity = (0.15 + 0.85 * u).toFixed(3);
     a.classList.toggle('down', next === 0);
+    // the perfect window: the closing ring turns gold right on the beat
+    this.batonWrap.classList.toggle('now', u > 0.9 || u < 0.07);
     if (eighths) {
       const v = (u + 0.5) % 1;
       b.style.display = '';
@@ -541,6 +551,71 @@ export class Hud {
     const head = this.callEl.querySelector('.head') as HTMLElement;
     head.style.display = c.head < 0 ? 'none' : '';
     head.style.left = `${(Math.max(0, Math.min(1, c.head)) * 100).toFixed(2)}%`;
+  }
+
+  // ───────── the power meter (v4) ─────────
+
+  private powerEl!: HTMLElement;
+  private lastPowerKey = '';
+  private lastCombo = 0;
+
+  /**
+   * The power meter beside the baton: a bar in colour bands (the groove thresholds marked), the
+   * band's multiplier, the combo (pops on every hit) and the crescendo stars of the journey.
+   */
+  setPower(power: number, combo: number, mult: number, crescendo: number, movements: number) {
+    const key = `${Math.round(power)}:${combo}:${mult.toFixed(2)}:${crescendo}:${movements}`;
+    if (key === this.lastPowerKey) return;
+    this.lastPowerKey = key;
+    const el = this.powerEl;
+    (el.querySelector('.fill') as HTMLElement).style.height = `${Math.max(0, Math.min(100, power)).toFixed(1)}%`;
+    (el.querySelector('.mult') as HTMLElement).textContent = `×${mult.toFixed(2)}`;
+    const c = el.querySelector('.combo') as HTMLElement;
+    c.textContent = String(combo);
+    c.classList.toggle('zero', combo === 0);
+    if (combo > this.lastCombo) this.retrigger(c, 'pop');
+    this.lastCombo = combo;
+    for (let g = 0; g <= 4; g++) el.classList.toggle(`g${g}`, g === [20, 45, 70, 90].filter((t) => power >= t).length);
+    const cr = el.querySelector('.cresc') as HTMLElement;
+    if (cr.dataset.k !== `${crescendo}/${movements}`) {
+      cr.dataset.k = `${crescendo}/${movements}`;
+      cr.innerHTML = Array.from({ length: movements }, (_, i) => `<i class="${i < crescendo ? 'on' : ''}">${ICON.star}</i>`).join('');
+    }
+  }
+
+  /** a miss: the meter flashes red and shakes */
+  powerMiss() {
+    this.retrigger(this.powerEl, 'miss');
+  }
+
+  /** a crescendo star is earned: it pops on the meter */
+  crescendo(stars: number, movements: number) {
+    const cr = this.powerEl.querySelector('.cresc') as HTMLElement;
+    cr.dataset.k = '';
+    this.lastPowerKey = '';
+    const star = cr.children[stars - 1] as HTMLElement | undefined;
+    void movements;
+    if (star) this.retrigger(star, 'pop');
+    this.retrigger(this.powerEl, 'cresc');
+  }
+
+  /** the verdict of a tap where the finger was: ✦ perfect (gold), ✓ good (white), ✕ miss (red) */
+  judgeAt(x: number, y: number, q: 'perfect' | 'good' | 'miss', combo: number) {
+    const el = h(`<div class="judge ${q}">${q === 'perfect' ? ICON.star : q === 'good' ? ICON.check : ICON.close}${q !== 'miss' && combo >= 5 ? `<b>${combo}</b>` : ''}</div>`);
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    this.floats.appendChild(el);
+    setTimeout(() => el.remove(), 700);
+  }
+
+  /** the end of a journey: how well it was played (accuracy %, longest combo, crescendo stars) */
+  rhythmSummary(accuracy: number, judged: number, best: number, crescendo: number, movements: number) {
+    const el = this.root.querySelector('#rhythm-sum') as HTMLElement;
+    if (!judged) return;
+    const stars = Array.from({ length: movements }, (_, i) => `<i class="${i < crescendo ? 'on' : ''}">${ICON.star}</i>`).join('');
+    el.innerHTML = `<div class="acc"><span class="ico">${BATON}</span><b>${Math.round(accuracy * 100)}%</b></div><div class="best"><span class="ico">${ICON.star}</span><b>${best}</b></div><div class="cresc">${stars}</div>`;
+    el.classList.toggle('great', accuracy >= 0.85);
+    requestAnimationFrame(() => el.classList.add('on'));
   }
 
   /** the call was echoed right (or not) */

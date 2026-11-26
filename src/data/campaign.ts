@@ -225,7 +225,8 @@ export const TUNE: Record<string, number[]> = {
  * the baton still gets through them all, and a band with no rhythm at all still wins the main road
  * with fewer stars; the extra paths ask for the baton.
  */
-export const LIFT = { main: 1.15, boss: 1.15, extra: 1.45 };
+
+export const LIFT = { main: 1.6, boss: 1.6, extra: 2.3 };
 /** the first land stays welcoming (it teaches the baton), and journeys that were already at the edge: no lift */
 const NO_LIFT = new Set(['m1', 'm2', 'm3', 'm4', 'i1', 'c3']);
 function lift(id: string, k: number): number {
@@ -304,7 +305,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm1', world: 'meadow', map: [14, 74], kind: 'main', requires: [],
     def: journey({
       id: 'm1', world: 'meadow', name: { pt: 'O Despertar', en: 'The Awakening' }, slots: 2, coins: 150, towers: T1, newTower: 'harp',
-      tutorial: ['basics', 'pickup', 'baton', 'echo'], pickups: 9, curviness: 0.6,
+      tutorial: ['basics', 'baton', 'coin', 'strike', 'echo'], pickups: 9, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 70 }, { kind: 'lake', from: 40, to: 100, side: 1 }, { kind: 'hills', from: 100, to: 140 }, { kind: 'meadow', from: 140, to: 190 }],
       moves: [
         {

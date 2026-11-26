@@ -4,10 +4,11 @@
  *   npx tsx tools/balance.ts --tune [levelId…] [--rhythm 0.6]   (difficulty factors per movement for TUNE)
  *
  * good:      varied band, duets, golden notes, upgrades, placement by threat direction; no rhythm
+ * virtuoso:  the good bot with an excellent rhythm (0.9: nearly every tap perfect, power ≈ 90)
  * conductor: the good bot keeping the beat like a decent player (rhythm skill `--rhythm`, default
- *            0.6: an average groove of about 2, a solo now and then, most of the Maestro's calls)
- * weak:      the good bot with a shaky hand on the baton (rhythm 0.3: groove ≈ 1)
- * novice:    slow decisions, obvious moves (the next instrument on the first free plate); no rhythm
+ *            0.6: power ≈ 60, taps notes and creatures on the beat, solos, most of the calls)
+ * weak:      the good bot with a sloppy hand (rhythm 0.3: power ≈ 20)
+ * novice:    slow decisions, obvious moves (the next instrument on the first free plate); sloppy rhythm (0.3)
  * spam:      one instrument only (the best of all single-instrument bands is shown)
  * The tuner plays the conductor: levels are set at the edge of a decent player who keeps the beat.
  */
@@ -18,7 +19,7 @@ import { playBot, playSpam, type BotResult } from '../src/sim/bots';
 
 const args = process.argv.slice(2);
 const mode: Mode = args.includes('--mode') ? (args[args.indexOf('--mode') + 1] as Mode) : 'normal';
-const bots = (args.includes('--bots') ? args[args.indexOf('--bots') + 1] : 'conductor,weak,good,novice,spam').split(',');
+const bots = (args.includes('--bots') ? args[args.indexOf('--bots') + 1] : 'virtuoso,conductor,weak,good,novice,spam').split(',');
 const rhythmArg = args.includes('--rhythm') ? args[args.indexOf('--rhythm') + 1] : '0.6';
 const rhythm = Number(rhythmArg);
 const detail = args.includes('--detail');
@@ -130,7 +131,7 @@ for (const l of CAMPAIGN) {
   const cells = bots.map((b) => {
     if (b === 'spam') return cell((s = playSpam(d, mode)));
     if (b === 'novice') return cell(playBot(d, 'novice', { mode }));
-    return cell(playBot(d, 'good', { mode, rhythm: b === 'conductor' ? rhythm : b === 'weak' ? 0.3 : 0 }));
+    return cell(playBot(d, 'good', { mode, rhythm: b === 'conductor' ? rhythm : b === 'weak' ? 0.3 : b === 'virtuoso' ? 0.9 : 0 }));
   });
   console.log(
     `${l.id.padEnd(3)} ${l.kind.padEnd(6)} ${String(d.bars).padStart(4)} ${min.toFixed(1).padStart(4)} ${String(movs).padStart(4)} ${plates.padStart(6)}  | ${cells.join(' ')}${s ? ` ${(s as { kind: string }).kind}` : ''}`,
@@ -139,7 +140,7 @@ for (const l of CAMPAIGN) {
     const j = playBot(d, 'good', { mode, rhythm }).j;
     const dmg = Object.entries(j.stats.damageByKind).map(([k, v]) => `${k} ${Math.round(v! / 1000)}k`).join(' ');
     const st = j.stats;
-    console.log(`      conductor: groove ${(st.grooveSum / Math.max(1, st.walkBars)).toFixed(2)} (peak ${st.groovePeak}) · solos ${st.solos} (${st.perfectSolos} perfect) · echoes ${st.echoes} · chords ${st.chords}`);
+    console.log(`      conductor: power ${Math.round(st.powerSum / Math.max(1, st.walkBars))} · accuracy ${Math.round(j.accuracy * 100)}% · crescendo ${j.crescendo} · solos ${st.solos} (${st.perfectSolos} perfect) · strikes ${st.strikes} · notes on the beat ${st.onBeatNotes} · echoes ${st.echoes} · chords ${st.chords}`);
     console.log(`      conductor: towers ${j.towers.map((x) => x.kind.slice(0, 2) + x.level).join(' ')} · harmony ${j.band.harmony} duets ${j.band.duets.map((x) => x.id).join(',')} · coins ${j.coins} · kills ${j.stats.kills} · ff ${j.stats.ffUses} · heals ${j.stats.heals} · ${dmg}`);
   }
 }
