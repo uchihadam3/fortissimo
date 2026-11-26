@@ -353,6 +353,10 @@ export abstract class AdaptiveSong extends Song {
   /** a band that ignores the shell (cinematic statements of the land's song: the full orchestra) */
   fixedBand: BandMix | null = null;
 
+  get followsBand(): boolean {
+    return this.fixedBand === null;
+  }
+
   /** the band's layers in this bar */
   protected L(b: BarCtx): Layers {
     return this.fixedBand ? layersOf(this.fixedBand, this.fixedBand) : layersOf(b.band, b.bandPrev);

@@ -9,6 +9,8 @@ export type BufInst =
   | 'kalimba' | 'marimba' | 'celesta' | 'glass' | 'bell' | 'tile' | 'wood'
   // FORTÍSSIMO tonal instruments
   | 'brass' | 'choir' | 'choiroo' | 'zap' | 'spicc' | 'tbell' | 'mbox' | 'boom' | 'anvil' | 'timp' | 'taiko' | 'tom'
+  // v3 tower voices that cut through on small speakers: the battle drum, the bright bass, the choir's sung attack
+  | 'tdrum' | 'tbass' | 'choirx'
   // one-shot percussion (single zone at MIDI 60 — play at 60 for the natural pitch)
   | 'kick' | 'snare' | 'brush' | 'hat' | 'ohat' | 'shaker' | 'tamb' | 'tick' | 'crash' | 'dum' | 'tek' | 'clap' | 'gong' | 'rim';
 
@@ -286,10 +288,9 @@ function vowelTable(f0: number, vowel: Vowel, shift: number): Float32Array {
 }
 
 /** Choir ensemble: four voices reading a vowel wavetable with independent vibrato and drift. */
-function choir(m: number, vowel: Vowel): Rendered {
+function choir(m: number, vowel: Vowel, attack = 0.3, dur = 4.4): Rendered {
   const f0 = mtof(m);
   const sr = 24000;
-  const dur = 4.4;
   const n = Math.floor(sr * dur);
   const out = new Float32Array(n);
   const tab = vowelTable(f0, vowel, m >= 62 ? 1.14 : 1);
@@ -322,8 +323,16 @@ function choir(m: number, vowel: Vowel): Rendered {
   const bp = new Bq('bp', f2, 1.4, sr);
   for (let i = 0; i < n; i++) {
     const t = i / sr;
-    const env = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, t / 0.3));
-    out[i] = (out[i] + bp.run(white()) * 0.05) * env * (0.92 + 0.08 * Math.min(1, t / 1.5));
+    const env = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, t / attack));
+    // a sung attack (fast) bursts a little above its sustain, like a choir's accent
+    const acc = attack < 0.1 ? 1 + 0.45 * Math.exp(-t / 0.12) : 1;
+    out[i] = (out[i] + bp.run(white()) * 0.05) * env * acc * (0.92 + 0.08 * Math.min(1, t / 1.5));
+  }
+  if (attack < 0.1) {
+    // the consonant: a breathy 'h' just before the vowel speaks
+    const hb = new Bq('bp', 2400, 0.9, sr);
+    const nh = Math.min(n, Math.floor(sr * 0.08));
+    for (let i = 0; i < nh; i++) out[i] += hb.run(white()) * 0.35 * Math.exp(-i / sr / 0.018);
   }
   finish(out, sr, 0.01);
   return { data: out, sr };
@@ -610,11 +619,57 @@ function gong(m: number): Rendered {
   return { data: out, sr };
 }
 
+
+/**
+ * The battle drum of the drum tower: a tight, bright snare-tom (a tuned shell, a hard stick and
+ * snare wires). Unlike the turtle's deep footstep drum it lives in the mids and highs, so it cuts
+ * through the backing on any speaker.
+ */
+function tdrum(m: number): Rendered {
+  const f0 = mtof(m);
+  const sr = 32000;
+  const r = membrane(f0, {
+    sr, dur: 0.8,
+    modes: [[1, 1, 0.12], [1.59, 0.7, 0.08], [2.14, 0.55, 0.06], [2.65, 0.4, 0.045], [3.16, 0.3, 0.035], [3.65, 0.2, 0.028]],
+    glide: 0.16, glideTau: 0.015, thump: 0.15, thumpTau: 0.03, stick: 1.3, stickLp: 7000, drive: 1.6,
+  });
+  const out = r.data;
+  // snare wires (rattle) and the stick's crack
+  noiseInto(out, sr, [new Bq('hp', 1300, 0.7, sr), new Bq('lp', 9000, 0.7, sr)], 1.6, 0.11, 0.0008);
+  noiseInto(out, sr, [new Bq('bp', 2600, 1.0, sr)], 2.2, 0.014, 0.0004);
+  // the shell's ring an octave and a fifth up (a crisp, pitched 'tak')
+  pingsInto(out, sr, [[f0 * 3.0, 0.45, 0.06], [f0 * 4.5, 0.3, 0.04]]);
+  finish(out, sr, 0.0004);
+  return { data: out, sr };
+}
+
+/**
+ * The bass tower's voice: a bright, growling plucked bass (strong 2nd–8th harmonics and a slap
+ * click) — the fundamental can sit an octave lower, the harmonics are what a phone speaker plays.
+ */
+function tbass(m: number): Rendered {
+  const f0 = mtof(m);
+  const sr = 32000;
+  const P: [number, number, number, number?][] = [];
+  for (let k = 1; k * f0 < 6000 && k <= 40; k++) {
+    const f = k * f0;
+    const formant = 1 + 1.6 / (1 + Math.pow((f - 900) / 450, 2)) + 0.6 / (1 + Math.pow((f - 2200) / 700, 2));
+    P.push([k, (formant / Math.pow(k, 0.75)) * (k === 1 ? 0.9 : 1), 1.2 / (1 + 0.22 * k), k % 2 ? 0 : 2]);
+  }
+  const out = additive(sr, 1.8, f0, P, { attack: 0.0015, noise: 0.5, noiseTau: 0.006, noiseLp: 5000 });
+  for (let i = 0; i < out.length; i++) out[i] = Math.tanh(1.8 * out[i]) / Math.tanh(1.8);
+  finish(out, sr, 0.0015);
+  return { data: out, sr };
+}
+
 const NEW_SPECS = {
   mando: { lo: 48, hi: 96, step: 4, render: (m: number) => ks(mtof(m), { dur: clamp(2.2 - (m - 55) * 0.02, 0.9, 2.2), t60: clamp(1.5 - (m - 55) * 0.015, 0.6, 1.6), bright: 0.86, pick: 0.15, soft: 7000 }) },
   brass: { lo: 36, hi: 77, step: 3, render: brass },
   choir: { lo: 45, hi: 81, step: 3, render: (m: number) => choir(m, 'ah') },
   choiroo: { lo: 45, hi: 81, step: 3, render: (m: number) => choir(m, 'oo') },
+  choirx: { lo: 48, hi: 84, step: 3, render: (m: number) => choir(m, 'ah', 0.035, 3.2) },
+  tdrum: { lo: 43, hi: 67, step: 3, render: tdrum },
+  tbass: { lo: 28, hi: 60, step: 3, render: tbass },
   zap: { lo: 57, hi: 99, step: 3, render: zap },
   spicc: {
     lo: 33, hi: 81, step: 4,

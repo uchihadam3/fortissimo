@@ -3,13 +3,14 @@
  * sequences and battle stress tests through an OfflineAudioContext, scheduling incrementally like
  * the real-time engine (suspend every 50 ms), and measures the result.
  */
-import { SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type SongId, type TowerKind, type WorldId } from '../../sim/defs';
+import { SECTION_OF, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type SongId, type TowerKind, type WorldId } from '../../sim/defs';
 import type { BandMix, CinematicCue } from '../api';
 import { Ambience, type Place } from './ambience';
 import { Cinema } from './cinema';
 import { Core } from './core';
 import { LOOKAHEAD } from './engine';
 import { Motifs } from './motifs';
+import { Rhythm, type TapQuality } from './rhythm';
 import { cleanBand, Director, type Player, type TrackId } from './music';
 import { Sfx } from './sfx';
 import { makeTheme } from './songs';
@@ -58,6 +59,7 @@ export interface Rig {
   cine: Cinema;
   amb: Ambience;
   motifs: Motifs;
+  rhythm: Rhythm;
   /** run fn once the render reaches context time `at` − lead */
   at(at: number, fn: () => void, lead?: number): void;
   render(): Promise<{ buf: AudioBuffer; ms: number; maxVoices: number; cats: Record<string, number> }>;
@@ -74,6 +76,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
   const cine = new Cinema(core, bank, director);
   const amb = new Ambience(core, bank);
   const motifs = new Motifs(core, bank, director);
+  const rhythm = new Rhythm(core, bank, director);
   const actions: { at: number; fn: () => void }[] = [];
   let maxVoices = 0;
   const cats: Record<string, number> = {};
@@ -106,7 +109,7 @@ export function makeRig(seconds: number, sr = 44100): Rig {
     });
   }
   return {
-    ctx, core, bank, director, towers, sfx, cine, amb, motifs,
+    ctx, core, bank, director, towers, sfx, cine, amb, motifs, rhythm,
     at(at: number, fn: () => void, lead = 0.15) {
       actions.push({ at: Math.max(0, at - lead), fn });
     },
@@ -147,6 +150,13 @@ class Biquad {
     const al = Math.sin(w) / (2 * q);
     const a0 = 1 + al;
     return new Biquad((1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, (-2 * c) / a0, (1 - al) / a0);
+  }
+  static lp(sr: number, f0: number, q: number): Biquad {
+    const w = (2 * Math.PI * f0) / sr;
+    const c = Math.cos(w);
+    const al = Math.sin(w) / (2 * q);
+    const a0 = 1 + al;
+    return new Biquad((1 - c) / 2 / a0, (1 - c) / a0, (1 - c) / 2 / a0, (-2 * c) / a0, (1 - al) / a0);
   }
   static bp(sr: number, f0: number, q: number): Biquad {
     const w = (2 * Math.PI * f0) / sr;
@@ -966,4 +976,299 @@ export async function renderDeaths(song: SongId = 'desert', wav = false): Promis
   const r = await rig.render();
   const stats = measure(r.buf, r.ms, 0.3);
   return { stats, wav: wav ? wavBase64(r.buf) : undefined };
+}
+
+// ───────────────────────────── tower balance (v3) ─────────────────────────────
+
+/** a 2nd-order low-pass (RBJ) */
+function lpq(sr: number, f0: number): Biquad {
+  return Biquad.lp(sr, f0, 0.7071);
+}
+
+/**
+ * Mono weighted copies of a render: K-weighting (loudness) and a phone-speaker model (a small
+ * speaker gives almost nothing below ~420 Hz and rolls off above ~10 kHz; 4th-order slopes, plus
+ * the K-weighting presence shelf). Also the stereo energy (side / mid).
+ */
+function weighted(buf: AudioBuffer): { k: Float32Array; phone: Float32Array; side: number; mid: number } {
+  const sr = buf.sampleRate;
+  const L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const n = L.length;
+  const k = new Float32Array(n);
+  const phone = new Float32Array(n);
+  const kf = [Biquad.shelf(sr, 1681.97, 4, 0.7071), Biquad.hp(sr, 38.13, 0.5)];
+  const pf = [Biquad.hp(sr, 420, 0.7071), Biquad.hp(sr, 420, 0.7071), Biquad.shelf(sr, 1681.97, 4, 0.7071), lpq(sr, 10000), lpq(sr, 10000)];
+  let side = 0;
+  let mid = 0;
+  for (let i = 0; i < n; i++) {
+    const x = (L[i] + R[i]) * 0.5;
+    const s = (L[i] - R[i]) * 0.5;
+    side += s * s;
+    mid += x * x;
+    let y = x;
+    for (const f of kf) y = f.run(y);
+    k[i] = y;
+    let z = x;
+    for (const f of pf) z = f.run(z);
+    phone[i] = z;
+  }
+  return { k, phone, side, mid };
+}
+
+/** gated integrated loudness (BS.1770 gates) of a weighted mono signal over [a, b) s */
+function gatedLoudness(x: Float32Array, sr: number, a: number, b: number): number {
+  const blk = Math.floor(sr * 0.1);
+  const i0 = Math.max(0, Math.floor(a * sr));
+  const i1 = Math.min(x.length, Math.floor(b * sr));
+  const ms: number[] = [];
+  for (let i = i0; i + blk <= i1; i += blk) {
+    let s = 0;
+    for (let j = i; j < i + blk; j++) s += x[j] * x[j];
+    ms.push((2 * s) / blk);
+  }
+  const blocks: number[] = [];
+  for (let i = 0; i + 4 <= ms.length; i++) blocks.push((ms[i] + ms[i + 1] + ms[i + 2] + ms[i + 3]) / 4);
+  const lk = (m: number) => -0.691 + db(m);
+  const abs = blocks.filter((m) => lk(m) > -70);
+  if (!abs.length) return -99;
+  const meanAbs = abs.reduce((s, m) => s + m, 0) / abs.length;
+  const rel = abs.filter((m) => lk(m) > lk(meanAbs) - 10);
+  return rel.length ? lk(rel.reduce((s, m) => s + m, 0) / rel.length) : -99;
+}
+
+/** loudness (dB, like LUFS) of [a, b) s of a weighted signal, ungated */
+function windowLoudness(x: Float32Array, sr: number, a: number, b: number): number {
+  const i0 = Math.max(0, Math.floor(a * sr));
+  const i1 = Math.min(x.length, Math.floor(b * sr));
+  let s = 0;
+  for (let i = i0; i < i1; i++) s += x[i] * x[i];
+  return -0.691 + db((2 * s) / Math.max(1, i1 - i0));
+}
+
+const median = (v: number[]): number => {
+  if (!v.length) return -99;
+  const s = [...v].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+};
+const r1 = (x: number) => Math.round(x * 10) / 10;
+
+export interface BalanceStem {
+  /** gated loudness, K-weighted (LUFS) and through the phone-speaker model */
+  lufs: number;
+  phone: number;
+  peakDb: number;
+}
+
+export interface BalanceRender {
+  back: BalanceStem;
+  stem: BalanceStem;
+  mix: BalanceStem & { width: number; bands: number[] };
+  /** during the towers' hits (250 ms from each onset): stem − backing, dB (median over hits) */
+  hitDelta: number;
+  hitDeltaPhone: number;
+  /** the stem's own level during its hits (K-weighted and phone model, dB) */
+  hitK: number;
+  hitPhone: number;
+  hits: number;
+  wav?: string;
+}
+
+/** extra things a balance script can do (the rhythm API) */
+export interface BalanceExtras {
+  groove?: number;
+  /** player taps on every beat (quality per tap) */
+  taps?: 'perfect' | 'good' | 'miss';
+  /** a solo of this tower (the army's first of that kind) on bar 2 */
+  solo?: TowerKind;
+}
+
+/**
+ * The balance of a band over its song: three renders of the same script — the backing alone (tower
+ * bus muted), the towers alone (music muted) and the mix — measured over bars [1, bars).
+ * `band` = the sections reported to the engine (default: those of the army).
+ */
+export async function renderBalance(
+  song: SongId,
+  army: TowerSpec[],
+  o: { bars?: number; intensity?: number; band?: Partial<Record<Section, number>>; duets?: DuetId[]; wav?: boolean; window?: number } & BalanceExtras = {},
+): Promise<BalanceRender> {
+  const bars = o.bars ?? 8;
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = spb * 4;
+  const sd = spb / 4;
+  const t0 = 0.2;
+  const seconds = t0 + (bars + 0.6) * barDur;
+  const secs: Partial<Record<Section, number>> = o.band ? { ...o.band } : {};
+  if (!o.band) for (const tw of army) secs[SECTION_OF[tw.kind]] = (secs[SECTION_OF[tw.kind]] ?? 0) + 1;
+  const mix = bandOf(secs, o.duets ?? []);
+  const win = o.window ?? 0.25;
+  const run = async (mode: 'back' | 'stem' | 'mix') => {
+    const rig = makeRig(seconds);
+    rig.director.band = mix;
+    rig.towers.setBand(mix);
+    if (mode === 'stem') rig.core.setVolumes({ master: 1, music: 0, sfx: 0.9, ambience: 0.8 });
+    if (mode === 'back') {
+      rig.core.towerBus.gain.value = 0;
+      rig.core.rhythmBus.gain.value = 0;
+    }
+    const p = rig.director.play(song, t0, 0.05, o.intensity ?? 1);
+    if (!p) throw new Error('no song');
+    if (o.groove !== undefined) {
+      // the groove arrives on bar 1 (with its riser and drop when it is 4)
+      const g = o.groove;
+      rig.at(t0 + barDur, () => {
+        const tl = rig.director.setGroove(g);
+        if (g === 4 && tl !== null) rig.rhythm.grooveRise(tl);
+      }, 0.2 + 2 * spb);
+    }
+    const onsets: number[] = [];
+    for (const tw of army) {
+      const lv = TOWERS[tw.kind].levels[tw.level];
+      for (let s = 0; s < bars * 16; s++) {
+        if (lv.pattern[s % lv.pattern.length] !== 'x') continue;
+        const t = t0 + s * sd;
+        if (s >= 16) onsets.push(t);
+        rig.at(t, () => rig.towers.shot(tw.kind, tw.level, t, tw.pan, tw.voice), 0.12);
+        if (lv.flight > 0) rig.at(t + lv.flight * sd, () => rig.towers.impact(tw.kind, t + lv.flight * sd, tw.pan, 0.7), 0.12);
+      }
+    }
+    if (o.taps) {
+      for (let beat = 4; beat < bars * 4; beat++) {
+        const t = t0 + beat * spb;
+        rig.at(t, () => rig.rhythm.beatTap(t, o.taps!, 0), 0.1);
+      }
+    }
+    if (o.solo) {
+      const tw = army.find((x) => x.kind === o.solo) ?? { kind: o.solo, level: 1, pan: 0, voice: 1 };
+      const t = t0 + 2 * barDur;
+      rig.at(t, () => rig.rhythm.solo(tw.kind, tw.level, t, tw.pan, tw.voice), 0.15);
+    }
+    const r = await rig.render();
+    return { buf: r.buf, onsets: [...new Set(onsets)].sort((x, y) => x - y) };
+  };
+  const back = await run('back');
+  const stem = await run('stem');
+  const mixed = await run('mix');
+  const a = t0 + barDur;
+  const b = t0 + bars * barDur;
+  const sr = back.buf.sampleRate;
+  const W = { back: weighted(back.buf), stem: weighted(stem.buf), mix: weighted(mixed.buf) };
+  const peak = (buf: AudioBuffer) => {
+    let pk = 0;
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = Math.floor(a * sr); i < d.length; i++) pk = Math.max(pk, Math.abs(d[i]));
+    }
+    return 20 * Math.log10(pk + 1e-12);
+  };
+  const st = (w: ReturnType<typeof weighted>, buf: AudioBuffer): BalanceStem => ({ lufs: r1(gatedLoudness(w.k, sr, a, b)), phone: r1(gatedLoudness(w.phone, sr, a, b)), peakDb: r1(peak(buf)) });
+  const dK: number[] = [];
+  const dP: number[] = [];
+  const hK: number[] = [];
+  const hP: number[] = [];
+  for (const t of stem.onsets) {
+    if (t >= b) continue;
+    const sK = windowLoudness(W.stem.k, sr, t, t + win);
+    const bK = windowLoudness(W.back.k, sr, t, t + win);
+    const sP = windowLoudness(W.stem.phone, sr, t, t + win);
+    const bP = windowLoudness(W.back.phone, sr, t, t + win);
+    dK.push(sK - bK);
+    dP.push(sP - bP);
+    hK.push(sK);
+    hP.push(sP);
+  }
+  return {
+    back: st(W.back, back.buf),
+    stem: st(W.stem, stem.buf),
+    mix: { ...st(W.mix, mixed.buf), width: r1(10 * Math.log10((W.mix.side + 1e-12) / (W.mix.mid + 1e-12))), bands: octaves(mixed.buf, a, b) },
+    hitDelta: r1(median(dK)),
+    hitDeltaPhone: r1(median(dP)),
+    hitK: r1(median(hK)),
+    hitPhone: r1(median(hP)),
+    hits: dK.length,
+    wav: o.wav ? wavBase64(mixed.buf) : undefined,
+  };
+}
+
+// ───────────────────────────── rhythm play (v3) ─────────────────────────────
+
+export interface RhythmRender {
+  stats: Stats;
+  /** a bar of each kind of tap: its loudness with the taps and without them (the same render, no player) */
+  taps: { q: string; lufs: number; ref: number }[];
+  /** `before`: that bar without the player (the full band alone) */
+  solos: { kind: TowerKind; lufs: number; before: number; peakDb: number; inChord: number }[];
+  call: { lufs: number; ref: number; inScale: number };
+  wav?: string;
+}
+
+/**
+ * The rhythm API over a battle song (full band, intensity 1): a bar of perfect, good and miss taps;
+ * every musician's solo (one bar each, a bar of rest between); the Maestro's call, a right and a
+ * wrong echo, and both verdicts. Rendered twice: with the player and without (the reference).
+ */
+export async function renderRhythm(song: SongId = 'meadow', o: { wav?: boolean; world?: WorldId } = {}): Promise<RhythmRender> {
+  const kinds: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = 4 * spb;
+  const t0 = 0.2;
+  const soloBar0 = 5;
+  const callBar = soloBar0 + kinds.length * 2 + 1;
+  const bars = callBar + 6;
+  const seconds = t0 + bars * barDur + 2;
+  const qs: TapQuality[] = ['perfect', 'good', 'miss'];
+  const run = async (player: boolean) => {
+    const rig = makeRig(seconds);
+    const mix = bandOf({ strings: 1, percussion: 1, bells: 1, brass: 1, voices: 1, low: 1 });
+    rig.director.band = mix;
+    rig.towers.setBand(mix);
+    if (o.world) rig.director.world = o.world;
+    const p = rig.director.play(song, t0, 0.05, 1);
+    if (!p) throw new Error('no song');
+    // the call comes in a breather (intensity 0)
+    rig.at(p.barStart(callBar) - 0.3, () => p.setIntensity(0, rig.ctx.currentTime), 0);
+    if (player) {
+      qs.forEach((q, i) => {
+        for (let beat = 0; beat < 4; beat++) {
+          const t = p.barStart(2 + i) + beat * spb;
+          rig.at(t, () => rig.rhythm.beatTap(t, q, 0.2), 0.1);
+        }
+      });
+      kinds.forEach((k, i) => {
+        const t = p.barStart(soloBar0 + i * 2);
+        rig.at(t, () => rig.rhythm.solo(k, 1, t, 0.2, 1), 0.15);
+      });
+      for (let i = 0; i < 4; i++) {
+        const tc = p.barStart(callBar) + i * spb;
+        const te = p.barStart(callBar + 1) + i * spb;
+        const tc2 = p.barStart(callBar + 3) + i * spb;
+        const te2 = p.barStart(callBar + 4) + i * spb;
+        rig.at(tc, () => rig.rhythm.callNote(i, tc), 0.1);
+        rig.at(te, () => rig.rhythm.echoNote(i, te, true), 0.1);
+        rig.at(tc2, () => rig.rhythm.callNote(3 - i, tc2), 0.1);
+        rig.at(te2, () => rig.rhythm.echoNote(3 - i, te2, i !== 2), 0.1);
+      }
+      rig.at(p.barStart(callBar + 2), () => rig.rhythm.echoResult(true), 0.05);
+      rig.at(p.barStart(callBar + 5), () => rig.rhythm.echoResult(false), 0.05);
+    }
+    const r = await rig.render();
+    return { r, p };
+  };
+  const { r, p } = await run(true);
+  const ref = (await run(false)).r;
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  stats.cats = r.cats;
+  const lu = (buf: AudioBuffer, a: number, b: number) => Math.round(measureRange(buf, a, b).lufs * 10) / 10;
+  const bar = (buf: AudioBuffer, k: number, n = 1) => lu(buf, p.barStart(k), p.barStart(k + n));
+  const taps = [{ q: 'none', lufs: bar(r.buf, 1), ref: bar(ref.buf, 1) }, ...qs.map((q, i) => ({ q, lufs: bar(r.buf, 2 + i), ref: bar(ref.buf, 2 + i) }))];
+  const solos = kinds.map((kind, i) => {
+    const b = soloBar0 + i * 2;
+    const m = measureRange(r.buf, p.barStart(b), p.barStart(b + 1));
+    const h = harmonyCheck(r.buf, p, b, b + 1);
+    return { kind, lufs: Math.round(m.lufs * 10) / 10, before: bar(ref.buf, b), peakDb: Math.round(m.peakDb * 10) / 10, inChord: h.inChord };
+  });
+  const hc = harmonyCheck(r.buf, p, callBar, callBar + 6);
+  return { stats, taps, solos, call: { lufs: bar(r.buf, callBar, 6), ref: bar(ref.buf, callBar, 6), inScale: hc.inScale }, wav: o.wav ? wavBase64(r.buf) : undefined };
 }

@@ -35,13 +35,13 @@ interface KindCfg {
 
 const KIND: Record<TowerKind, KindCfg> = {
   harp: { cap: 3, base: 0.6, wet: 1, panMul: 1 },
-  drum: { cap: 2, base: 0.21, wet: 0, panMul: 0.35 },
-  bell: { cap: 2, base: 0.14, wet: 2, panMul: 0.8 },
-  shaker: { cap: 1, base: 0.24, wet: 1, panMul: 1 },
+  drum: { cap: 2, base: 0.56, wet: 0, panMul: 0.35 },
+  bell: { cap: 2, base: 0.19, wet: 2, panMul: 0.8 },
+  shaker: { cap: 1, base: 0.62, wet: 1, panMul: 1 },
   crystal: { cap: 3, base: 0.36, wet: 1, panMul: 1 },
   horn: { cap: 3, base: 0.38, wet: 1, panMul: 0.6 },
-  choir: { cap: 1, base: 0.135, wet: 2, panMul: 0.5 },
-  bass: { cap: 1, base: 0.26, wet: 0, panMul: 0.2 },
+  choir: { cap: 1, base: 0.21, wet: 2, panMul: 0.5 },
+  bass: { cap: 1, base: 0.38, wet: 0, panMul: 0.2 },
 };
 
 const BUS_PANS = [-0.65, -0.32, 0, 0.32, 0.65];
@@ -97,7 +97,13 @@ export class Towers {
     this.buses = WETS.map((wet) => BUS_PANS.map((pan) => new Channel(core, core.towerBus, core.sfxWet, { pan, wet, gain: 1 })));
     // tower instruments first (they are the melody of every battle)
     bank.warm('harp', 55, 96, 3);
-    bank.warm('taiko', 30, 46, 3);
+    bank.warm('tdrum', 47, 67, 3);
+    bank.warm('tom', 41, 50, 3);
+    bank.warm('tbass', 40, 60, 3);
+    bank.warm('choirx', 58, 84, 3);
+    bank.warm('tamb', 60, 60, 3);
+    bank.warm('rim', 60, 60, 4);
+    bank.warm('taiko', 30, 46, 4);
     bank.warm('tbell', 55, 80, 3);
     bank.warm('shaker', 60, 60, 3);
     bank.warm('zap', 70, 93, 3);
@@ -114,6 +120,19 @@ export class Towers {
 
   setBand(m: BandMix): void {
     this.duets = new Set(m.duets);
+    this.harmony = clamp(m.harmony, 0, 5);
+  }
+
+  /** harmony of the band (0…5): a bigger band spreads wider across the stereo field */
+  private harmony = 5;
+
+  /** the chord's root in [lo, hi] (nearest the middle) */
+  private rootIn(c: Chord, lo: number, hi: number): number {
+    const xs: number[] = [];
+    for (let m = lo; m <= hi; m++) if (pcOf(m) === c.root) xs.push(m);
+    if (!xs.length) return lo;
+    const mid = (lo + hi) / 2;
+    return xs.reduce((a, x) => (Math.abs(x - mid) < Math.abs(a - mid) ? x : a));
   }
 
   // ───────────────────────────── grid & harmony ─────────────────────────────
@@ -157,7 +176,9 @@ export class Towers {
     const all = `*:${step}`;
     const n = this.stepCounts.get(key) ?? 0;
     const tot = this.stepCounts.get(all) ?? 0;
-    if (n >= cap || tot >= STEP_CAP) return -1;
+    // the first voice of every kind always gets through (the global cap only thins doublings), so a
+    // crowd of harps can never swallow the drum, the bell or the bass on a busy step
+    if (n >= cap || (n > 0 && tot >= STEP_CAP)) return -1;
     this.stepCounts.set(key, n + 1);
     this.stepCounts.set(all, tot + 1);
     if (++this.prune > 400) {
@@ -180,6 +201,26 @@ export class Towers {
       else if (tt < t - barDur * 8) this.all.delete(k);
     }
     return 1 / Math.sqrt(1 + 0.07 * Math.max(0, n - 1));
+  }
+
+  /** the backing's level under the band (linear) and when it was last set */
+  private leadLevel = 1;
+  private leadT = -1;
+
+  /**
+   * The band leads: the backing steps back gently as the band gets busy (distinct towers heard in
+   * the last bar: one ≈ −0.5 dB … eight or more ≈ −2.5 dB) and comes back when the towers stop.
+   */
+  private lead(t: number, barDur: number, spb: number): void {
+    let n = 0;
+    for (const tt of this.all.values()) if (tt > t - barDur && tt <= t + 0.001) n++;
+    const dB = n <= 0 ? 0 : -Math.min(2.5, 0.5 + 0.3 * (n - 1));
+    const target = Math.pow(10, dB / 20);
+    if (t < this.leadT - 0.001) return;
+    if (Math.abs(target - this.leadLevel) < 0.02 && t - this.leadT < spb) return;
+    this.leadLevel = target;
+    this.leadT = t;
+    this.core.leadAt(target, t, barDur * 1.5);
   }
 
   /** overall level of tower voices: calibrated so that one tower of each kind ≈ the backing's loudness */
@@ -208,7 +249,9 @@ export class Towers {
   }
 
   private bus(wet: WetClass, pan: number, mul: number): Channel {
-    const p = clamp((Number.isFinite(pan) ? pan : 0) * mul, -1, 1);
+    // a lone musician sits near the middle; the full band (harmony 5) spreads wide
+    const width = 0.7 + 0.12 * this.harmony;
+    const p = clamp((Number.isFinite(pan) ? pan : 0) * mul * width, -1, 1);
     const i = clamp(Math.round((p + 1) * 2), 0, 4);
     return this.buses[wet][i];
   }
@@ -230,6 +273,7 @@ export class Towers {
     const order = this.claim(kind, g.step, cfg.cap);
     if (order < 0 && kind !== 'choir') return;
     const dens = this.density(kind, v, t, g.barDur) * this.globalDensity(kind, v, t, g.barDur);
+    this.lead(t, g.barDur, g.spb);
     const vel = this.trim * cfg.base * dens * (order <= 0 ? 1 : order === 1 ? 0.8 : 0.66) * (1 + 0.08 * lv);
     const ch = this.bus(cfg.wet, pan, cfg.panMul);
     const c = this.chordAt(t);
@@ -270,31 +314,41 @@ export class Towers {
         break;
       }
       case 'drum': {
-        const p = this.director.ref;
-        const tonic = p ? p.keyAtTime(t).tonicPc : 0;
-        let r = 33;
-        while (pcOf(r) !== tonic) r++;
-        const m = v % 2 === 0 ? r : r - 5;
-        this.note('taiko', ch, t, m, vel * accent, 2, { release: 0.6 }, kind);
-        if (lv >= 1) this.note('tom', ch, t, m + 12, vel * 0.22 * lv, 0.4, { release: 0.2 }, kind);
+        // the battle drum: a tight, bright snare-tom tuned to the chord (root, or the fifth for the
+        // second drum) — the backing keeps the turtle's deep footstep drum, this one cuts through it
+        const root = this.rootIn(c, 53, 64);
+        let fifth = chordTones(c, root + 5, root + 9)[0] ?? root;
+        if (fifth > 66) fifth -= 12;
+        const m = v % 2 === 0 ? root : fifth;
+        this.note('tdrum', ch, t, m, vel * accent, 0.5, { release: 0.12 }, kind);
+        const sx = g.spb / 4;
+        // level 1: a ghost stroke on the next 16th ("ta-ka"); level 2: "ta-ka-ta" and a rim crack
+        if (lv >= 1) this.note('tdrum', ch, t + sx, m, vel * 0.36, 0.25, { release: 0.08 }, kind);
+        if (lv === 2) {
+          this.note('tdrum', ch, t + 2 * sx, fifth === m ? root : fifth, vel * 0.5, 0.3, { release: 0.1 }, kind);
+          this.note('rim', ch, t, 60, vel * 0.5, 0.15, {}, kind);
+        }
         // groundwork: the drum lands together with a sub on the root
         if (D.has('groundwork') && g.stepInBar % 8 === 0) this.note('boom', ch, t, bassNote(c, 28), vel * 0.5, 1.2, { release: 0.4 }, kind);
         break;
       }
       case 'bell': {
+        // a bell toll on the tune's strong note (or a chord tone), with a bright strike on top so its
+        // attack speaks on any speaker
         let m: number;
-        if (guide !== null) m = nearestChordTone(c, fold(guide, 60, 74));
+        if (guide !== null) m = nearestChordTone(c, fold(guide, 64, 79));
         else {
           const which = [0, 2, 1][v % 3];
           const pc = c.pcs[Math.min(which, c.pcs.length - 1)];
-          m = 60;
+          m = 64;
           while (pcOf(m) !== pc) m++;
         }
-        if (m > 74) m -= 12;
+        if (m > 79) m -= 12;
         this.lastBell = m;
         const dur = this.holdFor(t, m, g.spb, 10);
         this.note('tbell', ch, t, m, vel * accent, dur, { release: 1.2, cap: 110 }, kind);
-        if (lv >= 1 || D.has('shimmer')) this.note('glass', ch, t, m + 24, vel * (lv === 2 || D.has('shimmer') ? 0.16 : 0.09), Math.min(dur, 3), { release: 1 }, kind);
+        this.note('celesta', ch, t, m + 12, vel * 0.42 * accent, Math.min(dur, 2.5), { release: 0.8 }, kind);
+        if (lv >= 1 || D.has('shimmer')) this.note('glass', ch, t, m + 24 <= 98 ? m + 24 : m + 12, vel * (lv === 2 || D.has('shimmer') ? 0.22 : 0.14), Math.min(dur, 3), { release: 1 }, kind);
         // hymn: the choir sings the bell's note with it
         if (D.has('hymn')) this.note('choiroo', ch, t + 0.02, m - 12 >= 50 ? m - 12 : m, vel * 0.7, Math.min(dur, 4 * g.spb), { release: 0.9, cap: 110 }, kind);
         break;
@@ -305,6 +359,9 @@ export class Towers {
         const groove = D.has('groove');
         const acc = groove ? (g.stepInBar % 8 === 6 ? 1.25 : off ? 1 : 0.5) : off ? 1 : 0.62;
         this.note('shaker', ch, t, 60 + (off ? 0 : 1.2) + rand(-0.15, 0.15), vel * acc, 0.2, { release: 0.05 }, kind);
+        // the jingle that makes it a musician (and not the backing's hi-hat): a tambourine on the off-beats
+        if (off || lv === 2) this.note('tamb', ch, t, 60 + rand(-0.2, 0.2), vel * acc * 0.55, 0.3, { release: 0.1 }, kind);
+        if (lv >= 1 && g.stepInBar % 8 === 6) this.note('shaker', ch, t + g.spb / 8, 60.6, vel * 0.45, 0.15, { release: 0.04 }, kind);
         if (groove && (g.stepInBar === 4 || g.stepInBar === 12)) this.note('clap', ch, t, 60, vel * 0.7, 0.3, { release: 0.1 }, kind);
         break;
       }
@@ -340,7 +397,17 @@ export class Towers {
         let fifth = root + 1;
         while (pcOf(fifth) !== fifthPc) fifth++;
         const pick = order <= 0 ? v % 2 : order;
-        const m = pick === 0 ? root : pick === 1 ? fifth : root + 12;
+        let m = pick === 0 ? root : pick === 1 ? fifth : root + 12;
+        // the lead horn sings the tune's note of the moment (a chord tone in the horn's range) over
+        // its root: the hook rings out in brass
+        if (guide !== null && order <= 0 && this.rank('horn', v, t, g.barDur) === 0 && !D.has('fanfare')) {
+          const hm = nearestChordTone(c, fold(guide, 57, 70));
+          const dur = Math.min(1.6 * g.spb, this.holdFor(t, hm, g.spb, 2));
+          this.note('brass', ch, t, hm, vel * accent, dur, { release: 0.28 }, kind);
+          this.note('brass', ch, t, root, vel * 0.6, dur, { release: 0.28 }, kind);
+          if (lv === 2) this.note('brass', ch, t, hm + 12 <= 77 ? hm + 12 : hm, vel * 0.4, dur * 0.85, { release: 0.25 }, kind);
+          break;
+        }
         if (D.has('fanfare') && order <= 0) {
           // fanfare: a call — root, (a dotted eighth later) the fifth above, held
           const t2 = t + 0.75 * g.spb;
@@ -357,8 +424,9 @@ export class Towers {
         break;
       }
       case 'choir': {
-        const inst: BufInst = v % 2 === 0 ? 'choir' : 'choiroo';
         const hymn = D.has('hymn');
+        // a sung attack ('ah' with a consonant) so the chord speaks at once; the hymn hums ('oo')
+        const inst: BufInst = hymn ? 'choiroo' : 'choirx';
         const span = hymn ? 8 : lv === 2 ? 2 : 4;
         const dur = Math.min(span * g.spb, this.holdFor(t, bassNote(c, 55), g.spb, span) + 0.05);
         const prev = this.choirStep.get(g.step);
@@ -373,7 +441,7 @@ export class Towers {
           this.note(inst, ch, t, up, vel * 0.55, dur, { release: 0.7, cap: 110 }, kind);
           return;
         }
-        const notes = voiceLead(this.lastChoir, c, 55, 72, 3);
+        const notes = voiceLead(this.lastChoir, c, 60, 77, 3);
         this.lastChoir = notes;
         this.choirStep.set(g.step, { notes: [...notes], extra: 0 });
         if (this.choirStep.size > 64) for (const k of this.choirStep.keys()) if (k < g.step - 64) this.choirStep.delete(k);
@@ -381,9 +449,21 @@ export class Towers {
         break;
       }
       case 'bass': {
+        // the sub drop for the body, and a bright growling bass an octave up (the harmonics are what
+        // small speakers play), popping the octave on the next eighth
         const m = bassNote(c, 28);
-        this.note('boom', ch, t, m, vel * accent, 2.2, { release: 0.5 }, kind);
-        if (lv >= 1) this.note('boom', ch, t, m + 12, vel * 0.18 * lv, 1, { release: 0.3 }, kind);
+        const b2 = m + 12 <= 47 ? m + 12 : m;
+        this.note('boom', ch, t, m, vel * 0.36 * accent, 2.2, { release: 0.5 }, kind);
+        this.note('tbass', ch, t, b2, vel * 1.15 * accent, Math.min(1.6 * g.spb, this.holdFor(t, b2, g.spb, 2)), { release: 0.2 }, kind);
+        const t2 = t + g.spb / 2;
+        const c2 = this.peek(t2);
+        if (c2.pcs.includes(pcOf(b2))) this.note('tbass', ch, t2, b2 + 12, vel * 0.55, 0.4 * g.spb, { release: 0.1 }, kind);
+        if (lv >= 1) {
+          const t3 = t + g.spb;
+          const c3 = this.peek(t3);
+          const fifth = chordTones(c3, b2 + 5, b2 + 8)[0];
+          if (fifth !== undefined) this.note('tbass', ch, t3, fifth, vel * 0.5 * (lv === 2 ? 1.2 : 1), 0.45 * g.spb, { release: 0.12 }, kind);
+        }
         if (D.has('groundwork')) this.note('taiko', ch, t, bassNote(c, 33), vel * 0.6, 1.6, { release: 0.5 }, kind);
         if (D.has('thunder')) {
           // thunder: the drop glints — a crystal arc flies up from it
@@ -401,6 +481,7 @@ export class Towers {
 
   impact(kind: TowerKind, t: number, pan: number, strength: number): void {
     const s = clamp(Number.isFinite(strength) ? strength : 0.5, 0, 1.5);
+    if (!KIND[kind]) return;
     if (kind === 'bell' || kind === 'choir' || kind === 'shaker') return;
     const g = this.grid(t);
     const cap = kind === 'bass' || kind === 'horn' ? 1 : 2;

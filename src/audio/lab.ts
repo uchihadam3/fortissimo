@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderCinema, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderCinema, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
+  offline: { renderBalance, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;
@@ -229,6 +229,43 @@ button(ev, 'count-in', () => {
   const b0 = nextBar();
   for (let k = 0; k < 4; k++) audio.countIn(b0 + k * (c?.spb ?? 0.6), k);
 });
+// ── v3: the player conducts ──
+const rh = section('Rhythm (v3)', 'Start a battle song first. Taps land on the next beat; the groove changes at the next bar line; solos and the call start on the next bar.');
+const nextBeat = () => {
+  const c = audio.songClock();
+  if (!c) return t();
+  return c.t0 + Math.ceil((audio.now() + 0.08 - c.t0) / c.spb) * c.spb;
+};
+const tapRow = row(rh, 'baton');
+for (const q of ['perfect', 'good', 'miss'] as const) button(tapRow, `tap ${q}`, () => audio.beatTap(nextBeat(), q, 0));
+button(tapRow, 'tap a bar (perfect)', () => {
+  const c = audio.songClock();
+  const b0 = nextBar();
+  for (let k = 0; k < 4; k++) audio.beatTap(b0 + k * (c?.spb ?? 0.6), 'perfect', 0);
+});
+const gRow = row(rh, 'groove');
+for (const g of [0, 1, 2, 3, 4]) button(gRow, `groove ${g}`, () => audio.setGroove(g));
+const sRow = row(rh, 'solos');
+for (const kind of KINDS) button(sRow, kind, () => audio.solo(kind, 2, nextBar(), 0, 1));
+const cRow = row(rh, 'call & echo');
+button(cRow, 'call (next bar)', () => {
+  const c = audio.songClock();
+  const b0 = nextBar();
+  for (let i = 0; i < 4; i++) audio.callNote(i, b0 + i * (c?.spb ?? 0.6));
+});
+button(cRow, 'echo right (next bar)', () => {
+  const c = audio.songClock();
+  const b0 = nextBar();
+  for (let i = 0; i < 4; i++) audio.echoNote(i, b0 + i * (c?.spb ?? 0.6), true);
+});
+button(cRow, 'echo wrong (next bar)', () => {
+  const c = audio.songClock();
+  const b0 = nextBar();
+  for (let i = 0; i < 4; i++) audio.echoNote(3 - i, b0 + i * (c?.spb ?? 0.6), i !== 2);
+});
+button(cRow, 'success', () => audio.echoResult(true));
+button(cRow, 'fail', () => audio.echoResult(false));
+
 const res = row(bt, 'results');
 button(res, 'arrive → victory', () => {
   audio.cinematic('world:restored');

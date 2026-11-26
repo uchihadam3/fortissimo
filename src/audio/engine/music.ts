@@ -55,6 +55,9 @@ export interface BarCtx {
   /** the band on the shell for this bar and the previous one */
   band: BandMix;
   bandPrev: BandMix;
+  /** the player's groove (0…4: their run of on-beat taps) for this bar and the previous one */
+  groove: number;
+  groovePrev: number;
 }
 
 export abstract class Theme {
@@ -87,6 +90,10 @@ export abstract class Theme {
   invalidate(_bar: number): void {}
   /** release any extra nodes created in setup */
   dispose(): void {}
+  /** the arrangement follows the band on the shell (battle songs): the backing's size follows it too */
+  get followsBand(): boolean {
+    return false;
+  }
 }
 
 interface FFWindow {
@@ -114,6 +121,7 @@ export class Player {
   private ilog: { bar: number; level: number }[];
   private blog: { bar: number; mix: BandMix }[];
   private mlog: { bar: number; index: number; total: number }[] = [];
+  private glog: { bar: number; level: number }[];
   /** highest bar whose harmony has been handed out (to towers) before it was composed */
   private observed = -1;
   private readonly ff: FFWindow[] = [];
@@ -159,6 +167,7 @@ export class Player {
     this.t0 = t0;
     this.ilog = [{ bar: -1e9, level: clamp(Math.round(intensity), 0, 3) }];
     this.blog = [{ bar: -1e9, mix: director.band }];
+    this.glog = [{ bar: -1e9, level: director.groove }];
   }
 
   /** channel-name namespace (a medley lends the player to several songs' arrangement code) */
@@ -286,6 +295,26 @@ export class Player {
     return firstFree;
   }
 
+  grooveAt(bar: number): number {
+    let lv = this.glog[0].level;
+    for (const e of this.glog) {
+      if (e.bar <= bar) lv = e.level;
+      else break;
+    }
+    return lv;
+  }
+
+  /** the groove changes from the next free bar line */
+  setGroove(level: number, now: number): number {
+    const lv = clamp(Math.round(level), 0, 4);
+    const firstFree = this.firstFree(now);
+    this.glog = this.glog.filter((e) => e.bar < firstFree);
+    if (this.grooveAt(firstFree - 1) !== lv) this.glog.push({ bar: firstFree, level: lv });
+    if (this.glog.length > 64) this.glog.splice(1, this.glog.length - 64);
+    this.theme.invalidate(firstFree);
+    return firstFree;
+  }
+
   /**
    * Movement `index` of `total` begins at the downbeat nearest to context time t - or, when that bar
    * is already composed (the call came late), at the next free bar line.
@@ -361,6 +390,8 @@ export class Player {
       build: this.isBuild(bar),
       band: this.bandAt(bar),
       bandPrev: this.bandAt(bar - 1),
+      groove: this.grooveAt(bar),
+      groovePrev: this.grooveAt(bar - 1),
     };
   }
 
@@ -545,6 +576,8 @@ export class Director {
   world: WorldId | null = null;
   /** the band last reported by the game (new players start with it) */
   band: BandMix = FULL_BAND;
+  /** the player's groove (0…4) last reported (new players start with it) */
+  groove = 0;
   /** the most recently started track (its harmony and grid stay the reference after it stops) */
   last: Player | null = null;
 
@@ -576,6 +609,7 @@ export class Director {
     this.last = p;
     this.core.setReverbMode(theme.reverb, Math.max(0.5, f));
     p.start();
+    this.applySize();
     return p;
   }
 
@@ -635,10 +669,25 @@ export class Director {
     return p ? p.keyAtTime(t) : null;
   }
 
+  /** the backing's size: the band's harmony for battle songs, the full size for everything else */
+  applySize(): void {
+    const p = this.current;
+    this.core.setBandSize(p && p.theme.followsBand ? this.band.harmony : 5);
+  }
+
   setBand(mix: BandMix): void {
     this.band = mix;
+    this.applySize();
     const p = this.current;
     if (p && !p.stopped) p.setBand(mix, this.core.now);
+  }
+
+  /** the player's groove changes from the next free bar line; returns when (context time), or null */
+  setGroove(level: number): number | null {
+    this.groove = clamp(Math.round(Number.isFinite(level) ? level : 0), 0, 4);
+    const p = this.current;
+    if (!p || p.stopped) return null;
+    return p.barStart(p.setGroove(this.groove, this.core.now));
   }
 
   movement(index: number, total: number, t: number): void {

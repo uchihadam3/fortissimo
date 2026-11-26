@@ -259,7 +259,7 @@ export class BufferBank {
 function liteVoice(core: Core, inst: BufInst, dest: AudioNode, t: number, midi: number, vel: number, dur: number, rel: number): void {
   if (core.voiceCount('lite') >= 24) return;
   const ctx = core.ctx;
-  if (PERC.has(inst) || inst === 'taiko' || inst === 'tom' || inst === 'timp' || inst === 'boom') {
+  if (PERC.has(inst) || inst === 'tdrum' || inst === 'taiko' || inst === 'tom' || inst === 'timp' || inst === 'boom') {
     // percussion stand-in: a short filtered noise tick or a low thump
     const low = inst === 'kick' || inst === 'dum' || inst === 'taiko' || inst === 'tom' || inst === 'timp' || inst === 'boom' || inst === 'gong';
     const g = ctx.createGain();
@@ -281,7 +281,7 @@ function liteVoice(core: Core, inst: BufInst, dest: AudioNode, t: number, midi: 
       const n = core.noise('white', t);
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass';
-      hp.frequency.value = inst === 'snare' || inst === 'clap' ? 1500 : 5000;
+      hp.frequency.value = inst === 'snare' || inst === 'clap' || inst === 'tdrum' ? 1500 : 5000;
       n.connect(hp).connect(g);
       src = n;
       nodes.push(n, hp);
@@ -293,7 +293,7 @@ function liteVoice(core: Core, inst: BufInst, dest: AudioNode, t: number, midi: 
     return;
   }
   const f = mtof(midi);
-  const plucked = inst === 'piano' || inst === 'epiano' || inst === 'harp' || inst === 'guitar' || inst === 'koto' || inst === 'oud' || inst === 'pizz' || inst === 'harpsi' || inst === 'mando' || inst === 'spicc' || inst === 'zap';
+  const plucked = inst === 'piano' || inst === 'epiano' || inst === 'harp' || inst === 'guitar' || inst === 'koto' || inst === 'oud' || inst === 'pizz' || inst === 'harpsi' || inst === 'mando' || inst === 'spicc' || inst === 'zap' || inst === 'tbass';
   const tau = inst === 'bell' || inst === 'tbell' ? 2.5 : inst === 'glass' || inst === 'anvil' ? 1.4 : inst === 'wood' ? 0.07 : inst === 'pizz' || inst === 'spicc' ? 0.2 : inst === 'zap' ? 0.3 : plucked ? clamp(1.4 - (midi - 60) * 0.02, 0.3, 1.6) : 0.7;
   const o = ctx.createOscillator();
   o.type = plucked ? 'triangle' : 'sine';

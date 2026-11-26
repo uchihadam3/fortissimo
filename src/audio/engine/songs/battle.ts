@@ -21,7 +21,7 @@
 import type { MNote } from '../compose';
 import type { BarInfo } from '../compose';
 import type { BarCtx } from '../music';
-import { SUB, type BufInst } from '../synth';
+import { LOWBRASS, SUB, type BufInst } from '../synth';
 import { chordTones, type Chord, pcOf } from '../theory';
 import { rand } from '../util';
 import { AdaptiveSong, type Layers } from './adaptive';
@@ -79,12 +79,29 @@ export abstract class Battle extends AdaptiveSong {
   tail(b: BarCtx): void {
     if (b.build || b.drop) return;
     const nextI = b.p.intensityAt(b.bar + 1);
-    if (nextI > b.I && !b.p.isBuild(b.bar + 1) && !b.p.dropIndex(b.bar + 1)) this.fill(b);
+    if (nextI > b.I && !b.p.isBuild(b.bar + 1) && !b.p.dropIndex(b.bar + 1)) {
+      this.fill(b);
+      if (b.I === 0 || nextI >= 3) this.waveBuild(b, nextI);
+    }
   }
 
-  /** true when this bar starts a new, louder layer (crash-worthy) */
+  /**
+   * The build into a wave (the calm turns into battle, or the battle into its climax): timpani and
+   * the snare roll up through the last two beats, the choir and brass swell into the downbeat.
+   */
+  protected waveBuild(b: BarCtx, nextI: number): void {
+    const K = this.kit;
+    const next = this.chordAt(b.bar + 1, 0, b.p);
+    const big = nextI >= 3 ? 1.2 : 1;
+    this.roll(b, 'timp', K.timp, 2, 4, 6, 0.08, 0.36 * big, this.tone(next, 40, 0));
+    this.roll(b, K.snare, K.perc, 3, 4, 8, 0.08, 0.34 * big);
+    this.play(b, { ...LOWBRASS(0.65), attack: 1.6 * b.spb, release: 0.2 }, K.brass, 2, this.tone(next, 50, 0), 0.4 * big, 2 * b.spb);
+    this.play(b, { ...LOWBRASS(0.65), attack: 1.6 * b.spb, release: 0.2 }, K.brass, 2, this.tone(next, 50, 2), 0.32 * big, 2 * b.spb);
+  }
+
+  /** true when this bar starts a new, louder layer (crash-worthy): a wave arriving, or a heavier one */
   protected rise(b: BarCtx): boolean {
-    return !b.drop && b.I > b.Iprev && b.I >= 2;
+    return !b.drop && b.I > b.Iprev && (b.I >= 2 || b.Iprev === 0);
   }
 
   /** the final plan of the song is playing (the grand last movement) */
@@ -271,8 +288,15 @@ export abstract class Battle extends AdaptiveSong {
     }
   }
 
-  /** the full band in glory (harmony 5): harp sweeps into phrases, timpani rolls into sections */
+  /**
+   * The full band in glory, and everything that grows with it. Every battle song calls this once per
+   * bar: harmony >= 3 brings choir swells into the phrases, >= 4 brass swells and a stab on every
+   * phrase, 5 the full glory (harp sweeps, timpani rolls into sections, a choir 'ah' over every bar);
+   * the player's groove adds its energy layers on top (see grooveLayers).
+   */
   protected glory(b: BarCtx, f: BarInfo, L: Layers, I: number, harpCh: string | null): void {
+    this.tutti(b, f, L, I);
+    this.grooveLayers(b, f, I);
     if (L.h < 5) return;
     if (f.last && !b.drop && !b.build) {
       this.roll(b, 'timp', this.kit.timp, 2, 4, 6, 0.08, I >= 2 ? 0.42 : 0.3, this.tone(f.next, 40, 0));
@@ -280,6 +304,67 @@ export abstract class Battle extends AdaptiveSong {
         const c = this.cAt(f, 3);
         const tones = chordTones(c, 55, 86);
         for (let k = 0; k < 12 && tones.length; k++) this.play(b, 'harp', harpCh, 2.5 + k * 0.125, tones[k % tones.length], 0.16 + 0.01 * k, 0.8 * b.spb, undefined, 0.002);
+      }
+    }
+  }
+
+  /** the layers a big band adds to the battle (none in breakdowns, the calm or a small band) */
+  private tutti(b: BarCtx, f: BarInfo, L: Layers, I: number): void {
+    if (this.isBreak || I === 0 || b.build || L.h < 3) return;
+    const K = this.kit;
+    const phraseEnd = f.i % 4 === 3;
+    const phraseStart = f.i % 4 === 0;
+    // choir swells: an 'ah' chord rising into the next phrase (every bar at harmony 5)
+    if (phraseEnd || L.h >= 5) {
+      const v = (phraseEnd ? 0.16 : 0.11) * (L.h >= 5 ? 1.2 : 1);
+      this.chords(b, f, 'tutti-ch', 'choir', K.choir, 60, 76, 3, v, 0.4);
+    }
+    if (L.h >= 4) {
+      // brass: a swell across the phrase's last bar, a stab on the downbeat it lands on
+      if (phraseEnd && !b.drop) this.chords(b, f, 'tutti-sw', { ...LOWBRASS(0.6), attack: 3.2 * b.spb, release: 0.5 }, K.brass, 50, 67, 3, 0.4, 0.15);
+      if (phraseStart) this.stabs(b, f, 'tutti-st', 'brass', K.brass, 52, 69, 3, [0], 0.48, 0.9);
+    }
+    if (L.h >= 5 && phraseStart && !b.drop) b.p.hit('crash', K.perc, this.T(b, 0, 0.001), I >= 2 ? 0.26 : 0.2);
+    // the full band sings the hook: the choir hums the towers' tune with them
+    if (L.h >= 5) this.tune(b, f, 'choiroo', K.choir, 0.15, { legato: 1.0, release: 0.5 });
+  }
+
+  /**
+   * The player's groove (0..4, their run of on-beat baton taps), on bar lines: 1 claps on the
+   * backbeat and running shakers, 2 choir shouts, 3 brass hits, 4 everything, with drum fills
+   * into every second bar, a tambourine and the crash on every phrase.
+   */
+  private grooveLayers(b: BarCtx, f: BarInfo, I: number): void {
+    const g = b.groove;
+    if (!g || b.build) return;
+    const K = this.kit;
+    const soft = this.isBreak || I === 0 ? 0.6 : 1;
+    const fresh = b.groovePrev < g ? 0.9 : 1;
+    const v = 1.5 * soft * fresh;
+    this.drum(b, K.clap, K.perc, '....x.......x...', 0.34 * v);
+    this.drum(b, K.shake, K.perc, g >= 4 ? 'xoxoxoxoxoxoxoxo' : 'x.o.x.o.x.o.x.o.', 0.3 * v);
+    if (g >= 2) {
+      // "Hey!": the choir shouts a chord on the downbeat of every other bar, and on the and-of-4
+      const at = f.i % 2 === 0 ? [0] : [3.5];
+      for (const beat of at) {
+        const tones = chordTones(this.cAt(f, beat), 62, 74).slice(0, 3);
+        tones.forEach((m, k) => b.p.buf('choirx', K.choir, this.T(b, beat, 0.002), m, (0.3 - k * 0.03) * v, 0.32 * b.spb, { release: 0.12 }));
+      }
+    }
+    if (g >= 3) {
+      // brass hits on the syncopations
+      this.stabs(b, f, 'groove-br', 'brass', K.brass, 55, 70, 3, f.i % 2 === 0 ? [0, 1.5] : [2.5, 3.5], 0.36 * v, 0.3);
+    }
+    if (g >= 4) {
+      // the hook in the horns, an octave under the towers' tune (battle only: the towers carry it)
+      if (!this.isBreak && I >= 1) this.tune(b, f, 'brass', K.brass, 0.34 * soft, { shift: -12, legato: 0.9 });
+      b.p.buf('timp', K.timp, this.T(b, 0, 0.001), this.tone(this.cAt(f, 0), 40, 0), 0.36 * v, 2);
+      this.drum(b, 'tamb', K.perc, '..x...x...x...x.', 0.3 * v);
+      if (f.i % 4 === 0 && !b.drop) b.p.hit('crash', K.perc, this.T(b, 0, 0.001), 0.3 * v);
+      if (f.i % 2 === 1 && !b.drop) {
+        // a fill: snare sixteenths, then the toms tumbling down into the next bar
+        this.roll(b, K.snare, K.perc, 3, 3.5, 4, 0.22 * v, 0.34 * v);
+        [52, 48, 45].forEach((m, k) => b.p.hit('tom', K.perc, this.T(b, 3.5 + k * (0.5 / 3), 0.002), (0.4 + k * 0.06) * v, m));
       }
     }
   }

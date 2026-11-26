@@ -68,6 +68,19 @@ export class Core {
   readonly towerComp: DynamicsCompressorNode;
   /** undoes the compressor's automatic make-up gain (quiet towers pass at unity) */
   private readonly towerMakeup: GainNode;
+  /** the player's own sounds (baton taps, solos, call & echo): dry, never ducked, beside the towers */
+  readonly rhythmBus: GainNode;
+  /** the backing steps back under a busy band (the band leads): set by the towers, per bar */
+  readonly bandLead: GainNode;
+  private readonly bandLeadW: GainNode;
+  /** the backing grows with the band: a little quieter and narrower for a lone musician */
+  private readonly bandSize: GainNode;
+  private readonly bandSizeW: GainNode;
+  /** mid/side widener of the dry music (side gain follows the band's harmony) */
+  private readonly wideLL: GainNode;
+  private readonly wideLR: GainNode;
+  private readonly wideRL: GainNode;
+  private readonly wideRR: GainNode;
 
   private readonly musicDuck: GainNode;
   private readonly musicTone: BiquadFilterNode;
@@ -160,6 +173,22 @@ export class Core {
     this.towerComp.release.value = 0.25;
     // Web Audio compressors add make-up gain ≈ 0.6 · (full-range gain reduction): −12 dB / 3:1 → +4.8 dB
     this.towerMakeup = g(Math.pow(10, -4.8 / 20));
+    this.rhythmBus = g(1);
+    this.bandLead = g(1);
+    this.bandLeadW = g(1);
+    this.bandSize = g(1);
+    this.bandSizeW = g(1);
+    this.wideLL = g(1);
+    this.wideLR = g(0);
+    this.wideRL = g(0);
+    this.wideRR = g(1);
+    const split = ctx.createChannelSplitter(2);
+    const merge = ctx.createChannelMerger(2);
+    this.bandSize.connect(split);
+    split.connect(this.wideLL, 0).connect(merge, 0, 0);
+    split.connect(this.wideLR, 1).connect(merge, 0, 0);
+    split.connect(this.wideRL, 0).connect(merge, 0, 1);
+    split.connect(this.wideRR, 1).connect(merge, 0, 1);
 
     this.musicTone = ctx.createBiquadFilter();
     this.musicTone.type = 'highshelf';
@@ -186,11 +215,13 @@ export class Core {
     this.muffleLPW = lp();
     this.muffleGain = g();
     this.muffleGainW = g();
-    this.musicDry.connect(this.musicDuck).connect(this.musicTone).connect(this.musicHP).connect(this.muffleLP).connect(this.muffleGain).connect(this.musicVol).connect(this.master);
-    this.musicWet.connect(this.musicDuckW).connect(this.musicHPW).connect(this.muffleLPW).connect(this.muffleGainW).connect(this.musicVolW).connect(this.wetSum);
+    this.musicDry.connect(this.musicDuck).connect(this.bandLead).connect(this.bandSize);
+    merge.connect(this.musicTone).connect(this.musicHP).connect(this.muffleLP).connect(this.muffleGain).connect(this.musicVol).connect(this.master);
+    this.musicWet.connect(this.musicDuckW).connect(this.bandLeadW).connect(this.bandSizeW).connect(this.musicHPW).connect(this.muffleLPW).connect(this.muffleGainW).connect(this.musicVolW).connect(this.wetSum);
     this.stingDry.connect(this.muffleLP);
     this.stingWet.connect(this.muffleLPW);
     this.towerBus.connect(this.towerComp).connect(this.towerMakeup).connect(this.sfxDry);
+    this.rhythmBus.connect(this.sfxDry);
     this.sfxDry.connect(this.sfxVol).connect(this.master);
     this.sfxWet.connect(this.sfxVolW).connect(this.wetSum);
     this.ambDry.connect(this.ambVol).connect(this.master);
@@ -235,6 +266,45 @@ export class Core {
       p.cancelScheduledValues(t);
       p.setTargetAtTime(low, t, 0.12);
       p.setTargetAtTime(1, t + Math.max(0.2, s), 0.6);
+    }
+  }
+
+  /**
+   * The size of the band (harmony 0…5): a lone musician's backing is 3 dB quieter and narrower
+   * (side ×0.6); the full band's is at full level and wide (side ×1.7).
+   */
+  setBandSize(harmony: number, t = this.now): void {
+    const h = clamp(Number.isFinite(harmony) ? harmony : 5, 0, 5);
+    const gain = Math.pow(10, (-3 + 0.6 * h) / 20);
+    const side = 0.6 + 0.22 * h;
+    const at = Math.max(this.now, t);
+    const set = (p: AudioParam, v: number) => {
+      p.cancelScheduledValues(at);
+      p.setTargetAtTime(v, at, 0.5);
+    };
+    set(this.bandSize.gain, gain);
+    set(this.bandSizeW.gain, gain);
+    set(this.wideLL.gain, (1 + side) / 2);
+    set(this.wideRR.gain, (1 + side) / 2);
+    set(this.wideLR.gain, (1 - side) / 2);
+    set(this.wideRL.gain, (1 - side) / 2);
+  }
+
+  /**
+   * The backing's level under the band: `level` (linear, 0.5…1) from t (reached in ~a quarter of a
+   * second), back to 1 after `hold` seconds unless a later call renews it.
+   */
+  leadAt(level: number, t: number, hold: number): void {
+    const v = clamp(Number.isFinite(level) ? level : 1, 0.5, 1);
+    const at = Math.max(this.now, t);
+    for (const p of [this.bandLead.gain, this.bandLeadW.gain]) {
+      try {
+        p.cancelScheduledValues(at);
+        p.setTargetAtTime(v, at, 0.08);
+        p.setTargetAtTime(1, at + Math.max(0.2, hold), 0.5);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
