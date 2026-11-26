@@ -33,6 +33,12 @@ const TAP = 0.36;
 const PICK = 0.32;
 /** level of the colossus' strikes (v4) */
 const STRIKE = 0.5;
+/** level of the virada's strokes (v7; measured: a perfect level-2 stroke stays under the song's own drum hits) */
+const FILL = 0.155;
+/** level of the virada's crash on the downbeat (measured against the song's own crash) */
+const VCRASH = 0.09;
+/** level of the "VIRADA!" chord swell */
+const SWELL = 0.25;
 
 /** each land's pickup voice (a coin collected on the beat rings a note of the song) */
 interface PickVoice {
@@ -68,6 +74,73 @@ const pingpong = (i: number, n: number): number => {
   const k = ((i % p) + p) % p;
   return k < n ? k : p - k;
 };
+
+/**
+ * Each land's drum fill (v7 viradas): the player's strokes ARE the fill while the song's kit steps
+ * back. `drum` (tuned to the chord) tumbles down from hi to lo across the marks, `body` sits under it
+ * (fuller on perfect), `hits` are unpitched strokes (high for the first half, low for the second),
+ * `tone` is the land's pitched colour on a chord tone (also falling), `stick` the attack, `jingle`
+ * a shimmer on perfect strokes.
+ */
+interface FillVoice {
+  drum: BufInst;
+  lo: number;
+  hi: number;
+  dv: number;
+  body: BufInst | null;
+  bodyLo: number;
+  bodyHi: number;
+  bv: number;
+  hits: [BufInst, BufInst] | null;
+  hv: number;
+  tone: BufInst | 'organ' | null;
+  toneLo: number;
+  toneHi: number;
+  tv: number;
+  stick: BufInst | null;
+  stickMidi: number;
+  sv: number;
+  jingle: BufInst | null;
+  /** the land's trim (measured: every land's loudest stroke at or under its song's drum hits, K and phone) */
+  trim: number;
+}
+
+/**
+ * Each land's kit energy per bar (Director.kitEnergy) with the full band at intensity 1: the level
+ * the strokes were calibrated against. A quieter kit (a breather, a band without percussion) plays a
+ * quieter fill, never a louder one.
+ */
+const KIT_REF: Record<WorldId | 'menu', number> = { meadow: 0.147, desert: 0.257, ice: 0.105, forge: 0.076, citadel: 0.12, menu: 0.147 };
+
+const FILLS: Record<WorldId | 'menu', FillVoice> = {
+  // the meadow: a frame drum falling over a floor tom, a wood block on the chord, a tambourine
+  meadow: { drum: 'tdrum', lo: 50, hi: 64, dv: 0.8, body: 'tom', bodyLo: 41, bodyHi: 53, bv: 0.45, hits: null, hv: 0, tone: 'wood', toneLo: 55, toneHi: 67, tv: 0.35, stick: 'rim', stickMidi: 60, sv: 0.22, jingle: 'tamb', trim: 1 },
+  // the dunes: the darbuka (tek on the rim, then dum in the middle) over its tuned body, the riq's jingles
+  desert: { drum: 'tdrum', lo: 49, hi: 62, dv: 0.66, body: null, bodyLo: 0, bodyHi: 0, bv: 0, hits: ['tek', 'dum'], hv: 0.62, tone: 'koto', toneLo: 64, toneHi: 76, tv: 0.2, stick: null, stickMidi: 60, sv: 0, jingle: 'tamb', trim: 0.94 },
+  // ice: glassy toms (a tom ringing down under a crack, a glass ping on the chord)
+  ice: { drum: 'tom', lo: 45, hi: 57, dv: 0.85, body: 'tdrum', bodyLo: 53, bodyHi: 65, bv: 0.3, hits: null, hv: 0, tone: 'glass', toneLo: 77, toneHi: 91, tv: 0.12, stick: 'rim', stickMidi: 63, sv: 0.1, jingle: null, trim: 0.52 },
+  // the forge: the taiko falling under the war drum, the anvil rung on the chord
+  forge: { drum: 'taiko', lo: 31, hi: 40, dv: 0.75, body: 'tdrum', bodyLo: 47, bodyHi: 59, bv: 0.3, hits: null, hv: 0, tone: 'anvil', toneLo: 72, toneHi: 88, tv: 0.12, stick: 'tek', stickMidi: 57, sv: 0.1, jingle: null, trim: 0.8 },
+  // the citadel: timpani rolling down under a hollow drum, an organ pipe on the chord
+  citadel: { drum: 'timp', lo: 41, hi: 53, dv: 0.75, body: 'tdrum', bodyLo: 50, bodyHi: 61, bv: 0.5, hits: null, hv: 0, tone: 'organ', toneLo: 60, toneHi: 74, tv: 0.32, stick: 'rim', stickMidi: 57, sv: 0.18, jingle: null, trim: 0.7 },
+  menu: { drum: 'tdrum', lo: 50, hi: 64, dv: 0.8, body: 'tom', bodyLo: 41, bodyHi: 53, bv: 0.45, hits: null, hv: 0, tone: 'wood', toneLo: 55, toneHi: 67, tv: 0.35, stick: 'rim', stickMidi: 60, sv: 0.22, jingle: 'tamb', trim: 1 },
+};
+
+/** a virada in progress (v7) */
+interface ViradaState {
+  start: number;
+  end: number;
+  n: number;
+  level: number;
+  /** the last pitch of each layer (the fill only ever falls) */
+  prev: Record<string, number>;
+  /** the crash on `end` is booked (the first hit books it) */
+  crash: boolean;
+  /** the virada's own gain (its crash can be cancelled by a new cue) */
+  bus: GainNode | null;
+  /** the strokes follow the song's kit: its level before the virada vs the land's reference (≤ 1) */
+  scale: number;
+}
 
 /** each land's baton: the drum it taps, the click on top, the pitched voice and the sparkle */
 interface Palette {
@@ -106,6 +179,10 @@ export class Rhythm {
   private lastTap = -1;
   private tapRun = 0;
   private lastSolo = -1;
+  /** the virada in progress (v7) */
+  private vir: ViradaState | null = null;
+  /** gains of earlier viradas (disconnected once their crash has rung out) */
+  private oldBuses: { bus: GainNode; until: number }[] = [];
   private lastDrop = -1e9;
   private lastTell = -1e9;
   private tellIdx = 0;
@@ -131,9 +208,10 @@ export class Rhythm {
     return (wet ? this.wetChs : this.chs)[i];
   }
 
-  private play(inst: BufInst, ch: Channel, t: number, midi: number, vel: number, dur: number, o: { release?: number; lp?: number; bend?: number; bendTime?: number; cents?: number } = {}): void {
+  private play(inst: BufInst, ch: Channel, t: number, midi: number, vel: number, dur: number, o: { release?: number; lp?: number; bend?: number; bendTime?: number; cents?: number; dest?: AudioNode } = {}): void {
     if (!(vel > 0.001) || !Number.isFinite(t)) return;
-    playBuf(this.core, this.bank, inst, ch.input, Math.max(this.core.now, t), midi, vel * this.level, dur, { cat: 'rhythm', cap: 90, ...o });
+    const { dest, ...rest } = o;
+    playBuf(this.core, this.bank, inst, dest ?? ch.input, Math.max(this.core.now, t), midi, vel * this.level, dur, { cat: 'rhythm', cap: 90, ...rest });
   }
 
   private chordAt(t: number): Chord {
@@ -668,6 +746,208 @@ export class Rhythm {
         break;
       }
     }
+  }
+
+  // ───────────────────────────── v7: viradas (the player plays the fill) ─────────────────────────────
+
+  private get fillVoice(): FillVoice {
+    return FILLS[this.director.world ?? 'menu'] ?? FILLS.menu;
+  }
+
+  /**
+   * A virada is coming: from `start` to `end` (context times; moved onto the 16th grid) the song's
+   * own drum kit steps back (Director.setVirada: tacet, the footsteps a faint ghost) so the
+   * player's strokes are the fill. A new cue replaces the previous one (its crash is cancelled).
+   */
+  viradaCue(start: number, end: number, n: number, level: number): void {
+    const now = this.core.now;
+    const g = this.grid();
+    const a = this.snap(start);
+    const b = this.snap(end);
+    if (!(b > a) || b - a > 4 * g.barDur + 1e-6 || b < now) return;
+    this.cancelVirada(now);
+    this.director.setVirada(a, b);
+    this.warmVirada();
+    const e = this.director.kitEnergy(a);
+    const ref = KIT_REF[this.director.world ?? 'menu'] ?? KIT_REF.menu;
+    const scale = e === null ? 1 : clamp(Math.sqrt(e / ref), 0.35, 1);
+    this.vir = { start: a, end: b, n: clamp(Math.round(Number.isFinite(n) ? n : 5), 1, 16), level: clamp(Math.round(Number.isFinite(level) ? level : 0), 0, 2), prev: {}, crash: false, bus: null, scale };
+  }
+
+  /** the fill's voices for this land (rendered in the background: the cue comes a bar ahead) */
+  warmVirada(): void {
+    const F = this.fillVoice;
+    this.bank.warm(F.drum, F.lo, F.hi, 2);
+    if (F.body) this.bank.warm(F.body, F.bodyLo, F.bodyHi, 2);
+    if (F.tone && F.tone !== 'organ') this.bank.warm(F.tone, F.toneLo, F.toneHi, 2);
+    for (const x of [...(F.hits ?? []), F.stick, F.jingle, 'tick', 'crash'] as (BufInst | null)[]) if (x) this.bank.warm(x, 60, 60, 2);
+    this.bank.warm('timp', 40, 51, 3);
+    this.bank.warm('celesta', 76, 96, 3);
+    this.bank.warm('glass', 88, 98, 3);
+    this.bank.warm('choirx', 67, 81, 3);
+  }
+
+  /** the song changed or stopped: a virada in progress is dropped (its crash too), the drums are back */
+  dropVirada(): void {
+    if (!this.vir && !this.director.viradas.length) return;
+    this.cancelVirada(this.core.now);
+    this.director.viradas = [];
+  }
+
+  /** drops the virada in progress: its crash (if booked and still ahead) fades out */
+  private cancelVirada(now: number): void {
+    const v = this.vir;
+    this.vir = null;
+    if (v?.bus && v.end > now - 0.01) this.silence(v.bus);
+    this.oldBuses = this.oldBuses.filter((o) => {
+      if (o.until > now) return true;
+      try {
+        o.bus.disconnect();
+      } catch {
+        /* ignore */
+      }
+      return false;
+    });
+    if (v?.bus) this.oldBuses.push({ bus: v.bus, until: v.end + 6 });
+  }
+
+  private silence(bus: GainNode): void {
+    const now = this.core.now;
+    try {
+      bus.gain.cancelScheduledValues(now);
+      bus.gain.setValueAtTime(bus.gain.value, now);
+      bus.gain.linearRampToValueAtTime(0, now + 0.03);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** the pitch of a falling layer: x 0 (first mark, high) … 1 (last, low), on a chord tone, never above the layer's last stroke */
+  private fall(v: ViradaState | null, layer: string, c: Chord, lo: number, hi: number, x: number): number {
+    const target = hi - x * (hi - lo);
+    const tones = chordTones(c, lo, hi);
+    if (!tones.length) return Math.round(target);
+    const prev = v?.prev[layer];
+    const ok = prev === undefined ? tones : tones.filter((m) => m <= prev);
+    const pool = ok.length ? ok : [tones[0]];
+    const m = pool.reduce((best, y) => (Math.abs(y - target) < Math.abs(best - target) ? y : best), pool[0]);
+    if (v) v.prev[layer] = m;
+    return m;
+  }
+
+  /**
+   * Mark i of n was tapped at the judged grid time t: one stroke of the fill, at the level of the
+   * song's drums (never above it). perfect = brighter and fuller; miss = no stroke, a faint muted tick.
+   */
+  viradaHit(i: number, n: number, t0: number, q: TapQuality, pan: number): void {
+    const t = this.snap(t0);
+    // a stroke reported long after its mark is no longer part of the fill
+    if (t < this.core.now - 0.25) return;
+    const ch = this.ch(pan * 0.6);
+    if (q === 'miss') {
+      this.play('tick', ch, t, 56, 0.1 * FILL, 0.05, { lp: 800 });
+      return;
+    }
+    const vv = this.vir;
+    const v = vv && t > vv.start - this.grid().barDur && t < vv.end + 0.2 ? vv : null;
+    const N = clamp(Math.round(Number.isFinite(n) ? n : v?.n ?? 5), 1, 16);
+    const k = clamp(Math.round(Number.isFinite(i) ? i : 0), 0, N - 1);
+    const x = N > 1 ? k / (N - 1) : 1;
+    const lv = v?.level ?? 0;
+    const perfect = q === 'perfect';
+    const F = this.fillVoice;
+    const c = this.chordAt(t);
+    const chW = this.ch(pan * 0.6, true);
+    // the first stroke announces the fill, the last one lands heaviest
+    const acc = k === N - 1 ? 1.04 : k === 0 ? 1 : 0.9;
+    const vel = FILL * F.trim * (v?.scale ?? 1) * (perfect ? 1 : 0.8) * (1 + 0.03 * lv) * acc;
+    this.play(F.drum, ch, t, this.fall(v, 'drum', c, F.lo, F.hi, x), F.dv * vel, 0.6, { release: 0.2, lp: perfect ? undefined : 3800 });
+    if (F.body && (perfect || lv >= 1 || x >= 0.5)) this.play(F.body, this.ch(pan * 0.4), t, this.fall(v, 'body', c, F.bodyLo, F.bodyHi, x), F.bv * vel * (perfect ? 1 : 0.75), 0.5, { release: 0.15 });
+    // a stroke's slight detune comes from its index (no randomness: the fill is the same every time)
+    const jit = ((k * 7) % 5) * 0.04 - 0.08;
+    if (F.hits) this.play(x < 0.5 ? F.hits[0] : F.hits[1], ch, t, 60 + jit, F.hv * vel, 0.3, { release: 0.1 });
+    if (F.tone) {
+      const m = this.fall(v, 'tone', c, F.toneLo, F.toneHi, x);
+      const tv = F.tv * vel * (perfect ? 1 : 0.75);
+      if (F.tone === 'organ') oscStack(this.core, chW, Math.max(this.core.now, t), m, 0.9 * tv * this.level, perfect ? 0.22 : 0.14, { ...ORGAN(perfect ? 0.8 : 0.5), attack: 0.006, release: 0.2, cat: 'rhythm', cap: 40 });
+      else this.play(F.tone, chW, t, m, tv, perfect ? 0.5 : 0.3, { release: 0.3, lp: perfect ? undefined : 4000 });
+    }
+    if (F.stick) this.play(F.stick, ch, t, F.stickMidi + jit, F.sv * vel, 0.1);
+    // perfect: the shimmer of the land's jingle (or a bright tick of air)
+    if (perfect) this.play(F.jingle ?? 'shaker', this.ch(pan * 0.6 + 0.2), t, 60 + jit, (F.jingle ? 0.32 : 0.2) * vel, 0.25, { release: 0.08 });
+    // the first hit books the crash on the downbeat (no hit at all: the song simply resumes)
+    if (v && !v.crash) {
+      v.crash = true;
+      this.bookCrash(v, v.end);
+    }
+  }
+
+  private bookCrash(v: ViradaState | null, t: number): void {
+    if (t < this.core.now - 0.12) return; // too late to land on the downbeat
+    const lv = v?.level ?? 0;
+    const ch = this.ch(0, true);
+    let dest: AudioNode | undefined;
+    if (v) {
+      if (!v.bus) {
+        v.bus = this.core.ctx.createGain();
+        v.bus.connect(ch.input);
+      }
+      dest = v.bus;
+    }
+    this.play('crash', ch, t, 60, VCRASH * (1 + 0.1 * lv) * Math.max(0.6, v?.scale ?? 1), 2.6, { release: 1, dest });
+  }
+
+  /**
+   * The virada ended at t (the downbeat after it). All hit: the crash and a sparkling one-bar chord
+   * swell with the band ("VIRADA!"); some: just the crash; none: the song simply resumes.
+   */
+  viradaEnd(t0: number, hits: number, n: number, perfect: boolean): void {
+    const g = this.grid();
+    const v = this.vir;
+    const T = v && Math.abs(t0 - v.end) < g.barDur * 0.5 ? v.end : this.snap(t0);
+    const h = Math.max(0, Math.round(Number.isFinite(hits) ? hits : 0));
+    const N = Math.max(0, Math.round(Number.isFinite(n) ? n : v?.n ?? 0));
+    this.vir = null;
+    if (v) this.director.endVirada(T);
+    if (h > 0 && !v?.crash) this.bookCrash(v, T);
+    // no hit after all: no crash (the song simply resumes)
+    if (h === 0 && v?.bus) this.silence(v.bus);
+    if (v?.bus) this.oldBuses.push({ bus: v.bus, until: T + 6 });
+    if (N > 0 && h >= N) this.viradaSwell(T, v?.level ?? 0, !!perfect);
+  }
+
+  /** "VIRADA!": a sparkle climbing the chord, the band's chord swelling for a bar, the land's drum on the downbeat */
+  private viradaSwell(T: number, lv: number, perfect: boolean): void {
+    const now = this.core.now;
+    const g = this.grid();
+    const sd = g.spb / 4;
+    const S = SWELL * (1 + 0.08 * lv) * (perfect ? 1.06 : 1);
+    // a late call plays only what is still ahead (never a burst of overdue notes)
+    const ahead = (x: number) => x >= now - 0.005;
+    const c = this.chordAt(T + 0.01);
+    if (ahead(T)) {
+      // the land's drum lands with the crash, on the chord root
+      const F = this.fillVoice;
+      this.play(F.drum, this.ch(0), T, this.rootIn(c, F.lo, F.hi), F.dv * 0.6 * S, 0.6, { release: 0.2 });
+      this.play('timp', this.ch(0), T, this.rootIn(c, 40, 51), 0.3 * S, 1.4, { release: 0.5 });
+    }
+    // the sparkle: celesta up the chord in 16ths across two beats (each note on that moment's chord), glass on top
+    for (let k = 0; k < 8; k++) {
+      const tk = T + k * sd;
+      if (!ahead(tk)) continue;
+      const tones = chordTones(this.chordAt(tk + 0.001), 76, 96);
+      if (!tones.length) continue;
+      const m = tones[Math.min(tones.length - 1, k)];
+      this.play('celesta', this.ch(-0.5 + k * 0.14, true), tk, m, (0.2 + 0.012 * k) * S, 0.7, { release: 0.5 });
+      if (k === 7 || (perfect && k % 2 === 1)) this.play('glass', this.ch(0.4, true), tk, m + 12 <= 98 ? m + 12 : m, (k === 7 ? 0.24 : 0.12) * S, 1.2, { release: 0.8 });
+    }
+    // the band's chord swells through the bar (low brass and the choir's "ah"), held while it stays a chord tone
+    if (!ahead(T)) return;
+    chordTones(c, 55, 69).slice(0, 3).forEach((m, k) => {
+      const hold = Math.min(g.barDur, this.holdBeats(T, m, g.spb, g.beats));
+      oscStack(this.core, this.ch(k - 1), T, m, 0.42 * S * this.level, hold, { ...LOWBRASS(0.6), attack: hold * 0.5, release: 0.5, cat: 'rhythm', cap: 40 });
+      this.play('choirx', this.ch(1 - k, true), T, m + 12, 0.18 * S, hold + 0.2, { release: 0.6 });
+    });
   }
 
   // ───────────────────────────── call & echo ─────────────────────────────

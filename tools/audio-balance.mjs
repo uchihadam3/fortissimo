@@ -17,9 +17,16 @@
  *     phone model. A miss must be clearly duller and quieter than a hit; a strike must cut through.
  *  6. v4 power: the full band while power climbs 0 → 1, holds, then a miss drops it (0.3): loudness,
  *     brightness, width per stage, the drop's dip, peaks and clicks.
+ *  7. v7 viradas (full band + 10 towers): a 6-mark fill (8ths then 16ths) played perfect (level 0
+ *     and 2), good, partial (every other mark missed) and none. Measured as stems: the song's drum
+ *     kit must duck ≥ 15 dB inside the window and be unchanged outside it, the rest of the song
+ *     unchanged inside it; the loudest stroke ≤ the song's drum hits (K; phone model ≤ +3 dB); the crash on the
+ *     downbeat (≤ 2 ms; none when nothing was hit); every onset of the player's stem on the 16th
+ *     grid; no clicks; the bar after a full virada a little louder (the swell), not much.
  *
  * Usage: node tools/audio-balance.mjs [--song meadow,desert] [--level 0] [--intensity 1] [--bars 8]
- *        [--only kinds|band|groove|rhythm|events|power] [--wav DIR]      AUDIO_PORT selects the Vite server (default 5174).
+ *        [--only kinds|band|groove|rhythm|events|power|virada] [--wav DIR]      AUDIO_PORT selects the Vite server (default 5174);
+ *        AUDIO_SEED=n seeds Math.random in the page (bit-identical renders, for before/after comparisons).
  */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -64,6 +71,20 @@ if (!(await up())) {
 }
 const browser = await chromium.launch();
 const page = await browser.newPage();
+// AUDIO_SEED=n: a seeded Math.random in the page, so two renders of the same scenario are bit-identical
+// (compare the numbers before and after a change)
+if (process.env.AUDIO_SEED) {
+  await page.addInitScript((seed) => {
+    let s = (Number(seed) >>> 0) || 1;
+    Math.random = () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }, process.env.AUDIO_SEED);
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => {
@@ -186,6 +207,35 @@ for (const song of songs) {
     if (s1.lufs - s3.lufs < 1.5) problems.push(`${song}: losing power is not clear (${f1(s1.lufs - s3.lufs)} LU)`);
     if (r.stats.peakDb > -1) problems.push(`${song} power: peak ${f1(r.stats.peakDb)}`);
     if (r.stats.clicks) problems.push(`${song} power: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
+  }
+  if (!only || only === 'virada') {
+    console.log(`\n── ${song}: viradas (full band + 10 towers, intensity ${intensity}): the kit steps back, the strokes are the fill ──`);
+    console.log('play     lvl |  duck  rest  kitOut  Δrest ΔmixBefore | drumRef K/ph   | strokes K                           | max−ref K/ph | crash ms   K  | grid ms | bar after w/o  | clicks  peak');
+    for (const [play, lv] of [['perfect', 0], ['perfect', 2], ['good', 0], ['partial', 0], ['none', 0]]) {
+      const r = await page.evaluate(([s, pl, l, i, w]) => window.__lab.offline.renderVirada(s, { play: pl, level: l, intensity: i, wav: w }), [song, play, lv, intensity, !!wavDir]);
+      save(`${song}-virada-${play}${lv}`, r);
+      const st = r.strokes.map((x) => (x.q === 'miss' ? '  --' : `${f1(x.k)}`)).join(' ');
+      const crash = r.crash.errMs === null ? '-' : f1(r.crash.errMs);
+      console.log(`${play.padEnd(8)} ${String(lv).padStart(3)} | ${p6(r.duckDb)} ${p6(r.restDb)} ${p6(r.drumsOutsideDb)} ${p6(r.diff.rest)} ${p6(r.diff.mixBefore)}     | ${p6(r.drumRef.k)} ${p6(r.drumRef.phone)} | ${st.padEnd(35)} | ${p6(r.over.k)} ${p6(r.over.phone)} | ${crash.padStart(6)} ${p6(r.crash.k)} | ${p6(r.grid.maxErrMs)}  | ${p6(r.after.with)} ${p6(r.after.without)} | ${String(r.stats.clicks).padStart(6)} ${p6(r.stats.peakDb)} | kitE ${r.kitE === null ? '-' : r.kitE.toFixed(4)}`);
+      // with the same random draws, the rest of the song and the mix before the window must be bit-identical
+      // (−60 dBFS: two renders of the same thing differ by up to about −70 dBFS in Chromium)
+      if (r.diff.rest > -60) problems.push(`${song} virada ${play}${lv}: the rest of the song is not identical (max diff ${f1(r.diff.rest)} dBFS)`);
+      if (r.diff.mixBefore > -60) problems.push(`${song} virada ${play}${lv}: the mix before the virada is not identical (max diff ${f1(r.diff.mixBefore)} dBFS)`);
+      const tag = `${song} virada ${play}${lv}`;
+      if (r.duckDb > -15) problems.push(`${tag}: the song's drums only ${f1(r.duckDb)} dB down inside the virada`);
+      if (Math.abs(r.restDb) > 0.6) problems.push(`${tag}: the rest of the song changed inside the virada (${f1(r.restDb)} dB)`);
+      if (Math.abs(r.drumsOutsideDb) > 0.6) problems.push(`${tag}: the song's drums changed outside the virada (${f1(r.drumsOutsideDb)} dB)`);
+      // K-weighted: never above the song's drums; the phone model may be a little brighter (≤ 3 dB) over a dark kit, so the fill is heard on a phone
+      if (play !== 'none' && (r.over.k > 0 || r.over.phone > 3)) problems.push(`${tag}: a stroke is louder than the song's drums (${f1(r.over.k)} / ${f1(r.over.phone)} dB)`);
+      if (play !== 'none' && (r.crash.errMs === null || Math.abs(r.crash.errMs) > 2)) problems.push(`${tag}: no crash on the downbeat (highs +${f1(r.crash.rise)} dB, at ${r.crash.errMs} ms)`);
+      if (play === 'none' && r.crash.rise > 3) problems.push(`${tag}: a crash although nothing was hit (highs +${f1(r.crash.rise)} dB)`);
+      if (r.grid.worst.length) problems.push(`${tag}: onsets off the 16th grid at ${r.grid.worst.join(', ')} (max ${f1(r.grid.maxErrMs)} ms)`);
+      if (r.stats.clicks) problems.push(`${tag}: ${r.stats.clicks} clicks at ${r.stats.clickAt.join(', ')}`);
+      if (r.stats.peakDb > -1) problems.push(`${tag}: peak ${f1(r.stats.peakDb)}`);
+      const lift = r.after.with - r.after.without;
+      if (play === 'perfect' && (lift < 0.3 || lift > 3)) problems.push(`${tag}: the bar after the full virada is ${f1(lift)} LU over the song (want a little lift, 0.3…3)`);
+      if ((play === 'partial' || play === 'none') && Math.abs(lift) > 1) problems.push(`${tag}: the bar after changed by ${f1(lift)} LU`);
+    }
   }
 }
 // v5: every boss fight inside its level's song (only with --only boss; --boss toad,crow picks some)

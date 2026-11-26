@@ -7,7 +7,8 @@
  * and the spectral balance; plus the bar-by-bar trace of the form (plan, battle/breakdown, section).
  *
  * Usage: node tools/audio-journey.mjs [--song meadow] [--full] [--wav DIR] [--trace] [--bars N]
- *        AUDIO_PORT=5181 to use (or start) a Vite server on that port (default 5174).
+ *        AUDIO_PORT=5181 to use (or start) a Vite server on that port (default 5174);
+ *        AUDIO_SEED=n seeds Math.random in the page (bit-identical renders, for before/after comparisons).
  */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -52,6 +53,20 @@ if (!(await up())) {
 }
 const browser = await chromium.launch();
 const page = await browser.newPage();
+// AUDIO_SEED=n: a seeded Math.random in the page, so two renders of the same scenario are bit-identical
+// (compare the numbers before and after a change)
+if (process.env.AUDIO_SEED) {
+  await page.addInitScript((seed) => {
+    let s = (Number(seed) >>> 0) || 1;
+    Math.random = () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }, process.env.AUDIO_SEED);
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => {

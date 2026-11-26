@@ -9,6 +9,7 @@
 import type { EnemyKind, SongId, WorldId } from '../../sim/defs';
 import type { BandMix } from '../api';
 import type { Core, ReverbMode } from './core';
+import { PERC } from './dsp';
 import { BufferBank, Channel, type BufInst, type BufNoteOpts, type ChannelOpts, oscStack, playBuf, type StackOpts } from './synth';
 import type { Chord, Scale } from './theory';
 import { clamp, report } from './util';
@@ -593,6 +594,16 @@ export class Player {
   buf(inst: BufInst, ch: string, t: number, midi: number, vel: number, dur: number, o?: BufNoteOpts): void {
     const c = this.channels.get(this.prefix + ch);
     if (!c || t < this.core.now - 0.01 || !(vel > 0)) return;
+    const d = this.director;
+    const perc = o?.cat === 'perc';
+    // v7: the kit's level is metered (the virada's strokes follow it); this changes no sound
+    if (this === d.current && (perc || KIT.has(inst))) d.meterKit(this, t, vel * c.input.gain.value);
+    if (d.viradas.length || d.stem) {
+      // v7: inside a virada the song's own drum kit steps back (nothing changes outside one)
+      const k = d.drumGain(inst, t, perc);
+      if (!(k > 0)) return;
+      vel *= k;
+    }
     // caps count notes from the moment they are scheduled (a whole bar ahead): they are per-bar budgets
     playBuf(this.core, this.bank, inst, c.input, t, midi, vel, dur, { cat: 'music', cap: 160, pitch: this.pitch, ...o });
   }
@@ -605,11 +616,23 @@ export class Player {
   rt(preset: StackOpts, ch: string, t: number, midi: number, vel: number, dur: number): void {
     const c = this.channels.get(this.prefix + ch);
     if (!c || t < this.core.now - 0.01 || !(vel > 0)) return;
+    if (this.director.stem === 'drums') return;
     oscStack(this.core, c, t, midi, vel, dur, preset);
   }
 }
 
 export type ThemeFactory = (id: TrackId) => Theme | null;
+
+/** the song's drum kit (what steps back in a virada): every unpitched one-shot, the toms, taiko, timpani */
+const KIT: ReadonlySet<BufInst> = new Set<BufInst>([...PERC, 'tom', 'taiko', 'timp', 'tdrum']);
+/** a note this close before the window's edge already belongs to it (humanised notes sit a few ms early) */
+const EDGE = 0.03;
+
+/** a virada's window (context time): the song's drums step back from `from` until `to` */
+export interface ViradaWindow {
+  from: number;
+  to: number;
+}
 
 export class Director {
   private players: Player[] = [];
@@ -624,6 +647,13 @@ export class Director {
   power = 1;
   /** the most recently started track (its harmony and grid stay the reference after it stops) */
   last: Player | null = null;
+  /** v7: the current virada's window (at most one; a new cue replaces it). Empty = the song plays as written. */
+  viradas: ViradaWindow[] = [];
+  /** the kit's energy per bar of the current track (Σ (velocity · channel gain)²), the last few bars */
+  private kitBars = new Map<number, number>();
+  private kitOf: Player | null = null;
+  /** analysis only: render just the drum kit ('drums') or everything but it ('rest'); null in the game */
+  stem: 'drums' | 'rest' | null = null;
 
   constructor(
     readonly core: Core,
@@ -764,6 +794,73 @@ export class Director {
   movement(index: number, total: number, t: number): void {
     const p = this.current;
     if (p && !p.stopped) p.setMovement(index, total, t, this.core.now);
+  }
+
+  /**
+   * A virada: from `from` until `to` (context times on the grid) the song's own drum kit steps back
+   * (tacet: the bass and the harmony keep the time); its crash on the downbeat `to` is left out too
+   * (the virada's own crash replaces it). Bars are composed just ahead of time, so this applies to
+   * every bar not composed yet: call it at least a bar ahead. A new virada replaces the previous one.
+   */
+  setVirada(from: number, to: number): void {
+    if (!(Number.isFinite(from) && Number.isFinite(to) && to > from)) return;
+    this.viradas = [{ from, to }];
+  }
+
+  /** a note of the current track's kit at t with level `amp` (bars are composed a little ahead) */
+  meterKit(p: Player, t: number, amp: number): void {
+    if (p !== this.kitOf) {
+      this.kitOf = p;
+      this.kitBars.clear();
+    }
+    const bar = p.barAt(t);
+    this.kitBars.set(bar, (this.kitBars.get(bar) ?? 0) + amp * amp);
+    if (this.kitBars.size > 8) {
+      const oldest = Math.min(...this.kitBars.keys());
+      this.kitBars.delete(oldest);
+    }
+  }
+
+  /**
+   * The kit's energy per bar over the (up to) 3 composed bars before the bar of t, or null when the
+   * current track has none composed yet. Silent bars count (a breather's quiet kit is quiet).
+   */
+  kitEnergy(t: number): number | null {
+    const p = this.current;
+    if (!p || p !== this.kitOf) return null;
+    const b = p.barAt(t);
+    let sum = 0;
+    let n = 0;
+    for (let k = b - 3; k < b; k++) {
+      if (k < 0 || k >= p.composedUntil) continue;
+      sum += this.kitBars.get(k) ?? 0;
+      n++;
+    }
+    return n ? sum / n : null;
+  }
+
+  /** the drums return at t (the virada ended there, or was cancelled) */
+  endVirada(t: number): void {
+    const w = this.viradas[0];
+    if (!w) return;
+    if (t <= w.from) this.viradas = [];
+    else if (t < w.to) w.to = t;
+  }
+
+  /**
+   * The level (linear) a note of `inst` at context time t plays at: 1 outside a virada. The kit is
+   * every note a song plays as percussion (`perc`: Player.hit, its drum patterns and rolls) and the
+   * drum instruments wherever they are played.
+   */
+  drumGain(inst: BufInst, t: number, perc = false): number {
+    const kit = perc || KIT.has(inst);
+    if (this.stem && (this.stem === 'drums') !== kit) return 0;
+    if (!kit) return 1;
+    for (const w of this.viradas) {
+      if (t >= w.from - EDGE && t < w.to - EDGE) return 0;
+      if ((inst === 'crash' || inst === 'gong') && t >= w.to - EDGE && t < w.to + 0.06) return 0;
+    }
+    return 1;
   }
 
   get activePlayers(): number {
