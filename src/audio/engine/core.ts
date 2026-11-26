@@ -81,6 +81,15 @@ export class Core {
   private readonly wideLR: GainNode;
   private readonly wideRL: GainNode;
   private readonly wideRR: GainNode;
+  /** the player's power (v4): level, brightness and reverb tail of the battle music */
+  private readonly powerGain: GainNode;
+  private readonly powerGainW: GainNode;
+  private readonly powerLP: BiquadFilterNode;
+  /** the towers follow the power too (the band IS the music): level and brightness */
+  private readonly towerPower: GainNode;
+  private readonly towerPowerLP: BiquadFilterNode;
+  private harmonyNow = 5;
+  private powerNow = 1;
 
   private readonly musicDuck: GainNode;
   private readonly musicTone: BiquadFilterNode;
@@ -182,6 +191,17 @@ export class Core {
     this.wideLR = g(0);
     this.wideRL = g(0);
     this.wideRR = g(1);
+    this.powerGain = g(1);
+    this.powerGainW = g(1);
+    this.powerLP = ctx.createBiquadFilter();
+    this.powerLP.type = 'lowpass';
+    this.powerLP.frequency.value = 20000;
+    this.powerLP.Q.value = 0.5;
+    this.towerPower = g(1);
+    this.towerPowerLP = ctx.createBiquadFilter();
+    this.towerPowerLP.type = 'lowpass';
+    this.towerPowerLP.frequency.value = 20000;
+    this.towerPowerLP.Q.value = 0.5;
     const split = ctx.createChannelSplitter(2);
     const merge = ctx.createChannelMerger(2);
     this.bandSize.connect(split);
@@ -216,11 +236,11 @@ export class Core {
     this.muffleGain = g();
     this.muffleGainW = g();
     this.musicDry.connect(this.musicDuck).connect(this.bandLead).connect(this.bandSize);
-    merge.connect(this.musicTone).connect(this.musicHP).connect(this.muffleLP).connect(this.muffleGain).connect(this.musicVol).connect(this.master);
-    this.musicWet.connect(this.musicDuckW).connect(this.bandLeadW).connect(this.bandSizeW).connect(this.musicHPW).connect(this.muffleLPW).connect(this.muffleGainW).connect(this.musicVolW).connect(this.wetSum);
+    merge.connect(this.powerLP).connect(this.powerGain).connect(this.musicTone).connect(this.musicHP).connect(this.muffleLP).connect(this.muffleGain).connect(this.musicVol).connect(this.master);
+    this.musicWet.connect(this.musicDuckW).connect(this.bandLeadW).connect(this.bandSizeW).connect(this.powerGainW).connect(this.musicHPW).connect(this.muffleLPW).connect(this.muffleGainW).connect(this.musicVolW).connect(this.wetSum);
     this.stingDry.connect(this.muffleLP);
     this.stingWet.connect(this.muffleLPW);
-    this.towerBus.connect(this.towerComp).connect(this.towerMakeup).connect(this.sfxDry);
+    this.towerBus.connect(this.towerComp).connect(this.towerMakeup).connect(this.towerPowerLP).connect(this.towerPower).connect(this.sfxDry);
     this.rhythmBus.connect(this.sfxDry);
     this.sfxDry.connect(this.sfxVol).connect(this.master);
     this.sfxWet.connect(this.sfxVolW).connect(this.wetSum);
@@ -274,13 +294,36 @@ export class Core {
    * (side ×0.6); the full band's is at full level and wide (side ×1.7).
    */
   setBandSize(harmony: number, t = this.now): void {
-    const h = clamp(Number.isFinite(harmony) ? harmony : 5, 0, 5);
+    this.harmonyNow = clamp(Number.isFinite(harmony) ? harmony : 5, 0, 5);
+    this.applyShape(t, 0.5);
+  }
+
+  /**
+   * The player's power 0…1 (v4), reached smoothly (`tau` s; ~a third of a bar). Low power dims the
+   * battle music: quieter (−4.5 dB), darker (low-pass down to ~4.5 kHz), narrower, a drier reverb,
+   * and the towers a little quieter and darker too (−3 dB, 6.5 kHz); full power opens it all up —
+   * full level, open top, wide, and a longer, louder reverb tail. The player's own sounds (rhythm
+   * bus) never dim.
+   * 1 = neutral for everything that is not a battle song.
+   */
+  setPower(power: number, tau = 0.8, t = this.now): void {
+    this.powerNow = clamp(Number.isFinite(power) ? power : 1, 0, 1);
+    this.applyShape(t, tau);
+  }
+
+  private applyShape(t: number, tau: number): void {
+    const h = this.harmonyNow;
+    const pw = this.powerNow;
     const gain = Math.pow(10, (-3 + 0.6 * h) / 20);
-    const side = 0.6 + 0.22 * h;
+    const side = (0.6 + 0.22 * h) * (0.6 + 0.6 * pw);
     const at = Math.max(this.now, t);
-    const set = (p: AudioParam, v: number) => {
-      p.cancelScheduledValues(at);
-      p.setTargetAtTime(v, at, 0.5);
+    const set = (p: AudioParam, v: number, tc = tau) => {
+      try {
+        p.cancelScheduledValues(at);
+        p.setTargetAtTime(v, at, Math.max(0.02, tc));
+      } catch {
+        /* ignore */
+      }
     };
     set(this.bandSize.gain, gain);
     set(this.bandSizeW.gain, gain);
@@ -288,6 +331,11 @@ export class Core {
     set(this.wideRR.gain, (1 + side) / 2);
     set(this.wideLR.gain, (1 - side) / 2);
     set(this.wideRL.gain, (1 - side) / 2);
+    set(this.powerGain.gain, Math.pow(10, (-4.5 + 4.5 * pw) / 20));
+    set(this.powerGainW.gain, Math.pow(10, (-4 + 5.5 * pw) / 20));
+    set(this.powerLP.frequency, 4500 * Math.pow(20000 / 4500, pw));
+    set(this.towerPower.gain, Math.pow(10, (-3 + 3 * pw) / 20));
+    set(this.towerPowerLP.frequency, 6500 * Math.pow(20000 / 6500, pw));
   }
 
   /**

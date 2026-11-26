@@ -1071,6 +1071,8 @@ export interface BalanceRender {
   hitK: number;
   hitPhone: number;
   hits: number;
+  /** share (%) of the stem's energy above 2 kHz during its hits */
+  stemBright?: number;
   wav?: string;
 }
 
@@ -1081,6 +1083,12 @@ export interface BalanceExtras {
   taps?: 'perfect' | 'good' | 'miss';
   /** a solo of this tower (the army's first of that kind) on bar 2 */
   solo?: TowerKind;
+  /** v4: a pickup or a strike of this quality on every beat from bar 1 (their onsets are the hits measured) */
+  events?: { kind: 'tap' | 'pickup' | 'strike'; q: 'perfect' | 'good' | 'miss' };
+  /** v4: the player's power (0…1) for the whole render */
+  power?: number;
+  /** measure the player's sounds (rhythm bus) against everything else (music + towers) */
+  measure?: 'towers' | 'rhythm';
 }
 
 /**
@@ -1107,13 +1115,28 @@ export async function renderBalance(
     const rig = makeRig(seconds);
     rig.director.band = mix;
     rig.towers.setBand(mix);
-    if (mode === 'stem') rig.core.setVolumes({ master: 1, music: 0, sfx: 0.9, ambience: 0.8 });
+    const rhythmStem = o.measure === 'rhythm';
+    if (mode === 'stem') {
+      rig.core.setVolumes({ master: 1, music: 0, sfx: 0.9, ambience: 0.8 });
+      if (rhythmStem) rig.core.towerBus.gain.value = 0;
+    }
     if (mode === 'back') {
-      rig.core.towerBus.gain.value = 0;
+      if (!rhythmStem) rig.core.towerBus.gain.value = 0;
       rig.core.rhythmBus.gain.value = 0;
     }
+    if (o.power !== undefined) rig.director.power = o.power;
     const p = rig.director.play(song, t0, 0.05, o.intensity ?? 1);
     if (!p) throw new Error('no song');
+    const evOnsets: number[] = [];
+    if (o.events) {
+      const ev = o.events;
+      for (let beat = 4; beat < bars * 4; beat++) {
+        const t = t0 + beat * spb;
+        evOnsets.push(t);
+        const run = beat - 4;
+        rig.at(t, () => (ev.kind === 'tap' ? rig.rhythm.beatTap(t, ev.q, 0.2) : ev.kind === 'pickup' ? rig.rhythm.pickupTap(t, ev.q, 0.2, run) : rig.rhythm.strike(t, ev.q, 0.2)), 0.1);
+      }
+    }
     if (o.groove !== undefined) {
       // the groove arrives on bar 1 (with its riser and drop when it is 4)
       const g = o.groove;
@@ -1145,7 +1168,7 @@ export async function renderBalance(
       rig.at(t, () => rig.rhythm.solo(tw.kind, tw.level, t, tw.pan, tw.voice), 0.15);
     }
     const r = await rig.render();
-    return { buf: r.buf, onsets: [...new Set(onsets)].sort((x, y) => x - y) };
+    return { buf: r.buf, onsets: [...new Set(rhythmStem ? evOnsets : onsets)].sort((x, y) => x - y) };
   };
   const back = await run('back');
   const stem = await run('stem');
@@ -1187,6 +1210,19 @@ export async function renderBalance(
     hitK: r1(median(hK)),
     hitPhone: r1(median(hP)),
     hits: dK.length,
+    stemBright: (() => {
+      let hi = 0;
+      let tot = 0;
+      for (const t of stem.onsets) {
+        if (t >= b) continue;
+        const sh = bandShares(stem.buf, t, t + win);
+        const e = windowLoudness(W.stem.k, sr, t, t + win);
+        const w = Math.pow(10, e / 10);
+        hi += w * (sh[3] + sh[4] + sh[5]);
+        tot += w;
+      }
+      return tot > 0 ? Math.round((hi / tot) * 1000) / 10 : 0;
+    })(),
     wav: o.wav ? wavBase64(mixed.buf) : undefined,
   };
 }
@@ -1271,4 +1307,105 @@ export async function renderRhythm(song: SongId = 'meadow', o: { wav?: boolean; 
   });
   const hc = harmonyCheck(r.buf, p, callBar, callBar + 6);
   return { stats, taps, solos, call: { lufs: bar(r.buf, callBar, 6), ref: bar(ref.buf, callBar, 6), inScale: hc.inScale }, wav: o.wav ? wavBase64(r.buf) : undefined };
+}
+
+// ───────────────────────────── the power meter (v4) ─────────────────────────────
+
+export interface PowerRender {
+  stats: Stats;
+  /** per segment: loudness (K and phone), share of energy above 4 kHz, stereo side/mid (dB) */
+  segments: { name: string; power: number; lufs: number; phone: number; hf: number; width: number; peakDb: number }[];
+  /** the bar of the power drop: loudness of the half bar after it vs the half bar before */
+  drop: { before: number; after: number };
+  wav?: string;
+}
+
+/**
+ * The full band over a battle song while the player's power climbs 0 → 1 (updated every beat, like
+ * the game), holds, then a miss breaks the run (powerDrop and power falls to 0.3).
+ */
+export async function renderPower(song: SongId = 'meadow', o: { wav?: boolean; intensity?: number } = {}): Promise<PowerRender> {
+  const spb = 60 / SONGS[song].bpm;
+  const barDur = 4 * spb;
+  const sd = spb / 4;
+  const t0 = 0.2;
+  const bars = 22;
+  const seconds = t0 + bars * barDur + 1.5;
+  const rig = makeRig(seconds);
+  const mix = bandOf({ strings: 2, percussion: 2, bells: 2, brass: 1, voices: 1, low: 1 });
+  rig.director.band = mix;
+  rig.towers.setBand(mix);
+  rig.director.power = 0;
+  const p = rig.director.play(song, t0, 0.05, o.intensity ?? 1);
+  if (!p) throw new Error('no song');
+  // power: 0 for bars 0–3, climbing over bars 4–11, 1 for bars 12–15, a miss on bar 16 (→ 0.3)
+  const powerAt = (beat: number) => {
+    const bar = beat / 4;
+    if (bar < 4) return 0;
+    if (bar < 12) return (bar - 4) / 8;
+    if (bar < 16) return 1;
+    return 0.3;
+  };
+  for (let beat = 0; beat < bars * 4; beat++) {
+    const t = t0 + beat * spb;
+    const pw = powerAt(beat);
+    rig.at(t, () => rig.director.setPower(pw), 0.05);
+  }
+  const tDrop = p.barStart(16) + 0.5 * spb;
+  rig.at(tDrop, () => rig.rhythm.powerDrop(tDrop), 0.1);
+  const army = defaultArmy(10).map((x) => ({ ...x, level: 0 }));
+  for (const tw of army) {
+    const lv = TOWERS[tw.kind].levels[tw.level];
+    for (let st = 0; st < bars * 16; st++) {
+      if (lv.pattern[st % lv.pattern.length] !== 'x') continue;
+      const t = t0 + st * sd;
+      rig.at(t, () => rig.towers.shot(tw.kind, tw.level, t, tw.pan, tw.voice), 0.12);
+    }
+  }
+  const r = await rig.render();
+  const stats = measure(r.buf, r.ms, 0.3);
+  stats.maxVoices = r.maxVoices;
+  const sr = r.buf.sampleRate;
+  const W = weighted(r.buf);
+  const segs: [string, number, number, number][] = [['p 0', 1, 4, 0], ['p .25', 6, 7, 0.25], ['p .5', 8, 9, 0.5], ['p .75', 10, 11, 0.75], ['p 1', 12, 16, 1], ['after miss (.3)', 17, 22, 0.3]];
+  const segments = segs.map(([name, a, b, pw]) => {
+    const ta = p.barStart(a);
+    const tb = p.barStart(b);
+    const i0 = Math.floor(ta * sr);
+    const i1 = Math.floor(tb * sr);
+    const L = r.buf.getChannelData(0);
+    const R = r.buf.getChannelData(1);
+    let side = 0;
+    let midE = 0;
+    for (let i = i0; i < i1; i++) {
+      const m = (L[i] + R[i]) * 0.5;
+      const d = (L[i] - R[i]) * 0.5;
+      midE += m * m;
+      side += d * d;
+    }
+    const sh = bandShares(r.buf, ta, tb);
+    const rr = measureRange(r.buf, ta, tb);
+    return { name, power: pw, lufs: r1(gatedLoudness(W.k, sr, ta, tb)), phone: r1(gatedLoudness(W.phone, sr, ta, tb)), hf: Math.round((sh[4] + sh[5]) * 1000) / 10, width: r1(10 * Math.log10((side + 1e-12) / (midE + 1e-12))), peakDb: r1(rr.peakDb) };
+  });
+  const drop = { before: r1(windowLoudness(W.k, sr, tDrop - 2 * spb, tDrop)), after: r1(windowLoudness(W.k, sr, tDrop, tDrop + 2 * spb)) };
+  return { stats, segments, drop, wav: o.wav ? wavBase64(r.buf) : undefined };
+}
+
+export interface EventStems {
+  /** per event kind and quality: the stem's level (K and phone) during the event, its share of energy
+   * above 2 kHz (brightness), and stem − everything else (phone) during it */
+  rows: { kind: string; q: string; hitK: number; hitPhone: number; bright: number; overPhone: number; peakDb: number }[];
+}
+
+/** every player sound (tap, pickup, strike) in every quality over the full band, measured as a stem */
+export async function renderEvents(song: SongId = 'meadow'): Promise<EventStems> {
+  const army = defaultArmy(10).map((x) => ({ ...x, level: 0 }));
+  const rows: EventStems['rows'] = [];
+  for (const kind of ['tap', 'pickup', 'strike'] as const) {
+    for (const q of ['perfect', 'good', 'miss'] as const) {
+      const r = await renderBalance(song, army, { bars: 4, intensity: 1, events: { kind, q }, measure: 'rhythm', window: 0.08 });
+      rows.push({ kind, q, hitK: r.hitK, hitPhone: r.hitPhone, bright: r.stemBright ?? 0, overPhone: r.hitDeltaPhone, peakDb: r.mix.peakDb });
+    }
+  }
+  return { rows };
 }

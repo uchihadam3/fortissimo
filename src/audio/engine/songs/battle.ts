@@ -297,6 +297,7 @@ export abstract class Battle extends AdaptiveSong {
   protected glory(b: BarCtx, f: BarInfo, L: Layers, I: number, harpCh: string | null): void {
     this.tutti(b, f, L, I);
     this.grooveLayers(b, f, I);
+    this.powerLayers(b, f, I);
     if (L.h < 5) return;
     if (f.last && !b.drop && !b.build) {
       this.roll(b, 'timp', this.kit.timp, 2, 4, 6, 0.08, I >= 2 ? 0.42 : 0.3, this.tone(f.next, 40, 0));
@@ -327,6 +328,37 @@ export abstract class Battle extends AdaptiveSong {
     if (L.h >= 5 && phraseStart && !b.drop) b.p.hit('crash', K.perc, this.T(b, 0, 0.001), I >= 2 ? 0.26 : 0.2);
     // the full band sings the hook: the choir hums the towers' tune with them
     if (L.h >= 5) this.tune(b, f, 'choiroo', K.choir, 0.15, { legato: 1.0, release: 0.5 });
+  }
+
+  /**
+   * The player's power (0..1, v4), continuous: every tier fades in over 0.15 of power, so the music
+   * keeps growing while the player keeps the beat — 0.2 fuller voicings (a humming choir under the
+   * harmony) · 0.4 a counter-melody of guide tones in the bells · 0.6 the bells double the tune an
+   * octave up · 0.82 everything sings: the choir and the horns carry the tune with the towers and the
+   * timpani mark every phrase. When power falls the layers leave again (the mix also dims, see Core).
+   */
+  private powerLayers(b: BarCtx, f: BarInfo, I: number): void {
+    const P = b.power;
+    if (!(P > 0.2) || b.build) return;
+    const K = this.kit;
+    const tier = (lo: number) => Math.max(0, Math.min(1, (P - lo) / 0.15));
+    const brk = this.isBreak || I === 0;
+    const a = tier(0.2);
+    if (a > 0) this.chords(b, f, 'power-hum', 'choiroo', K.choir, 50, 65, 4, (brk ? 0.08 : 0.1) * a, 0.5);
+    const c2 = tier(0.4);
+    if (c2 > 0 && !b.drop) this.counter(b, f, 'celesta', K.glockCh, 79, 91, (brk ? 0.12 : 0.16) * c2, 2);
+    if (brk) return;
+    const c3 = tier(0.6);
+    if (c3 > 0) this.tune(b, f, 'celesta', K.glockCh, 0.17 * c3, { shift: 12, legato: 0.9 });
+    const c4 = tier(0.82);
+    if (c4 > 0) {
+      this.tune(b, f, 'choir', K.choir, 0.17 * c4, { legato: 1.0, release: 0.5 });
+      if (b.groove < 4) this.tune(b, f, 'brass', K.brass, 0.32 * c4, { shift: -12, legato: 0.9 });
+      if (f.i % 4 === 0 && !b.drop) {
+        b.p.buf('timp', K.timp, this.T(b, 0, 0.001), this.tone(this.cAt(f, 0), 40, 0), 0.34 * c4, 2);
+        b.p.hit('crash', K.perc, this.T(b, 0, 0.001), 0.2 * c4);
+      }
+    }
   }
 
   /**
