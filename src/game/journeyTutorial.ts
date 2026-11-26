@@ -8,12 +8,15 @@
  * v3 (the player conducts): after the first wave of the first journey the glove taps the baton in
  * time with its beat ring (until the groove rises); at the first breather it taps the Maestro's
  * echo; in the second journey it taps a glowing musician on the beat (a solo).
+ *
+ * v4: after the baton, the glove shows the power meter rising and the musicians brighter for it,
+ * then taps a golden note on the beat and a creature on the beat (the colossus strikes it).
  */
 import type { JourneyBattle } from './journeyBattle';
 import type { TutorialId } from '../sim/journey';
 import { TOWERS } from '../sim/defs';
 
-type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'echo';
+type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'echo' | 'coinBeat' | 'strike' | 'none';
 
 interface Step {
   where: () => { x: number; y: number } | null;
@@ -119,6 +122,39 @@ export class JourneyTutorial {
           until: 'groove',
           timeout: 30,
         });
+      }
+      if (id === 'baton') {
+        // what it does: the meter rises, and the musicians shine brighter with it
+        this.steps.push({ when: () => sim.power >= 15, where: byId('#power .bar'), until: 'none', timeout: 2.6 });
+        this.steps.push({
+          when: () => sim.towers.length > 0,
+          where: () => (hud.radialOpen || !sim.towers.length ? null : slotScreen(sim.towers[0].slot, 2.4)),
+          until: 'none',
+          timeout: 2,
+        });
+      }
+      if (id === 'coin') {
+        // a golden note, tapped on the beat
+        this.steps.push({ when: () => sim.started, where: nearestPickup, press: () => b.beatPress(), until: 'coinBeat', timeout: 16 });
+      }
+      if (id === 'strike') {
+        // a creature close to the colossus, tapped on the beat
+        const nearestFoe = () => {
+          let best: { x: number; y: number } | null = null;
+          let bd = 20;
+          for (const e of sim.enemies) {
+            if (!e.alive || e.structure || e.burrowed) continue;
+            const d = Math.hypot(e.x - sim.turtle.x, e.z - sim.turtle.z);
+            const v = view.enemies.get(e.id);
+            if (d >= bd || !v || !v.visibleNow) continue;
+            const sc = view.screen(v.pos.clone().setY(v.pos.y + 1.2));
+            if (sc.behind || sc.x < 30 || sc.y < 60 || sc.x > window.innerWidth - 30 || sc.y > window.innerHeight - 30) continue;
+            bd = d;
+            best = { x: sc.x, y: sc.y };
+          }
+          return best;
+        };
+        this.steps.push({ when: () => sim.started, where: nearestFoe, press: () => b.beatPress(), until: 'strike', timeout: 14 });
       }
       if (id === 'echo') {
         // the first breather: the glove listens to the Maestro, then taps the echo

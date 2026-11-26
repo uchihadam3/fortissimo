@@ -8,7 +8,7 @@
 import { CAMPAIGN, LEVEL_BY_ID, endlessDef } from '../src/data/campaign';
 import { Journey, SUB, SUBS_PER_BAR, type Enemy, type JourneyDef, type SimEvent, type Tower } from '../src/sim/journey';
 import { BAND, ENEMIES, SONGS, TOWERS, TOWER_KINDS, WORLDS, type EnemyKind, type TowerKind } from '../src/sim/defs';
-import { CALLS, ECHO, Groove, RHYTHM, callBars, callPattern, nearestGrid, quality } from '../src/sim/rhythm';
+import { CALLS, ECHO, Power, RHYTHM, callBars, callPattern, grooveOf, nearestGrid, powerMul, quality } from '../src/sim/rhythm';
 import { SLOTS, SLOT_NEIGHBOURS } from '../src/sim/shell';
 import { playBot, playSpam } from '../src/sim/bots';
 import { checkpointOf, newSave, rememberCheckpoint, saveFromCode, saveToCode, validate } from '../src/core/save';
@@ -143,8 +143,8 @@ let someCp: Checkpoint | null = null;
 for (const id of ['m3', 'i2', 'c1']) {
   const d = LEVEL_BY_ID.get(id)!.def;
   const bpmL = SONGS[d.song].bpm;
-  // a live game, frozen as it reaches a point well inside the third movement
-  const live = playBot(d, 'good', { until: (j) => j.movement >= 2 && j.journeyBar! >= j.movements[2].bar + 3 });
+  // a live game (keeping the beat), frozen as it reaches a point well inside the third movement
+  const live = playBot(d, 'good', { rhythm: 0.6, until: (j) => j.movement >= 2 && j.journeyBar! >= j.movements[2].bar + 3 });
   const L = live.j;
   const cp = L.checkpoint();
   check(`${id} checkpoint exists`, !!cp && cp.movement === 2, JSON.stringify(cp && { m: cp.movement, s: cp.sub }));
@@ -456,32 +456,44 @@ section('rhythm');
   check('miss beyond', quality(0.13) === 'miss' && quality(-0.2) === 'miss');
   check('quarters below groove 3', nearestGrid(spb * 0.5 + 0.01, spb, 2).grid === spb);
   check('eighths from groove 3', nearestGrid(spb * 0.5 + 0.01, spb, 3).grid === spb / 2 && quality(nearestGrid(spb * 0.5 + 0.01, spb, 3).delta) === 'perfect');
-  // the groove: 4/12/24/40 in a row
-  const g = new Groove();
-  let t = 0;
+  // the power meter: on-beat taps fill it (perfect more than good), the combo lifts the gains
+  const g = new Power();
   const levels: number[] = [];
-  for (let i = 0; i < 40; i++) {
-    t = (i + 1) * spb;
-    g.tap(t + 0.02, spb);
-    levels.push(g.level);
+  for (let i = 0; i < 60; i++) {
+    g.tap((i + 1) * spb + 0.02, spb);
+    levels.push(g.power);
   }
-  check('groove 1 after 4 on-beat taps', levels[2] === 0 && levels[3] === 1, levels.slice(0, 5).join(','));
-  check('groove 2/3/4 after 12/24/40', levels[10] === 1 && levels[11] === 2 && levels[23] === 3 && levels[39] === 4, `${levels[11]} ${levels[23]} ${levels[39]}`);
-  check('the run counts', g.perfects === 40 && g.misses === 0);
-  // hammering the same beat is a miss
-  const g2 = new Groove(2);
+  check('perfect taps fill the meter', levels[0] > 0 && levels[9] > levels[4] && levels[59] > 80 && levels[59] < 100, levels.filter((_, i) => i % 10 === 9).map((x) => x.toFixed(0)).join(','));
+  check('the combo counts', g.combo === 60 && g.best === 60 && g.perfects === 60 && g.accuracy === 1);
+  check('groove levels from the meter', grooveOf(19) === 0 && grooveOf(20) === 1 && grooveOf(45) === 2 && grooveOf(70) === 3 && grooveOf(90) === 4);
+  const gp = new Power(), gg = new Power();
+  for (let i = 0; i < 8; i++) {
+    gp.tap((i + 1) * spb, spb);
+    gg.tap((i + 1) * spb + 0.09, spb);
+  }
+  check('perfect fills more than good', gp.power > gg.power * 1.6 && gg.goods === 8, `${gp.power.toFixed(1)} ${gg.power.toFixed(1)}`);
+  check('band multiplier ×1 → ×1.6', powerMul(0) === 1 && Math.abs(powerMul(100) - 1.6) < 1e-9 && powerMul(50) > 1.29);
+  // hammering one target on one beat is a miss; two targets on one beat are fine
+  const g2 = new Power(50);
   g2.tap(spb * 5, spb);
-  check('a grid point counts once', g2.tap(spb * 5 + 0.03, spb).q === 'miss' && g2.level === 1);
-  // a miss drops one level and starts the run of that level again
-  const g3 = new Groove(3);
-  g3.tap(spb * 3 + 0.15, spb);
-  check('a miss drops a level', g3.level === 2 && g3.run === RHYTHM.thresholds[1] && g3.progress === 0);
-  // two quiet bars fade it, one level at a time
-  const g4 = new Groove(3);
+  check('a grid point counts once per target', g2.tap(spb * 5 + 0.03, spb).q === 'miss' && g2.combo === 0);
+  const g5 = new Power(50);
+  g5.tap(spb * 5, spb, 'baton');
+  check('two fingers on one beat', g5.tap(spb * 5 + 0.01, spb, 'coin').q === 'perfect' && g5.combo === 2);
+  // a miss takes a clear chunk and breaks the combo
+  const g3 = new Power(60);
+  g3.tap(spb * 3, spb);
+  const before = g3.power;
+  check('a miss costs power and the combo', g3.tap(spb * 4 + 0.2, spb).q === 'miss' && g3.power === before - RHYTHM.lossMiss && g3.combo === 0);
+  // quiet, it fades a little every beat, never under the crescendo floor
+  const g4 = new Power(60);
   g4.tap(10 * spb, spb);
-  check('no fade within two bars', !g4.idle(10 * spb + 7 * spb, 4 * spb) && g4.level === 3);
-  check('fades after two quiet bars', g4.idle(10 * spb + 8.1 * spb, 4 * spb) && g4.level === 2);
-  check('then again two bars later', !g4.idle(10 * spb + 12 * spb, 4 * spb) && g4.idle(10 * spb + 16.3 * spb, 4 * spb) && g4.level === 1);
+  check('no fade while playing', !g4.idle(10 * spb + 5 * spb, spb) && g4.power > 60);
+  const p0 = g4.power;
+  check('fades when quiet', g4.idle(10 * spb + 7 * spb, spb) && g4.power === p0 - RHYTHM.fadePerBeat);
+  g4.floor = 55;
+  for (let k = 8; k < 60; k++) g4.idle(10 * spb + k * spb, spb);
+  check('never under the floor', g4.power === 55);
   // the Maestro's calls
   for (const w of WORLDS) for (const c of CALLS[w]) check(`call ${w} ${c}`, c.length === 4 && c.every((p, i) => p >= 0 && p <= 7 && (i === 0 || p > c[i - 1])));
   check('first call is plain', callPattern('meadow', 1, 1, 0).join() === '0,2,4,6');
@@ -489,31 +501,39 @@ section('rhythm');
   check('two calls in a long breather', callBars(8).length === 2 && callBars(6).length === 2 && callBars(8)[1] + 2 <= 8 && callBars(6)[1] + 2 <= 6);
 }
 {
-  // groove makes the band stronger (and is recorded)
-  const dmgWith = (groove: number) => {
+  // power makes the band stronger (and is recorded)
+  const dmgWith = (power: number) => {
     const j = new Journey(arenaDef(), bpm);
     j.build(0, 'harp');
-    j.setGroove(groove);
+    j.setPower(power, 1, 1);
     for (let i = 0; i < 6; i++) spawn(j, 'blot', 9, (i - 2.5) * 1.5, 20);
     run(j, 4);
     return j.towers[0].damage;
   };
-  const d0 = dmgWith(0), d4 = dmgWith(4);
-  check('groove 4 hits harder', Math.abs(d4 / d0 - (1 + RHYTHM.grooveDamage[4])) < 0.03, `${(d4 / d0).toFixed(3)}`);
+  const d0 = dmgWith(0), d100 = dmgWith(100);
+  check('full power hits ×1.6', Math.abs(d100 / d0 - 1.6) < 0.03, `${(d100 / d0).toFixed(3)}`);
   const j = new Journey(arenaDef(), bpm);
-  check('setGroove logs', j.setGroove(3) && !j.setGroove(3) && j.log.some((a) => a.a === 'groove' && a.level === 3) && j.stats.groovePeak === 3);
-  check('groove is clamped', j.setGroove(9) && j.groove === 4);
+  check('setPower logs', j.setPower(72.4, 10, 9) && !j.setPower(72, 10, 9) && j.log.some((a) => a.a === 'power' && a.p === 72 && a.judged === 10 && a.hits === 9) && j.groove === 3);
+  check('power is clamped', j.setPower(140, 11, 10) && j.power === 100 && j.groove === 4);
+  check('accuracy from the tally', Math.abs(j.accuracy - 10 / 11) < 1e-9);
+  // v3 checkpoints: a groove level replays as its power threshold
+  check('v3 groove action replays', j.apply({ sub: j.sub, a: 'groove', level: 2 }) && j.power === RHYTHM.thresholds[1]);
 }
 {
   // solos: they charge, glow, and only fire when charged
   const j = new Journey(arenaDef({ bars: 400 }), bpm);
   const h = j.build(0, 'harp')!;
   check('no solo uncharged', !j.canSolo(h) && j.solo(h, true) === null);
-  j.setGroove(4);
+  j.setPower(100, 1, 1);
   j.begin();
   const ready: SimEvent[] = [];
-  run(j, j.barDur * 30, (evs) => ready.push(...evs.filter((e) => e.type === 'soloReady')));
-  check('passive charge with the groove', h.solo >= 1 && ready.length === 1, `${h.solo.toFixed(2)}`);
+  run(j, j.barDur * 32, (evs) => ready.push(...evs.filter((e) => e.type === 'soloReady')));
+  check('passive charge with the power', h.solo >= 1 && ready.length === 1, `${h.solo.toFixed(2)}`);
+  const j2 = new Journey(arenaDef({ bars: 400 }), bpm);
+  const h2 = j2.build(0, 'harp')!;
+  j2.begin();
+  run(j2, j2.barDur * 32);
+  check('slow without power', h2.solo < 0.5, h2.solo.toFixed(2));
 }
 /** the solo of a lone musician of `kind` against creatures, charged by hand; returns what it did */
 function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot', n = 6, d = 8) {
@@ -601,12 +621,12 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   const d = LEVEL_BY_ID.get('d2')!.def;
   const live = playBot(d, 'good', { rhythm: 0.7, until: (j) => j.movement >= 2 && j.journeyBar! >= j.movements[2].bar + 3 });
   const L = live.j;
-  check('rhythm bot plays solos, echoes, groove', L.stats.solos > 0 && L.stats.echoes > 0 && L.log.some((a) => a.a === 'groove'), `${L.stats.solos} ${L.stats.echoes}`);
+  check('rhythm bot plays solos, echoes, strikes, notes, power', L.stats.solos > 0 && L.stats.echoes > 0 && L.stats.strikes > 0 && L.stats.onBeatNotes > 0 && L.log.some((a) => a.a === 'power'), `${L.stats.solos} ${L.stats.echoes} ${L.stats.strikes}`);
   const cp = L.checkpoint()!;
   const now = Journey.replay(d, SONGS[d.song].bpm, { ...cp, sub: L.sub, actions: L.log.filter((a) => a.sub <= L.sub) });
   check('rhythm replay == live', now.fingerprint() === L.fingerprint(), `\n  ${now.fingerprint().slice(0, 160)}\n  ${L.fingerprint().slice(0, 160)}`);
   const at = Journey.replay(d, SONGS[d.song].bpm, cp);
-  check('groove restored at the checkpoint', at.groove === (cp.actions.filter((a) => a.a === 'groove').pop() as { level: number } | undefined)?.level);
+  check('power restored at the checkpoint', at.power === (cp.actions.filter((a) => a.a === 'power').pop() as { p: number } | undefined)?.p);
   for (const a of L.log.filter((x) => x.sub > cp.sub)) {
     at.advanceToSub(a.sub);
     at.apply(a);
@@ -622,37 +642,128 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   check('rhythm bot deterministic', b.j.fingerprint() === c.j.fingerprint());
 }
 
+{
+  // golden notes on the beat: perfect ×1.5, off the beat half (and recorded with their quality)
+  const d = { ...LEVEL_BY_ID.get('m2')!.def, waves: [] };
+  const take = (q?: 'perfect' | 'good' | 'miss') => {
+    const j = new Journey(d, SONGS[d.song].bpm);
+    const p = j.pickups[0];
+    const v = j.collect(p.id, q);
+    return { v, base: p.value, j };
+  };
+  const pf = take('perfect'), ms = take('miss'), plain = take();
+  check('a note on the beat is worth more', pf.v === Math.round(pf.base * 1.5) && pf.j.stats.onBeatNotes === 1);
+  check('off the beat, half', ms.v === Math.max(1, Math.round(ms.base * 0.5)) && ms.j.stats.onBeatNotes === 0);
+  check('notes keep their quality in the log', pf.j.log.some((a) => a.a === 'collect' && a.q === 'perfect') && plain.v === plain.base);
+}
+{
+  // the colossus strikes a creature tapped on the beat: damage with the power, a push, a cooldown
+  const strikeOn = (power: number, perfect: boolean) => {
+    const j = new Journey(arenaDef(), bpm);
+    j.setPower(power, 1, 1);
+    const e = spawn(j, 'shell', 14, 0, 10);
+    const hp = e.hp;
+    const dealt = j.strike(e.id, perfect);
+    return { j, e, hp, dealt, lost: hp - e.hp };
+  };
+  const s0 = strikeOn(0, false), s100 = strikeOn(100, false), sp = strikeOn(0, true);
+  check('a strike hurts', s0.lost > 0 && s0.j.stats.strikes === 1 && s0.j.log.some((a) => a.a === 'strike'));
+  check('power doubles a strike', Math.abs(s100.lost / s0.lost - 2) < 0.01, `${(s100.lost / s0.lost).toFixed(2)}`);
+  check('a perfect strike is stronger', Math.abs(sp.lost / s0.lost - 1.3) < 0.01);
+  check('a strike pushes back', s0.e.kx * (s0.e.x - s0.j.turtle.x) + s0.e.kz * (s0.e.z - s0.j.turtle.z) > 0);
+  check('a cooldown per creature', !s0.j.canStrike(s0.e) && s0.j.strike(s0.e.id, true) === 0);
+  run(s0.j, s0.j.barDur * 2.05);
+  check('then it can be struck again', !s0.e.alive || s0.j.canStrike(s0.e));
+  const far = new Journey(arenaDef(), bpm);
+  const fe = spawn(far, 'shell', 60);
+  check('out of reach', far.strike(fe.id, true) === 0);
+  const ev = (() => {
+    const j = new Journey(arenaDef(), bpm);
+    const e = spawn(j, 'blot', 12);
+    j.drain();
+    j.strike(e.id, true);
+    return j.drain();
+  })();
+  check('strike event', ev.some((e) => e.type === 'strike' && e.perfect && e.amount > 0));
+}
+{
+  // a glowing musician tapped off the beat still solos, weaker
+  const off = soloTrial('harp', false, 'shell', 6, 12);
+  void off;
+  const j = new Journey(arenaDef({ bars: 200 }), bpm);
+  const h = j.build(0, 'harp')!;
+  h.solo = 1;
+  j.solo(h, 'miss');
+  check('an off-beat solo plays weaker', h.soloQ === 0.6 && j.log.some((a) => a.a === 'solo' && a.q === 'miss'));
+}
+{
+  // a movement played with a high power earns a crescendo star (the band stays stronger)
+  const d = { ...LEVEL_BY_ID.get('m2')!.def, waves: [] };
+  const hot = new Journey(d, SONGS[d.song].bpm);
+  hot.setPower(80, 10, 10);
+  hot.begin();
+  const evs: SimEvent[] = [];
+  const m1 = d.movements![1];
+  run(hot, (m1.bar - m1.rest + 2) * hot.barDur + 1, (e) => evs.push(...e));
+  check('a crescendo star for a movement at high power', hot.crescendo === 1 && evs.some((e) => e.type === 'crescendo' && e.stars === 1 && e.average >= 79));
+  const cold = new Journey(d, SONGS[d.song].bpm);
+  cold.setPower(30, 10, 10);
+  cold.begin();
+  run(cold, (m1.bar - m1.rest + 2) * cold.barDur + 1);
+  check('none at low power', cold.crescendo === 0);
+  const mulHot = (hot as unknown as { towerMul(t: Tower, at: number): number });
+  const tw = hot.build(0, 'harp')!;
+  hot.setPower(0, 10, 10);
+  check('a crescendo star lifts the band', Math.abs(mulHot.towerMul(tw, hot.time) / (tw.buff * hot.harmonyMul) - 1.05) < 1e-9);
+}
+{
+  // three stars need the rhythm too
+  const d = LEVEL_BY_ID.get('m1')!.def;
+  const noRhythm = playBot(d, 'good');
+  const rhythm = playBot(d, 'good', { rhythm: 0.8 });
+  check('no rhythm: at most 2★', noRhythm.j.outcome === 'victory' && noRhythm.j.stars() <= 2);
+  check('good rhythm and no bites: 3★', rhythm.j.stars() === 3 && rhythm.j.accuracy >= 0.85, `${rhythm.j.stars()} ${rhythm.j.accuracy.toFixed(2)}`);
+}
+
 section('bots');
 // ───────────────────────────── the bots ─────────────────────────────
 const tb = Date.now();
-// a decent conductor (groove ≈ 2, solos now and then) wins every main journey with 2–3★; a shaky
-// hand on the baton still wins them all; without any rhythm the good bot still gets through the
-// main road (fewer stars); the extra paths ask for the baton. Good rhythm clearly helps.
-let starsConductor = 0, starsPlain = 0;
+// v4, a true rhythm game: the better the rhythm, the more you win.
+//   virtuoso (0.9: almost every tap perfect) · conductor (0.6) · sloppy (0.3) · no rhythm at all
+// The conductor and the virtuoso win everything (main road with 2–3★); the sloppy hand still gets
+// through the main road; a band with no rhythm struggles from the second land on; the virtuoso
+// beats the sloppy hand by a clear margin in stars.
+const SK = { virtuoso: 0.9, conductor: 0.6, sloppy: 0.3, none: 0 };
+const starsBy: Record<string, number> = { virtuoso: 0, conductor: 0, sloppy: 0, none: 0 };
+let noneLost = 0;
 for (const l of CAMPAIGN) {
-  const c = playBot(l.def, 'good', { rhythm: 0.6 });
-  if (l.kind !== 'main' && l.kind !== 'boss') {
-    check(`conductor wins extra ${l.id}`, c.j.outcome === 'victory', `${c.j.outcome} ${c.j.lives} lives`);
-    continue;
+  const main = l.kind === 'main' || l.kind === 'boss';
+  const r: Record<string, ReturnType<typeof playBot>> = {};
+  for (const [name, sk] of Object.entries(SK)) {
+    r[name] = playBot(l.def, 'good', sk ? { rhythm: sk } : {});
+    starsBy[name] += r[name].j.stars();
   }
-  check(`conductor wins ${l.id}`, c.j.outcome === 'victory' && c.j.stars() >= 2, `${c.j.outcome} ${c.j.lives} lives`);
-  const w = playBot(l.def, 'good', { rhythm: 0.3 });
-  check(`shaky rhythm wins ${l.id}`, w.j.outcome === 'victory', `${w.j.outcome} ${w.j.lives} lives`);
-  const g = playBot(l.def, 'good');
-  starsConductor += c.j.stars();
-  starsPlain += g.j.stars();
-  check(`good bot without rhythm wins ${l.id}`, g.j.outcome === 'victory', `${g.j.outcome} ${g.j.lives} lives`);
-  check(`rhythm helps in ${l.id}`, c.j.lives >= g.j.lives - 2, `${c.j.lives} vs ${g.j.lives}`);
+  check(`virtuoso wins ${l.id}`, r.virtuoso.j.outcome === 'victory' && (!main || r.virtuoso.j.stars() === 3), `${r.virtuoso.j.outcome} ${r.virtuoso.j.lives}`);
+  check(`conductor wins ${l.id}`, r.conductor.j.outcome === 'victory' && (!main || r.conductor.j.stars() >= 2), `${r.conductor.j.outcome} ${r.conductor.j.lives}`);
+  if (main) check(`sloppy rhythm still wins ${l.id}`, r.sloppy.j.outcome === 'victory', `${r.sloppy.j.outcome} ${r.sloppy.j.lives}`);
+  if (l.world === 'meadow' && main) check(`no rhythm still wins ${l.id}`, r.none.j.outcome === 'victory', `${r.none.j.outcome}`);
+  else if (r.none.j.outcome !== 'victory') noneLost++;
+  check(`rhythm helps in ${l.id}`, r.virtuoso.j.lives >= r.none.j.lives && r.virtuoso.j.lives >= r.sloppy.j.lives - 2, `${r.virtuoso.j.lives} ${r.conductor.j.lives} ${r.sloppy.j.lives} ${r.none.j.lives}`);
 }
-check('good rhythm: clearly more stars', starsConductor >= starsPlain + 15, `${starsConductor} vs ${starsPlain}`);
+check('the virtuoso beats the sloppy hand by far', starsBy.virtuoso >= starsBy.sloppy + 20, JSON.stringify(starsBy));
+check('more rhythm, more stars', starsBy.virtuoso >= starsBy.conductor && starsBy.conductor > starsBy.sloppy && starsBy.sloppy > starsBy.none, JSON.stringify(starsBy));
+check('no rhythm struggles from the second land on', noneLost >= 6, `${noneLost}`);
 {
-  const c = playBot(LEVEL_BY_ID.get('f2')!.def, 'good', { rhythm: 0.6 }).j.stats;
-  const avg = c.grooveSum / c.walkBars;
-  check('conductor keeps a groove of about 2', avg > 1.5 && avg < 3, avg.toFixed(2));
+  const st = (sk: number) => {
+    const j = playBot(LEVEL_BY_ID.get('f2')!.def, 'good', { rhythm: sk }).j;
+    return j.stats.powerSum / j.stats.walkBars;
+  };
+  const p3 = st(0.3), p6 = st(0.6), p9 = st(0.9);
+  check('power follows the skill', p3 < 40 && p6 > 45 && p6 < 80 && p9 > 82, `${p3.toFixed(0)} ${p6.toFixed(0)} ${p9.toFixed(0)}`);
 }
 for (const id of ['m1', 'm2', 'm3', 'm4']) {
   const r = playBot(LEVEL_BY_ID.get(id)!.def, 'novice');
-  check(`novice gets through ${id}`, r.j.outcome === 'victory', `${r.j.outcome} ${r.j.lives}`);
+  check(`novice (shaky rhythm) gets through ${id}`, r.j.outcome === 'victory', `${r.j.outcome} ${r.j.lives}`);
 }
 for (const id of ['m3', 'd1', 'i1', 'f1', 'c1']) {
   const r = playSpam(LEVEL_BY_ID.get(id)!.def);

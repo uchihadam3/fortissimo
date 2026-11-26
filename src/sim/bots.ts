@@ -8,15 +8,17 @@
  *           first free plate, otherwise the weakest tower grows; taps some notes that come close.
  * - spam:   plays like the good bot with one single instrument.
  *
- * v3: any bot can also keep the beat (`rhythm`, 0…1): it taps the baton on every beat with a hit
- * chance that grows with its skill (the groove follows the same rules as the player's), fires
- * charged solos now and then when there is something to hit, and echoes some of the Maestro's
- * calls. rhythm ≈ 0.6 keeps an average groove of about 2: a decent player.
+ * v4: any bot can also play the rhythm (`rhythm`, 0…1): on every beat it taps something — a
+ * creature close to the colossus, a golden note, a glowing musician, or the baton — with a timing
+ * that grows with its skill (miss chance 0.35 × (1 − skill)^1.5, the rest perfect with chance
+ * skill^1.3), feeding the same power meter as the player; it echoes the Maestro's calls when its
+ * four taps land. Without rhythm a bot's notes are taken off the beat most of the time (as a
+ * player tapping at random would). The novice plays with a shaky rhythm (0.3) by default.
  */
 import { Journey, type JourneyDef, type Mode, type SimEvent, type Tower } from './journey';
 import { ENEMIES, SONGS, TOWERS, SECTION_OF, duetOf, type EnemyKind, type TowerKind } from './defs';
 import { SLOTS, SLOT_NEIGHBOURS } from './shell';
-import { Groove, callBars } from './rhythm';
+import { Power, callBars, type TapQuality } from './rhythm';
 import { Rng } from '../core/rng';
 
 export type BotKind = 'good' | 'novice' | 'spam';
@@ -205,10 +207,11 @@ function options(j: Journey, kinds: TowerKind[], th: Threats): Option[] {
   return out;
 }
 
+/** without rhythm, notes are tapped whenever (on the beat 4 times in 10, by chance) */
 function tapNotes(j: Journey, reach: number, pick: (id: number) => boolean = () => true) {
   for (const p of j.pickups) {
     if (p.taken || p.lost) continue;
-    if (Math.hypot(p.x - j.turtle.x, p.z - j.turtle.z) < reach && pick(p.id)) j.collect(p.id);
+    if (Math.hypot(p.x - j.turtle.x, p.z - j.turtle.z) < reach && pick(p.id)) j.collect(p.id, (p.id * 7919) % 10 < 4 ? 'good' : 'miss');
   }
 }
 
@@ -226,8 +229,8 @@ function useFF(j: Journey) {
 }
 
 /** one decision of the good (or spam) bot */
-function goodStep(j: Journey, kinds: TowerKind[]) {
-  tapNotes(j, 30);
+function goodStep(j: Journey, kinds: TowerKind[], hands: boolean) {
+  if (!hands) tapNotes(j, 30);
   useFF(j);
   const th = threats(j);
   for (let guard = 0; guard < 4; guard++) {
@@ -246,9 +249,9 @@ function goodStep(j: Journey, kinds: TowerKind[]) {
 }
 
 /** one decision of the novice */
-function noviceStep(j: Journey, state: { next: number; tick: number }) {
+function noviceStep(j: Journey, state: { next: number; tick: number }, hands: boolean) {
   state.tick++;
-  if (state.tick % 2 === 0) tapNotes(j, 20, (id) => (id * 7919) % 10 < 6);
+  if (!hands && state.tick % 2 === 0) tapNotes(j, 20, (id) => (id * 7919) % 10 < 6);
   if (j.ffReady() && j.aliveCount() >= 4) j.unleash();
   const kinds = j.def.towers;
   for (let s = 0; s < j.slotsOpen; s++) {
@@ -261,40 +264,33 @@ function noviceStep(j: Journey, state: { next: number; tick: number }) {
   if (t && (j.upgradeCost(t) ?? Infinity) <= j.coins) j.upgrade(t);
 }
 
-/** a bot's hands on the baton: taps, solos and echoes (deterministic for a journey and a skill) */
+/** a bot's hands on the beat: baton, notes, creatures, solos and echoes (deterministic for a journey and a skill) */
 class BotRhythm {
-  private g = new Groove();
+  readonly power = new Power();
   private rng: Rng;
   private beat = -1;
   private tried = new Set<string>();
-  constructor(private j: Journey, private skill: number) {
+  private readonly missP: number;
+  private readonly perfectP: number;
+  constructor(private j: Journey, private skill: number, private reach: number) {
     this.rng = new Rng(((j.def.seed ?? 7) * 7907 + Math.round(skill * 1000)) >>> 0);
+    this.missP = 0.35 * Math.pow(1 - skill, 1.5);
+    this.perfectP = Math.pow(skill, 1.3);
   }
-  /** chance that one tap lands on the beat */
-  private get hit() {
-    return 0.86 + 0.135 * this.skill;
+  private quality(): TapQuality {
+    if (this.rng.next() < this.missP) return 'miss';
+    return this.rng.next() < this.perfectP ? 'perfect' : 'good';
   }
   step() {
     const j = this.j;
     if (!j.started || j.outcome !== 'playing') return;
-    // the baton, on every beat that went by
     const b = Math.floor(j.time / j.spb + 1e-9);
     if (this.beat < 0) this.beat = b;
     while (this.beat < b) {
       this.beat++;
-      const r = this.rng.next();
-      this.g.judge(r < this.hit ? (r < this.hit * this.skill * 0.6 ? 'perfect' : 'good') : 'miss');
-      if (this.g.level !== j.groove) j.setGroove(this.g.level);
+      this.tap();
     }
-    // a charged musician, when there is something to play at (now and then)
-    for (const t of j.towers) {
-      if (!j.canSolo(t) || this.rng.next() > 0.12 + 0.45 * this.skill) continue;
-      const busy = t.kind === 'shaker' || j.enemies.some((e) => e.alive && !e.structure && Math.hypot(e.x - t.x, e.z - t.z) < 14);
-      if (!busy) continue;
-      const r = this.rng.next();
-      if (r < this.hit) j.solo(t, r < this.hit * this.skill * 0.6);
-    }
-    // the Maestro's call: after each echo bar of a breather, a chance it was echoed right
+    // the Maestro's call: after each echo bar of a breather, echoed right when its four taps land
     if (j.canEcho()) {
       const m = j.movements[j.movement];
       const jb = j.journeyBar ?? 0;
@@ -302,21 +298,70 @@ class BotRhythm {
         const key = `${j.movement}:${i}`;
         if (this.tried.has(key) || jb < m.bar - m.rest + cb + 2) return;
         this.tried.add(key);
-        if (this.rng.next() < 0.25 + 0.6 * this.skill) j.echo();
+        let ok = true;
+        for (let k = 0; k < 4; k++) {
+          const q = this.quality();
+          this.power.judge(q);
+          if (q === 'miss') ok = false;
+        }
+        if (ok) j.echo();
+        this.sync();
       });
     }
+  }
+  /** one tap on this beat: what a player would tap now */
+  private tap() {
+    const j = this.j;
+    const T = j.turtle;
+    const q = this.quality();
+    this.power.judge(q);
+    // a creature about to bite
+    let foe: { id: number; d: number } | null = null;
+    for (const e of j.enemies) {
+      if (!e.alive || e.structure || !j.canStrike(e)) continue;
+      const d = Math.hypot(e.x - T.x, e.z - T.z);
+      if (d < 16 && (!foe || d < foe.d)) foe = { id: e.id, d };
+    }
+    if (foe && this.rng.next() < 0.4) {
+      if (q !== 'miss') j.strike(foe.id, q === 'perfect');
+      this.sync();
+      return;
+    }
+    // a golden note within reach
+    for (const p of j.pickups) {
+      if (p.taken || p.lost || Math.hypot(p.x - T.x, p.z - T.z) >= this.reach) continue;
+      j.collect(p.id, q);
+      this.sync();
+      return;
+    }
+    // a glowing musician, when there is something to play at
+    for (const t of j.towers) {
+      if (!j.canSolo(t)) continue;
+      const busy = t.kind === 'shaker' || j.enemies.some((e) => e.alive && !e.structure && Math.hypot(e.x - t.x, e.z - t.z) < 14);
+      if (!busy) continue;
+      j.solo(t, q);
+      this.sync();
+      return;
+    }
+    this.sync();
+  }
+  private sync() {
+    const p = this.power;
+    this.j.setPower(p.power, p.judged, p.perfects + p.goods);
   }
 }
 
 export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spam?: TowerKind; limit?: number; rhythm?: number; onTick?: (j: Journey) => void; until?: (j: Journey) => boolean; onEvents?: (evs: SimEvent[], j: Journey) => void } = {}): BotResult {
   const j = new Journey(def, SONGS[def.song].bpm, { mode: opts.mode ?? 'normal' });
-  const rhythm = opts.rhythm ? new BotRhythm(j, Math.min(1, opts.rhythm)) : null;
+  // the novice keeps a shaky beat unless told otherwise
+  const skill = opts.rhythm ?? (kind === 'novice' ? 0.3 : 0);
+  const rhythm = skill > 0 ? new BotRhythm(j, Math.min(1, skill), kind === 'novice' ? 20 : 30) : null;
   const kinds = kind === 'spam' ? [opts.spam ?? 'harp'] : def.towers;
   const nov = { next: 0, tick: 0 };
   const dt = kind === 'novice' ? 4 : 0.2;
   // before setting off
-  if (kind === 'novice') noviceStep(j, nov);
-  else for (let i = 0; i < 6; i++) goodStep(j, kinds);
+  if (kind === 'novice') noviceStep(j, nov, !!rhythm);
+  else for (let i = 0; i < 6; i++) goodStep(j, kinds, !!rhythm);
   j.begin();
   let t = 0;
   const limit = opts.limit ?? 1500;
@@ -326,8 +371,8 @@ export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spa
     const evs = j.drain();
     opts.onEvents?.(evs, j);
     rhythm?.step();
-    if (kind === 'novice') noviceStep(j, nov);
-    else goodStep(j, kinds);
+    if (kind === 'novice') noviceStep(j, nov, !!rhythm);
+    else goodStep(j, kinds, !!rhythm);
     opts.onTick?.(j);
     if (opts.until?.(j)) break;
   }

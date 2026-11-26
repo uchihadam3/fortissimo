@@ -46,26 +46,41 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 - **Recomeçar do movimento:** perdeu? Dá para voltar do começo do movimento em que caiu.
 - **Os inimigos** saem da névoa cinza pela frente, pelos lados, por trás e pelo céu. Setas na borda da
   tela mostram de onde vem a próxima onda e quais criaturas.
-- **Notas douradas** flutuam pela paisagem: toque nelas para coletar antes que fiquem para trás.
-- **A batuta (você rege):** o botão da batuta, no canto de baixo à esquerda, pulsa a cada batida
-  (um anel se fecha sobre ele no tempo). Toque **no tempo** e você toca percussão junto com a banda.
-  Acertos seguidos sobem o **groove** (0 a 4: 4, 12, 24 e 40 acertos): a banda bate mais forte (até
-  +30% no groove 4, quando tudo explode em luz), o ff enche mais rápido e a tartaruga pisa mais firme.
-  Um erro derruba um nível; dois compassos sem tocar e o groove esfria devagar. A partir do groove 3
-  as colcheias também valem.
-- **Solos:** cada músico carrega um solo enquanto toca (mais rápido com groove). Quando ele brilha no
-  casco, toque nele **no tempo**: um compasso de ataque especial (harpa: rajada; tambor: onda de choque
-  que empurra; sino: grande badalada que freia tudo; chocalho: chuva de notas; cristal: tempestade de
-  raios; trompa: sopro que atravessa até redemoinho; coral: a banda inteira mais forte e nada fica
-  invisível; grave: pancadas enormes no chão). No tempo perfeito o solo é mais forte. Fora do tempo,
-  o toque abre o menu do músico, como sempre.
+- **Tudo no ritmo:** o FORTÍSSIMO é um jogo de ritmo. Cada toque é julgado contra a batida que você
+  ouve: perfeito (✦ dourado), bom (✓ branco) ou erro (✕ vermelho). Vale para a batuta, para qualquer
+  lugar vazio da tela, para as notas douradas, para as criaturas e para os músicos que brilham.
+- **A força (o medidor ao lado da batuta):** cada acerto enche a barra (o perfeito enche mais, e a
+  sequência, o número grande, faz encher ainda mais rápido); cada erro tira um pedaço, a barra pisca
+  vermelha e a sequência volta a zero. Parou de tocar, a força esvazia devagar. Quanto mais cheia,
+  mais forte a banda (o número ×1,00 até ×1,60 é o dano de todos os músicos), mais rápido enchem o ff e
+  os solos, mais os músicos brilham e mais grandiosa fica a música (as faixas da barra são as camadas
+  da música).
+- **A batuta:** o botão no canto de baixo à esquerda pulsa a cada batida: um anel se fecha sobre ele e
+  fica **dourado** no instante perfeito. Tocar num lugar vazio da tela também vale como batuta.
+- **Notas douradas no ritmo:** elas pulsam a cada batida (mais forte no primeiro tempo do compasso).
+  Tocadas no tempo valem mais (perfeito: ×1,5) e cada nota seguida no tempo toca a próxima nota de uma
+  melodia; fora do tempo você pega só metade e conta como erro.
+- **A batida nas criaturas:** toque numa criatura no tempo e a tartaruga a atinge com um raio de luz
+  (mais forte com a força cheia, e a empurra para trás). Cada criatura só pode ser atingida de novo
+  depois de dois compassos; fora do tempo é só um zumbido e conta como erro.
+- **Solos:** cada músico carrega um solo enquanto toca (muito mais rápido com a força alta). Quando ele
+  brilha no casco, tocar nele **sempre** dispara o solo: no tempo com força total (perfeito ainda mais
+  forte), fora do tempo mais fraco e contando como erro. Um músico que não brilha abre o menu dele
+  (evoluir ou vender; no nível máximo só aparece a coroa e vender). Os solos: harpa, rajada; tambor,
+  onda de choque que empurra; sino, grande badalada que freia tudo; chocalho, chuva de notas; cristal,
+  tempestade de raios; trompa, sopro que atravessa até redemoinho; coral, a banda inteira mais forte e
+  nada fica invisível; grave, pancadas enormes no chão.
+- **Crescendo:** cada movimento tocado com a força média alta acende uma estrela de crescendo (ao lado
+  da barra): a banda fica um pouco mais forte até o fim da viagem e a força nunca mais esvazia abaixo
+  dela. No fim da viagem aparecem a sua precisão (%), a maior sequência e as estrelas de crescendo.
 - **O eco do Maestro:** nos respiros o Maestro toca uma frase de 4 notas (as bolinhas acendem sobre a
-  batuta). No compasso seguinte, repita na batuta. Acertou: notas douradas de bônus, +1 de groove e um
+  batuta). No compasso seguinte, repita na batuta. Cada nota conta na força. Acertou: notas douradas de bônus e um
   **acorde** que atinge todas as criaturas no começo do próximo movimento. As frases ficam mais
   sincopadas nas terras mais distantes.
 - **FORTÍSSIMO (ff):** a barra enche com os acertos. Ao soltar, a música faz um crescendo e a tartaruga
   dá uma **pisada gigante** no tempo forte.
-- **Estrelas:** 3 se perder no máximo 2 vidas, 2 até a metade, 1 se chegar com qualquer vida.
+- **Estrelas:** 1 por chegar; 2 se perder no máximo metade das vidas; 3 se perder no máximo 2 vidas
+  **e** tocar no ritmo (pelo menos 85% de acertos, com mais ou menos um toque por compasso).
 
 ### Torres (instrumentos)
 
@@ -88,8 +103,9 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 | Girar a câmera | arrastar | arrastar |
 | Zoom | roda do mouse | pinça |
 | Partir | Enter ou ▶ | ▶ |
-| Batuta (no tempo) | Espaço ou J | botão da batuta |
-| Solo | clique no músico que brilha, no tempo | tocar no músico, no tempo |
+| Batuta (no tempo) | Espaço, J ou clique num lugar vazio | botão da batuta ou toque num lugar vazio |
+| Nota dourada / criatura | clique nela, no tempo | tocar, no tempo |
+| Solo | clique no músico que brilha, no tempo | tocar no músico que brilha, no tempo |
 | FORTÍSSIMO | F | botão "ff" |
 | Pausa | Esc ou P | botão ‖ |
 | Recentrar câmera | R ou duplo clique | duplo toque |
@@ -140,12 +156,13 @@ npm run balance
 ```
 
 Esse comando joga todas as fases com robôs e mostra o resultado de cada uma (vitória, vidas, estrelas):
-o *regente* (constrói bem e mantém o ritmo como um jogador razoável, groove ≈ 2), o *trêmulo* (ritmo
-fraco), o *bom* sem ritmo nenhum, o *novato* e a banda de um instrumento só. Ele é usado para equilibrar
+o *virtuose* (quase todo toque perfeito), o *regente* (constrói bem e mantém o ritmo como um jogador
+razoável, força ≈ 60), o *trêmulo* (ritmo fraco), o *bom* sem ritmo nenhum, o *novato* (ritmo fraco) e a
+banda de um instrumento só. Ele é usado para equilibrar
 a dificuldade.
 
 - `src/sim/`: a simulação (pura, determinística): `journey.ts` (a viagem), `defs.ts` (torres e
-  criaturas), `rhythm.ts` (groove, julgamento do toque, frases do Maestro), `shell.ts` (as placas do casco), `path.ts` (a estrada).
+  criaturas), `rhythm.ts` (a força, o julgamento do toque, as frases do Maestro), `shell.ts` (as placas do casco), `path.ts` (a estrada).
 - `src/data/campaign.ts`: as 25 jornadas, o mapa e o modo Bis.
 - `src/view/`: o mundo 3D: paisagem, céu pintado, grama, a tartaruga, torres, criaturas, efeitos e a
   cor que volta.
