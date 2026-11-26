@@ -108,6 +108,10 @@ export class TowerView {
    * INTEGRATION: journeyView can set `TowerView.audience = camera.position` once.
    */
   static audience: THREE.Vector3 | null = null;
+  /** v3: the player's groove (0…4): every musician bounces harder on the beat */
+  static groove = 0;
+  /** v3: extra bounce of this musician (its solo) */
+  bounce = 0;
   private static tmpV = new THREE.Vector3();
 
   constructor(readonly kind: TowerKind, level: number, readonly id: number) {
@@ -229,7 +233,7 @@ export class TowerView {
     this.upT = Math.min(1, this.upT + dt * 2.5);
     const pop = easeOutBack(clamp01(this.buildT)) * (0.85 + 0.15 * easeOutBack(clamp01(this.upT)));
     const live = !this.muted && !this.disabled;
-    const dance = live ? Math.exp(-bp * 6) * 0.025 : 0;
+    const dance = live ? Math.exp(-bp * 6) * (0.025 + 0.016 * TowerView.groove + this.bounce) : 0;
     const S = pop * this.scaleMul;
     this.group.scale.set(S * (1 + dance * 0.5), S * (1 - dance), S * (1 + dance * 0.5));
     // facing: toward the target while shooting, else toward the audience

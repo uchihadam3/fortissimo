@@ -20,10 +20,11 @@ import {
 import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng, hashString } from '../core/rng';
+import { RHYTHM, SOLO, ECHO } from './rhythm';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
-export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides';
+export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo';
 export type LandmarkKind = 'bell' | 'chimes' | 'organ' | 'harp' | 'spire';
 
 /** sub-steps per 16th note (fixed integration grid) */
@@ -176,6 +177,11 @@ export interface Tower {
   shots: number;
   /** duets this tower plays in right now (partner tower) */
   partners: { id: DuetId; tower: Tower }[];
+  /** v3: solo charge 0…1 (1 = ready: the musician glows) */
+  solo: number;
+  /** the 16th step its solo began on (−1: not soloing) and its strength */
+  soloFrom: number;
+  soloQ: number;
 }
 
 export interface Shot {
@@ -195,6 +201,8 @@ export interface Shot {
   done: boolean;
   /** a note played because of a duet (march) */
   duet?: DuetId;
+  /** a note of a solo (the solo's own music plays it: no separate tower note) */
+  solo?: boolean;
 }
 
 export interface Pickup {
@@ -256,7 +264,18 @@ export type SimEvent =
   /** groundwork: creatures stumble */
   | { t: number; type: 'stumble'; tower: Tower; hits: number[] }
   /** hymn: the colossus heals */
-  | { t: number; type: 'heartHeal'; lives: number };
+  | { t: number; type: 'heartHeal'; lives: number }
+  // ── v3: the player's rhythm ──
+  /** a musician's solo is charged (it glows on the shell) */
+  | { t: number; type: 'soloReady'; tower: Tower }
+  /** a solo begins at t (a beat) and lasts until `until` */
+  | { t: number; type: 'solo'; tower: Tower; perfect: boolean; until: number }
+  /** a solo's area effect (drum shockwave, bell ring, shaker shower, choir anthem, bass drop) */
+  | { t: number; type: 'soloHit'; tower: Tower; kind: TowerKind; x: number; z: number; r: number; hits: number[] }
+  /** the Maestro's call was echoed right: bonus notes, and a chord waits for the next movement */
+  | { t: number; type: 'echoWin'; index: number; coins: number }
+  /** the chord blast of a right echo */
+  | { t: number; type: 'chord'; hits: number[] };
 
 export interface SimStats {
   kills: number;
@@ -273,6 +292,15 @@ export interface SimStats {
   duets: number;
   /** highest harmony reached */
   harmonyPeak: number;
+  /** v3: solos played (perfectly timed ones), calls echoed right, chord blasts */
+  solos: number;
+  perfectSolos: number;
+  echoes: number;
+  chords: number;
+  /** groove: the highest level, and its sum over the bars walked (average = grooveSum / walkBars) */
+  groovePeak: number;
+  grooveSum: number;
+  walkBars: number;
 }
 
 /** A player input, with the sub-step it happened at. */
@@ -282,7 +310,11 @@ export type SimAction =
   | { sub: number; a: 'sell'; slot: number }
   | { sub: number; a: 'collect'; id: number }
   | { sub: number; a: 'ff' }
-  | { sub: number; a: 'go' };
+  | { sub: number; a: 'go' }
+  // v3: what the player's rhythm did (judged by the controller, recorded here)
+  | { sub: number; a: 'groove'; level: number }
+  | { sub: number; a: 'solo'; slot: number; perfect: boolean }
+  | { sub: number; a: 'echo' };
 
 /** Where a fallen journey can start again: the beginning of a movement's breather. */
 export interface Checkpoint {
@@ -336,7 +368,7 @@ export class Journey {
   shots: Shot[] = [];
   pickups: Pickup[] = [];
   events: SimEvent[] = [];
-  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0 };
+  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0 };
   /** the colossus */
   turtle = { s: 0, x: 0, z: 0, dx: 0, dz: -1 };
   walking = false;
@@ -381,6 +413,15 @@ export class Journey {
   private anyDead = false;
   /** the Silence steals an instrument for a while */
   stolen: { kind: TowerKind; until: number } | null = null;
+  /** v3: the groove the player's baton keeps (0…4) */
+  groove = 0;
+  /** a choir's solo lifts the whole band until then */
+  soloBuffUntil = 0;
+  soloBuffMul = 1;
+  /** breathers whose call was echoed right */
+  private echoed = new Set<number>();
+  /** a chord blast waiting for movement `chordFor` to begin (null: none) */
+  chordFor: number | null = null;
 
   constructor(readonly def: JourneyDef, bpm: number, opts: { mode?: Mode; path?: JourneyPath } = {}) {
     this.spb = 60 / bpm;
@@ -563,6 +604,7 @@ export class Journey {
     const t: Tower = {
       id: this.nextId++, kind, level: 0, slot, x: p.x, z: p.z, spent: cost, muted: false, muteCause: null, frozenUntil: 0, disabledUntil: 0,
       aim: Math.atan2(this.turtle.dz, this.turtle.dx), buff: 1, damage: 0, kills: 0, builtT: this.time, shots: 0, partners: [],
+      solo: 0, soloFrom: -1, soloQ: 1,
     };
     this.towers.push(t);
     this.log.push({ sub: this.sub, a: 'build', slot, kind });
@@ -664,8 +706,236 @@ export class Journey {
         return !!this.unleash();
       case 'go':
         return this.begin();
+      case 'groove':
+        return this.setGroove(a.level);
+      case 'solo': {
+        const t = this.towerAt(a.slot);
+        return !!t && this.solo(t, a.perfect) !== null;
+      }
+      case 'echo':
+        return this.echo() > 0;
     }
   }
+
+  // ───────────────────────────── the player's rhythm (v3) ─────────────────────────────
+
+  /** The groove the baton keeps changed (judged by the controller). */
+  setGroove(level: number): boolean {
+    const l = Math.max(0, Math.min(RHYTHM.maxGroove, Math.round(level)));
+    if (l === this.groove || this.outcome !== 'playing') return false;
+    this.groove = l;
+    this.stats.groovePeak = Math.max(this.stats.groovePeak, l);
+    this.log.push({ sub: this.sub, a: 'groove', level: l });
+    return true;
+  }
+
+  canSolo(t: Tower): boolean {
+    return this.outcome === 'playing' && this.towers.includes(t) && !t.muted && t.solo >= 1 - 1e-9 && t.soloFrom < 0;
+  }
+
+  /**
+   * A charged musician tapped on the beat: its solo starts on the next beat and lasts one bar.
+   * Returns [start, end] in sim time (null: it cannot solo now).
+   */
+  solo(t: Tower, perfect: boolean): [number, number] | null {
+    if (!this.canSolo(t)) return null;
+    const from = Math.ceil(this.step / 4) * 4;
+    t.solo = 0;
+    t.soloFrom = from;
+    t.soloQ = perfect ? SOLO.perfect : 1;
+    this.stats.solos++;
+    if (perfect) this.stats.perfectSolos++;
+    this.log.push({ sub: this.sub, a: 'solo', slot: t.slot, perfect });
+    const start = this.stepTime(from), end = this.stepTime(from + SOLO.steps);
+    this.emit({ t: start, type: 'solo', tower: t, perfect, until: end });
+    return [start, end];
+  }
+
+  /** can the Maestro's call be answered now (in a breather whose call was not echoed yet)? */
+  canEcho(): boolean {
+    if (this.outcome !== 'playing' || this.movement < 1 || this.echoed.has(this.movement)) return false;
+    // from the breather's first bar to the first bar of its movement (the last echo can end on it)
+    const m = this.movements[this.movement];
+    const jb = this.journeyBar;
+    return jb !== null && jb >= m.bar - m.rest && jb <= m.bar;
+  }
+
+  /** The call of this breather was echoed right: bonus golden notes, and a chord for the next movement. */
+  echo(): number {
+    if (!this.canEcho()) return 0;
+    const k = this.movement;
+    this.echoed.add(k);
+    const coins = ECHO.coins + ECHO.perMovement * k;
+    this.coins += coins;
+    this.stats.earned += coins;
+    this.stats.echoes++;
+    this.chordFor = k;
+    this.log.push({ sub: this.sub, a: 'echo' });
+    this.emit({ t: this.time, type: 'echoWin', index: k, coins });
+    return coins;
+  }
+
+  /** how much damage a full solo charge takes from a fighter (Infinity for musicians that do not hit) */
+  private soloNeed(tw: Tower): number {
+    const L = TOWERS[tw.kind].levels[tw.level];
+    if (!L.damage) return Infinity;
+    let xs = 0;
+    for (const c of L.pattern) if (c === 'x') xs++;
+    return L.damage * xs * (STEPS_PER_BAR / L.pattern.length) * SOLO.damageBars;
+  }
+
+  private chargeSolo(tw: Tower, amount: number, t: number) {
+    if (tw.soloFrom >= 0 || tw.solo >= 1 || !(amount > 0) || !this.towers.includes(tw)) return;
+    tw.solo = Math.min(1, tw.solo + amount);
+    if (tw.solo >= 1 - 1e-9) {
+      tw.solo = 1;
+      this.emit({ t, type: 'soloReady', tower: tw });
+    }
+  }
+
+  /** one 16th step of a solo (i = 0…15 within its bar) */
+  private soloStep(tw: Tower, k: number, t: number) {
+    const i = k - tw.soloFrom;
+    if (i < 0) return;
+    if (i >= SOLO.steps) {
+      tw.soloFrom = -1;
+      return;
+    }
+    if (i === SOLO.steps - 1) tw.soloFrom = -1;
+    if (tw.muted) return;
+    const L = TOWERS[tw.kind].levels[tw.level];
+    const q = tw.soloQ;
+    const mul = this.towerMul(tw, t) * q;
+    const range = this.rangeOf(tw);
+    const T = this.turtle;
+    switch (tw.kind) {
+      case 'harp':
+        // a rapid volley: every 16th of the bar
+        this.shoot(tw, t, L.damage * mul * 0.85, range * 1.15, undefined, true);
+        break;
+      case 'crystal':
+        // a chain storm: every eighth
+        if (i % 2 === 0) this.shoot(tw, t, L.damage * mul, range * 1.2, undefined, true);
+        break;
+      case 'horn':
+        // piercing blasts on every beat
+        if (i % 4 === 0) this.shoot(tw, t, L.damage * mul * 1.15, range * 1.2, undefined, true);
+        break;
+      case 'drum': {
+        // a shockwave around the colossus on every beat: damage and a push outward
+        if (i % 4 !== 0) break;
+        const R = 8 + tw.level;
+        const hits: number[] = [];
+        for (const e of this.enemies) {
+          if (!e.alive || e.flying || e.burrowed || e.structure) continue;
+          const d = Math.hypot(e.x - T.x, e.z - T.z);
+          if (d > R + e.def.radius * 0.5) continue;
+          hits.push(e.id);
+          if (!e.def.boss) {
+            const kb = 7 * (1 - d / (R + 4));
+            e.kx += ((e.x - T.x) / (d || 1)) * kb;
+            e.kz += ((e.z - T.z) / (d || 1)) * kb;
+          }
+          this.damage(e, L.damage * mul * (1 - (0.3 * d) / (R + 1)), 'blast', tw, t);
+        }
+        this.emit({ t, type: 'soloHit', tower: tw, kind: 'drum', x: T.x, z: T.z, r: R, hits });
+        break;
+      }
+      case 'bell': {
+        // a great slow ring: everything around is revealed, slowed hard and tolled
+        if (i % 8 !== 0) break;
+        const R = range * 1.8;
+        const hits: number[] = [];
+        const beats = 4 * q;
+        for (const e of this.enemies) {
+          if (!e.alive || e.burrowed || e.structure) continue;
+          if (this.dist2(tw, e) > (R + e.def.radius * 0.5) ** 2) continue;
+          hits.push(e.id);
+          e.revealedUntil = Math.max(e.revealedUntil, t + 8 * this.spb);
+          if ((!e.def.boss || e.kind === 'bossBlot') && !e.def.steady) {
+            e.slow = Math.min(e.slowUntil > t ? e.slow : 1, e.def.boss ? 0.7 : 0.4);
+            e.slowUntil = Math.max(e.slowUntil, t + beats * this.spb);
+          }
+          this.damage(e, L.damage * 6 * mul, 'bell', tw, t);
+        }
+        this.emit({ t, type: 'soloHit', tower: tw, kind: 'bell', x: tw.x, z: tw.z, r: R, hits });
+        break;
+      }
+      case 'shaker': {
+        // a shower of golden notes, every eighth
+        if (i % 2 !== 0) break;
+        const inc = Math.max(1, Math.round((L.income ?? 3) * 0.9 * q));
+        this.coins += inc;
+        this.stats.earned += inc;
+        this.emit({ t, type: 'income', tower: tw, amount: inc });
+        if (i === 0) this.emit({ t, type: 'soloHit', tower: tw, kind: 'shaker', x: tw.x, z: tw.z, r: 4, hits: [] });
+        break;
+      }
+      case 'choir': {
+        // an anthem: the whole band plays stronger for a while, and nothing stays hidden
+        if (i !== 0) break;
+        this.soloBuffUntil = t + SOLO.choirBars * this.barDur;
+        this.soloBuffMul = 1 + SOLO.choirBuff * q * (1 + 0.15 * tw.level);
+        const hits: number[] = [];
+        for (const e of this.enemies) {
+          if (!e.alive || e.structure) continue;
+          if (this.dist2(T, e) > 40 * 40) continue;
+          e.revealedUntil = Math.max(e.revealedUntil, t + 4 * this.barDur);
+          hits.push(e.id);
+        }
+        this.emit({ t, type: 'soloHit', tower: tw, kind: 'choir', x: tw.x, z: tw.z, r: 40, hits });
+        break;
+      }
+      case 'bass': {
+        // a huge drop on the heaviest creature on the ground, twice in the bar
+        if (i % 8 !== 0) break;
+        let target: Enemy | null = null;
+        for (const e of this.enemies) {
+          if (e.structure || !this.targetable(tw, e, t, range * 1.1)) continue;
+          if (!target || e.hp > target.hp) target = e;
+        }
+        if (!target) break;
+        const R = 5;
+        const hits: number[] = [target.id];
+        const x = target.x, z = target.z;
+        this.damage(target, L.damage * mul * 1.2, 'bass', tw, t);
+        for (const e of this.enemies) {
+          if (e === target || !e.alive || e.flying || e.burrowed || e.structure) continue;
+          if ((e.x - x) ** 2 + (e.z - z) ** 2 > R * R) continue;
+          hits.push(e.id);
+          this.damage(e, L.damage * mul * 0.45, 'bass', tw, t);
+          if (e.alive) this.stumble(e, 1.5, t);
+        }
+        if (target.alive) this.stumble(target, 1.5, t);
+        this.emit({ t, type: 'soloHit', tower: tw, kind: 'bass', x, z, r: R, hits });
+        break;
+      }
+    }
+  }
+
+  /** the chord of a right echo rings once its movement has creatures to ring at */
+  private chordCheck(jb: number, t: number) {
+    const k = this.chordFor;
+    if (k === null || this.movement < k || jb < this.movements[k].bar) return;
+    const T = this.turtle;
+    let near = 0, any = 0;
+    for (const e of this.enemies) {
+      if (!e.alive || e.structure) continue;
+      any++;
+      if (Math.hypot(e.x - T.x, e.z - T.z) <= ECHO.radius) near++;
+    }
+    if (near < ECHO.crowd && !(jb >= this.movements[k].bar + ECHO.wait && any > 0)) return;
+    this.chordFor = null;
+    this.stats.chords++;
+    const hits: number[] = [];
+    for (const e of this.enemies) {
+      if (!e.alive || e.structure || e.burrowed) continue;
+      hits.push(e.id);
+      this.damage(e, e.def.boss ? ECHO.bossFlat + e.maxHp * ECHO.bossShare : ECHO.flat + e.maxHp * ECHO.share, 'bass', null, t);
+    }
+    this.emit({ t, type: 'chord', hits });
+  }
+
 
   // ───────────────────────────── checkpoints ─────────────────────────────
 
@@ -911,6 +1181,7 @@ export class Journey {
     this.updateMutes(t);
     if (this.bandDirty) this.updateBand(t);
     for (const tw of this.towers) this.towerStep(tw, k, t);
+    for (const tw of this.towers) if (tw.soloFrom >= 0) this.soloStep(tw, k, t);
     if (this.ffDropT !== null && t >= this.ffDropT - 1e-9) this.ffDrop(t);
     if (!this.ffWasReady && this.ff >= 1 && this.ffDropT === null) {
       this.ffWasReady = true;
@@ -966,6 +1237,14 @@ export class Journey {
         this.stats.heals++;
         this.emit({ t, type: 'heartHeal', lives: this.lives });
       }
+      if (this.walking) {
+        this.stats.grooveSum += this.groove;
+        this.stats.walkBars++;
+        // every playing musician charges its solo a little each bar (more with a good groove)
+        const g = SOLO.perBar * (1 + SOLO.grooveCharge * this.groove);
+        for (const tw of this.towers) if (!tw.muted) this.chargeSolo(tw, g, t);
+      }
+      this.chordCheck(jb, t);
     }
     // economy (only once the journey is under way)
     if (this.walking && this.outcome === 'playing') {
@@ -1221,7 +1500,7 @@ export class Journey {
   }
 
   private towerMul(tw: Tower, t: number): number {
-    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1);
+    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1) * (1 + RHYTHM.grooveDamage[this.groove]) * (t < this.soloBuffUntil ? this.soloBuffMul : 1);
   }
 
   private towerStep(tw: Tower, k: number, t: number) {
@@ -1282,7 +1561,7 @@ export class Journey {
   }
 
   /** a tower fires one shot at its best target (false: nothing to shoot at) */
-  private shoot(tw: Tower, t: number, dmg: number, range: number, duet?: DuetId): boolean {
+  private shoot(tw: Tower, t: number, dmg: number, range: number, duet?: DuetId, solo = false): boolean {
     const L = TOWERS[tw.kind].levels[tw.level];
     const target = this.pickTarget(tw, t, range);
     if (!target) return false;
@@ -1305,7 +1584,7 @@ export class Journey {
     const shot: Shot = {
       id: this.nextId++, tower: tw, kind: tw.kind, level: tw.level, targetId: target.id,
       tx: lx, tz: lz, launchT: t, impactT: t + flight * this.stepDur, damage: dmg,
-      dirx: Math.cos(tw.aim), dirz: Math.sin(tw.aim), hits: [], done: false, duet,
+      dirx: Math.cos(tw.aim), dirz: Math.sin(tw.aim), hits: [], done: false, duet, solo: solo || undefined,
     };
     this.shots.push(shot);
     this.emit({ t, type: 'fire', shot });
@@ -1404,13 +1683,13 @@ export class Journey {
       case 'crystal': {
         if (!target) break;
         const shimmer = this.hasDuet(tw, 'shimmer');
-        const n = (L.chain ?? 3) + (shimmer ? BAND.shimmerExtraChain : 0);
-        this.chain(tw, target, s.damage, n, shimmer ? BAND.shimmerJump : 5, shimmer ? { slow: BAND.shimmerSlow, beats: BAND.shimmerSlowBeats } : null, t, s.hits);
+        const n = (L.chain ?? 3) + (shimmer ? BAND.shimmerExtraChain : 0) + (s.solo ? 2 : 0);
+        this.chain(tw, target, s.damage, n, shimmer ? BAND.shimmerJump : s.solo ? 6.5 : 5, shimmer ? { slow: BAND.shimmerSlow, beats: BAND.shimmerSlowBeats } : null, t, s.hits);
         break;
       }
       case 'horn': {
-        const len = this.rangeOf(tw) + 1;
-        const w = (L.area ?? 1.4) + (this.hasDuet(tw, 'fanfare') ? BAND.fanfareWidth : 0);
+        const len = (this.rangeOf(tw) + 1) * (s.solo ? 1.25 : 1);
+        const w = ((L.area ?? 1.4) + (this.hasDuet(tw, 'fanfare') ? BAND.fanfareWidth : 0)) * (s.solo ? 1.8 : 1);
         for (const e of this.enemies) {
           if (!e.alive || e.burrowed || e.flying) continue;
           if (e.def.camo && e.revealedUntil < t) continue;
@@ -1419,7 +1698,7 @@ export class Journey {
           if (along < 0 || along > len) continue;
           const across = Math.abs(rx * s.dirz - rz * s.dirx);
           if (across <= w + e.def.radius * 0.5) {
-            if (this.deflects('horn', e)) {
+            if (this.deflects('horn', e) && !s.solo) {
               this.emit({ t, type: 'deflect', enemy: e, shot: s });
               continue;
             }
@@ -1513,8 +1792,9 @@ export class Journey {
     if (tw) {
       tw.damage += dealt + shielded;
       this.stats.damageByKind[tw.kind] = (this.stats.damageByKind[tw.kind] ?? 0) + dealt + shielded;
+      if (!e.structure) this.chargeSolo(tw, (dealt + shielded) / this.soloNeed(tw), t);
     }
-    if (this.ffDropT === null && !e.structure) this.ff = Math.min(1, this.ff + (dealt + shielded) / this.ffNeed);
+    if (this.ffDropT === null && !e.structure) this.ff = Math.min(1, this.ff + ((dealt + shielded) / this.ffNeed) * (1 + RHYTHM.grooveFF * this.groove));
     this.emit({ t, type: 'damage', enemy: e, amount: dealt, shielded, hp: Math.max(0, e.hp) / e.maxHp, shield: s && s.maxShield > 0 ? s.shield / s.maxShield : 0, shieldOwner: s ? s.id : 0 });
     if (e.def.boss) this.bossDamaged(e, t);
     if (e.hp <= 0.0001) this.kill(e, t, tw);
@@ -1734,8 +2014,8 @@ export class Journey {
   fingerprint(): string {
     const r = (v: number) => Math.round(v * 1e6) / 1e6;
     const en = this.enemies.filter((e) => e.alive).map((e) => `${e.id}:${e.kind}:${r(e.x)},${r(e.z)}:${r(e.hp)}`).join('|');
-    const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}`).join('|');
-    return `t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
+    const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}:${r(t.solo)}${t.soloFrom >= 0 ? 's' : ''}`).join('|');
+    return `g${this.groove} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
   }
 
   private dist2(a: { x: number; z: number }, b: { x: number; z: number }) {

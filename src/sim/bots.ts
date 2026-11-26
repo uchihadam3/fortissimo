@@ -7,10 +7,17 @@
  * - novice: slow (one decision every few seconds) and obvious: the next instrument of the list on the
  *           first free plate, otherwise the weakest tower grows; taps some notes that come close.
  * - spam:   plays like the good bot with one single instrument.
+ *
+ * v3: any bot can also keep the beat (`rhythm`, 0…1): it taps the baton on every beat with a hit
+ * chance that grows with its skill (the groove follows the same rules as the player's), fires
+ * charged solos now and then when there is something to hit, and echoes some of the Maestro's
+ * calls. rhythm ≈ 0.6 keeps an average groove of about 2: a decent player.
  */
 import { Journey, type JourneyDef, type Mode, type SimEvent, type Tower } from './journey';
 import { ENEMIES, SONGS, TOWERS, SECTION_OF, duetOf, type EnemyKind, type TowerKind } from './defs';
 import { SLOTS, SLOT_NEIGHBOURS } from './shell';
+import { Groove, callBars } from './rhythm';
+import { Rng } from '../core/rng';
 
 export type BotKind = 'good' | 'novice' | 'spam';
 
@@ -254,8 +261,56 @@ function noviceStep(j: Journey, state: { next: number; tick: number }) {
   if (t && (j.upgradeCost(t) ?? Infinity) <= j.coins) j.upgrade(t);
 }
 
-export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spam?: TowerKind; limit?: number; onTick?: (j: Journey) => void; until?: (j: Journey) => boolean; onEvents?: (evs: SimEvent[], j: Journey) => void } = {}): BotResult {
+/** a bot's hands on the baton: taps, solos and echoes (deterministic for a journey and a skill) */
+class BotRhythm {
+  private g = new Groove();
+  private rng: Rng;
+  private beat = -1;
+  private tried = new Set<string>();
+  constructor(private j: Journey, private skill: number) {
+    this.rng = new Rng(((j.def.seed ?? 7) * 7907 + Math.round(skill * 1000)) >>> 0);
+  }
+  /** chance that one tap lands on the beat */
+  private get hit() {
+    return 0.86 + 0.135 * this.skill;
+  }
+  step() {
+    const j = this.j;
+    if (!j.started || j.outcome !== 'playing') return;
+    // the baton, on every beat that went by
+    const b = Math.floor(j.time / j.spb + 1e-9);
+    if (this.beat < 0) this.beat = b;
+    while (this.beat < b) {
+      this.beat++;
+      const r = this.rng.next();
+      this.g.judge(r < this.hit ? (r < this.hit * this.skill * 0.6 ? 'perfect' : 'good') : 'miss');
+      if (this.g.level !== j.groove) j.setGroove(this.g.level);
+    }
+    // a charged musician, when there is something to play at (now and then)
+    for (const t of j.towers) {
+      if (!j.canSolo(t) || this.rng.next() > 0.12 + 0.45 * this.skill) continue;
+      const busy = t.kind === 'shaker' || j.enemies.some((e) => e.alive && !e.structure && Math.hypot(e.x - t.x, e.z - t.z) < 14);
+      if (!busy) continue;
+      const r = this.rng.next();
+      if (r < this.hit) j.solo(t, r < this.hit * this.skill * 0.6);
+    }
+    // the Maestro's call: after each echo bar of a breather, a chance it was echoed right
+    if (j.canEcho()) {
+      const m = j.movements[j.movement];
+      const jb = j.journeyBar ?? 0;
+      callBars(m.rest).forEach((cb, i) => {
+        const key = `${j.movement}:${i}`;
+        if (this.tried.has(key) || jb < m.bar - m.rest + cb + 2) return;
+        this.tried.add(key);
+        if (this.rng.next() < 0.25 + 0.6 * this.skill) j.echo();
+      });
+    }
+  }
+}
+
+export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spam?: TowerKind; limit?: number; rhythm?: number; onTick?: (j: Journey) => void; until?: (j: Journey) => boolean; onEvents?: (evs: SimEvent[], j: Journey) => void } = {}): BotResult {
   const j = new Journey(def, SONGS[def.song].bpm, { mode: opts.mode ?? 'normal' });
+  const rhythm = opts.rhythm ? new BotRhythm(j, Math.min(1, opts.rhythm)) : null;
   const kinds = kind === 'spam' ? [opts.spam ?? 'harp'] : def.towers;
   const nov = { next: 0, tick: 0 };
   const dt = kind === 'novice' ? 4 : 0.2;
@@ -270,6 +325,7 @@ export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spa
     j.advance(t);
     const evs = j.drain();
     opts.onEvents?.(evs, j);
+    rhythm?.step();
     if (kind === 'novice') noviceStep(j, nov);
     else goodStep(j, kinds);
     opts.onTick?.(j);
@@ -279,12 +335,12 @@ export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spa
 }
 
 /** the strongest single-instrument band for a journey (the spam bot tries each fighter) */
-export function playSpam(def: JourneyDef, mode: Mode = 'normal'): BotResult & { kind: TowerKind } {
+export function playSpam(def: JourneyDef, mode: Mode = 'normal', rhythm = 0): BotResult & { kind: TowerKind } {
   let best: (BotResult & { kind: TowerKind }) | null = null;
   const score = (r: BotResult) => (r.j.outcome === 'victory' ? 1000 + r.j.lives : r.j.progress * 100);
   for (const k of FIGHTERS) {
     if (!def.towers.includes(k)) continue;
-    const r = playBot(def, 'spam', { mode, spam: k });
+    const r = playBot(def, 'spam', { mode, spam: k, rhythm });
     if (!best || score(r) > score(best)) best = { ...r, kind: k };
   }
   return best!;

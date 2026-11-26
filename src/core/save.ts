@@ -89,7 +89,7 @@ export function validate(raw: unknown): SaveData | null {
   } as SaveData;
 }
 
-const ACTIONS = new Set(['build', 'upgrade', 'sell', 'collect', 'ff', 'go']);
+const ACTIONS = new Set(['build', 'upgrade', 'sell', 'collect', 'ff', 'go', 'groove', 'solo', 'echo']);
 
 /** keeps only well-formed checkpoints (a broken one would replay a different journey) */
 function validCheckpoints(raw: unknown): Record<string, Checkpoint> {

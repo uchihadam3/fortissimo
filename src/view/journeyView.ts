@@ -458,6 +458,9 @@ export class JourneyView {
     this.spin = 0;
   }
 
+  /** v3: a short camera punch toward what it looks at (perfect taps, solos); decays by itself */
+  punch = 0;
+
   shake(a: number) {
     this.shakeAmt = Math.min(0.8, Math.max(this.shakeAmt, a));
   }
@@ -526,6 +529,10 @@ export class JourneyView {
       cam.position.y += Math.sin(this.shakeT * 1.7 + 1) * s;
       cam.position.z += Math.sin(this.shakeT * 1.1 + 2) * s;
       this.shakeAmt = Math.max(0, this.shakeAmt - dt * 1.6);
+    }
+    if (this.punch > 0.001) {
+      cam.position.lerp(this.camLook, Math.min(0.12, this.punch * 0.05));
+      this.punch = Math.max(0, this.punch - dt * 6);
     }
   }
 

@@ -1,0 +1,110 @@
+/* ───────── v3: the baton, the groove and the Maestro's call ───────── */
+
+#baton-wrap {
+  --flash: 0; --gc: rgba(255, 247, 230, .35); --size: 96px;
+  position: absolute; left: calc(22px + var(--safe-l)); bottom: calc(22px + var(--safe-b)); width: var(--size); height: var(--size);
+  pointer-events: none;
+}
+#baton-wrap.g1 { --gc: #ffd36b; }
+#baton-wrap.g2 { --gc: #ffb347; }
+#baton-wrap.g3 { --gc: #ff7ab8; }
+#baton-wrap.g4 { --gc: #9fe8ff; }
+#baton {
+  position: absolute; inset: 0; border-radius: 50%; border: 0; padding: 0; cursor: pointer; pointer-events: auto; touch-action: none;
+  background: radial-gradient(circle at 35% 30%, #4a4068, #1a1430 72%);
+  box-shadow: 0 6px 0 #0c0916, 0 10px 26px rgba(0, 0, 0, .45), 0 0 calc(var(--flash) * 40px) calc(var(--flash) * 8px) var(--gc);
+  color: #fff2c2; transform: scale(calc(1 + var(--flash) * .07)); -webkit-tap-highlight-color: transparent;
+}
+#baton:active { transform: scale(.94); }
+#baton .glyph { position: absolute; inset: 20px; filter: drop-shadow(0 0 calc(4px + var(--flash) * 12px) var(--gc)); }
+#baton .glyph svg { width: 100%; height: 100%; display: block; }
+#baton svg.groove { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+#baton .seg { fill: none; stroke: rgba(255, 247, 230, .14); stroke-width: 7; stroke-linecap: round; transition: stroke .25s; }
+#baton .seg.on { stroke: var(--gc); filter: drop-shadow(0 0 4px var(--gc)); }
+#baton .prog { fill: none; stroke: var(--gc); stroke-width: 3; opacity: .7; transition: stroke-dashoffset .15s; }
+#baton-wrap.g0 .prog { stroke: rgba(255, 247, 230, .55); }
+
+/* rings that close in on the beat */
+#baton-wrap .approach {
+  position: absolute; inset: -4px; border-radius: 50%; border: 3px solid rgba(255, 247, 230, .85); pointer-events: none;
+  box-shadow: 0 0 10px rgba(255, 247, 230, .35);
+}
+#baton-wrap .approach.down { border-color: #ffd36b; box-shadow: 0 0 14px rgba(255, 211, 107, .7); border-width: 4px; }
+#baton-wrap .approach.off { inset: 6px; border-width: 2px; border-color: var(--gc); }
+
+/* judged taps */
+#baton-wrap.hit-perfect #baton { animation: hitperfect .32s ease-out; }
+#baton-wrap.hit-good #baton { animation: hitgood .28s ease-out; }
+#baton-wrap.hit-miss #baton { animation: hitmiss .35s ease; }
+@keyframes hitperfect { 0% { transform: scale(1.22); filter: brightness(1.9); } 100% { transform: scale(1); filter: none; } }
+@keyframes hitgood { 0% { transform: scale(1.12); filter: brightness(1.4); } 100% { transform: scale(1); filter: none; } }
+@keyframes hitmiss { 0%, 100% { transform: translateX(0); filter: grayscale(.8); } 25% { transform: translateX(-6px) rotate(-6deg); } 60% { transform: translateX(5px) rotate(4deg); } }
+#baton-wrap .sparks { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+#baton-wrap .sparks i {
+  position: absolute; width: 10px; height: 10px; margin: -5px; border-radius: 50%;
+  background: radial-gradient(#fff, #ffd36b 60%, transparent 72%); box-shadow: 0 0 10px #ffd36b;
+  animation: spark .6s ease-out forwards;
+}
+#baton-wrap .sparks i.good { background: radial-gradient(#fff, #e8f4ff 60%, transparent 72%); box-shadow: 0 0 8px #cfe8ff; width: 8px; height: 8px; margin: -4px; }
+@keyframes spark { 0% { transform: translate(0, 0) scale(1.3); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; } }
+#baton-wrap .sparks b { position: absolute; width: 44px; height: 44px; margin: -22px; color: #ffd36b; filter: drop-shadow(0 0 10px #ffd36b); animation: starpop2 .7s ease-out forwards; }
+#baton-wrap .sparks b svg { width: 100%; height: 100%; display: block; }
+@keyframes starpop2 { 0% { transform: translate(0, 0) scale(.4) rotate(-20deg); opacity: 1; } 60% { transform: translate(0, -78px) scale(1.15) rotate(8deg); opacity: 1; } 100% { transform: translate(0, -96px) scale(.9); opacity: 0; } }
+
+/* the groove rises / peaks / falls */
+#baton-wrap.rise::after, #baton-wrap.peak::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; border: 5px solid var(--gc); pointer-events: none;
+  animation: grooverise .7s ease-out forwards;
+}
+#baton-wrap.peak::after { border-width: 8px; animation-duration: 1.1s; }
+@keyframes grooverise { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+#baton-wrap.fall #baton { animation: hitmiss .45s ease; }
+#baton-wrap.g4 #baton { background: radial-gradient(circle at 35% 30%, #5a4a8a, #241a44 72%); }
+#baton-wrap.g4 .glyph { animation: batonpeak 1.6s linear infinite; }
+@keyframes batonpeak { 0% { filter: drop-shadow(0 0 10px #9fe8ff) hue-rotate(0deg); } 100% { filter: drop-shadow(0 0 10px #9fe8ff) hue-rotate(360deg); } }
+
+/* groove 4: the edges of the screen glow on the beat; a burst when it is reached */
+#groove-glow {
+  --flash: 0; --kick: 0; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .6s;
+  box-shadow: inset 0 0 calc(40px + var(--flash) * 70px) calc(var(--flash) * 18px) rgba(255, 211, 107, .55);
+}
+#groove-glow.on { opacity: 1; }
+#groove-glow.burst { animation: grooveburst 1.2s ease-out; }
+@keyframes grooveburst { 0% { background: radial-gradient(circle at 12% 88%, rgba(255, 241, 194, .65), rgba(255, 211, 107, .15) 40%, transparent 70%); } 100% { background: transparent; } }
+#groove-glow.kick { animation: kick .35s ease-out; }
+@keyframes kick { 0% { background: radial-gradient(circle at 50% 55%, transparent 40%, rgba(255, 233, 168, calc(var(--kick) * .35))); } 100% { background: transparent; } }
+
+/* the Maestro's call: a little bar of eight eighths above the baton */
+#call {
+  position: absolute; left: 0; bottom: calc(100% + 18px); width: 168px; height: 34px; border-radius: 17px;
+  background: var(--panel); box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .35), 0 6px 16px rgba(0, 0, 0, .35);
+  opacity: 0; transform: translateY(8px) scale(.9); transition: opacity .3s, transform .3s; pointer-events: none;
+}
+#call.on { opacity: 1; transform: none; }
+#call .track, #call .notes { position: absolute; left: 10px; right: 10px; top: 0; bottom: 0; }
+#call .track b { position: absolute; top: 15px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: rgba(255, 247, 230, .35); }
+#call .track b.off { opacity: .45; }
+#call .notes i {
+  position: absolute; top: 7px; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%;
+  background: rgba(255, 247, 230, .12); box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .6); transition: background .08s, transform .12s;
+}
+#call .notes i.s1 { background: radial-gradient(circle at 35% 30%, #fff6d6, #ffd36b 60%, #c88a1a); box-shadow: 0 0 14px #ffd36b; transform: scale(1.25); }
+#call .notes i.s2 { box-shadow: inset 0 0 0 2px #9fe8ff, 0 0 10px rgba(159, 232, 255, .6); }
+#call .notes i.s3 { background: radial-gradient(circle at 35% 30%, #f2fff4, #7dff9a 60%, #2ea84e); box-shadow: 0 0 14px #7dff9a; transform: scale(1.15); }
+#call .notes i.s4 { background: #5a4a6a; box-shadow: inset 0 0 0 2px #ff5a6a; }
+#call .head { position: absolute; top: 3px; bottom: 3px; width: 3px; margin-left: 8px; border-radius: 2px; background: rgba(255, 247, 230, .8); box-shadow: 0 0 8px #fff; }
+#call.echo { box-shadow: inset 0 0 0 2px #9fe8ff, 0 0 18px rgba(159, 232, 255, .45), 0 6px 16px rgba(0, 0, 0, .35); }
+#call.win { animation: callwin .9s ease-out; }
+#call.lose { animation: hitmiss .45s ease; }
+@keyframes callwin { 0% { transform: scale(1.2); box-shadow: 0 0 40px 10px #7dff9a; } 100% { transform: scale(1); } }
+
+/* the glove can tap in time (the battle drives its press) */
+#hand.sync { animation: none; transition: none; }
+
+@media (max-width: 720px), (max-height: 520px) {
+  #baton-wrap { --size: 78px; }
+  #baton .glyph { inset: 16px; }
+  #call { width: 148px; height: 30px; bottom: calc(100% + 14px); }
+  #call .notes i { top: 6px; width: 18px; height: 18px; margin-left: -9px; }
+  #call .track b { top: 13px; }
+}
