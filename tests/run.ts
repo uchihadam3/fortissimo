@@ -844,13 +844,18 @@ function duelArena(kind: EnemyKind, hp = 1) {
   tj.begin();
   run(tj, (d.boss!.bar + 1) * tj.barDur + 1);
   check('the twin knights come two at once', tj.enemies.filter((e) => e.alive && e.kind === 'twin').length === 2);
-  // the black phoenix is reborn once, in its last phase
+  // the black phoenix burns down at its last phase and is reborn once (immune for a moment)
   const ph = duelArena('phoenix', 0.05);
   ph.j.drain();
-  (ph.j as unknown as { damage(e: Enemy, a: number, t: string, tw: Tower | null, at: number): void }).damage(ph.b, 1e9, 'bass', null, ph.j.time);
-  run(ph.j, ph.j.barDur * 1.2);
-  const reborn = ph.j.enemies.find((e) => e.alive && e.kind === 'phoenix');
-  check('the phoenix is reborn', !!reborn && reborn.echoed && reborn.duelPhase === 2);
+  const hurtP = (x: number) => (ph.j as unknown as { damage(e: Enemy, a: number, t: string, tw: Tower | null, at: number): void }).damage(ph.b, x, 'bass', null, ph.j.time);
+  hurtP(1e9);
+  check('the phoenix is reborn', ph.b.alive && ph.b.duelPhase === 2 && Math.abs(ph.b.hp / ph.b.maxHp - DUEL.rebirthHp) < 1e-6 && ph.b.invulnUntil > ph.j.time);
+  const hp0 = ph.b.hp;
+  hurtP(100);
+  check('immune while it rises', ph.b.hp === hp0);
+  run(ph.j, DUEL.rebirthTime + 0.2);
+  hurtP(1e9);
+  check('reborn only once', !ph.b.alive);
 }
 {
   // a whole boss level with the rhythm bot: deterministic, and a checkpoint replays through the duel

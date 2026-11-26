@@ -1297,12 +1297,7 @@ export class Journey {
       const r = this.respawns.shift()!;
       const e = this.addEnemy(r.kind, r.x, r.z, r.hp, r.wave, t, r.elite, true);
       this.emit({ t, type: 'echo', enemy: e });
-      // the black phoenix is reborn in its last, fiercest phase
-      const spec = BOSSES[e.kind];
-      if (spec && e.def.boss) {
-        e.duelPhase = spec.phases.length - 1;
-        this.emit({ t, type: 'bossPhase', enemy: e, phase: e.duelPhase });
-      }
+
     }
     // towers follow the shell
     const tmp = { x: 0, z: 0 };
@@ -1476,7 +1471,7 @@ export class Journey {
       armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? VIRTUOSO.speed : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
       revealedUntil: 0, alive: true, leaked: false, spawnT: t, burrowed: false, invulnUntil: 0, phase: 0, hitT: -1, wave,
       structure: kind === 'obelisk', kx: 0, kz: 0, lives: def.lives + (elite ? 1 : 0), bounty: Math.round(def.bounty * (elite ? 3 : echoed ? 0.5 : 1)),
-      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1, struckUntil: 0, duelPhase: 0, nextAttackBar: Math.floor(t / this.barDur + 1e-9) + DUEL.entrance, attacks: 0,
+      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1, struckUntil: 0, duelPhase: 0, nextAttackBar: Math.floor(t / this.barDur + 1e-9) + (def.legend ? DUEL.legendEntrance : DUEL.entrance), attacks: 0,
     };
     if (def.boss) {
       const T = this.turtle;
@@ -2181,6 +2176,18 @@ export class Journey {
     const f = e.hp / e.maxHp;
     // the duel's phases (every boss)
     const spec = BOSSES[e.kind];
+    // the black phoenix burns down at its last phase and is reborn (immune while it rises again)
+    if (spec?.ability === 'rebirth' && !e.echoed && f <= spec.at[spec.at.length - 1]) {
+      e.echoed = true;
+      e.hp = e.maxHp * DUEL.rebirthHp;
+      e.invulnUntil = t + DUEL.rebirthTime;
+      e.duelPhase = spec.phases.length - 1;
+      for (const b of this.blows) if (b.enemy === e) b.resolved = true;
+      this.blows = this.blows.filter((b) => !b.resolved);
+      e.nextAttackBar = Math.ceil((t + DUEL.rebirthTime) / this.barDur) + 1;
+      this.emit({ t, type: 'bossPhase', enemy: e, phase: e.duelPhase });
+      return;
+    }
     if (spec && e.hp > 0) {
       let ph = 0;
       for (const a of spec.at) if (f <= a) ph++;

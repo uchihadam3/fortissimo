@@ -41,6 +41,8 @@ import { ICON } from '../ui/icons';
 import { Power, RHYTHM, CRESCENDO, callBars, callPattern, grooveOf, powerMul, quality, type TapQuality, type TapTarget } from '../sim/rhythm';
 import type { Enemy, Blow } from '../sim/journey';
 import { BOSSES, DUEL, parryQuality, shieldOf } from '../sim/bosses';
+import { LEGEND_HEIGHT, type LegendKind } from '../view/legends';
+import { ENEMY_SCALE } from '../sim/defs';
 import { TowerView } from '../view/towers';
 import type { Tower } from '../sim/journey';
 
@@ -761,11 +763,16 @@ export class JourneyBattle {
     const pt = document.documentElement.lang.startsWith('pt');
     this.hud.bossCard(pt ? spec.name.pt : spec.name.en, e.kind, e.def.legend ? 'legend' : e.def.mini ? 'mini' : 'guardian');
     if (v && (!this.view.cine || this.bossCine >= 0)) {
+      // frame the boss with the colossus (a legend is three times the shell: step back and look up)
       const cam = this.view.engine.camera.position.clone();
       const tp = this.view.turtle.group.position.clone().setY(this.view.turtle.group.position.y + 3);
+      const legend = e.def.legend && e.kind in LEGEND_HEIGHT ? LEGEND_HEIGHT[e.kind as LegendKind] * ENEMY_SCALE : 0;
       this.view.cineRate = 2;
-      this.view.cine = { pos: cam.clone().lerp(tp, 0.12).setY(cam.y + 2), look: tp.lerp(v.pos, 0.7).setY(v.pos.y + 3) };
-      this.bossCine = this.lastVt + this.sim.barDur * 1.5;
+      if (legend) {
+        const back = cam.clone().sub(tp).setY(0).normalize();
+        this.view.cine = { pos: cam.clone().addScaledVector(back, 10).setY(cam.y + legend * 0.35), look: tp.clone().lerp(v.pos, 0.75).setY(v.pos.y + legend * 0.45) };
+      } else this.view.cine = { pos: cam.clone().lerp(tp, 0.12).setY(cam.y + 2), look: tp.lerp(v.pos, 0.7).setY(v.pos.y + 3) };
+      this.bossCine = this.lastVt + this.sim.barDur * (legend ? 2 : 1.5);
     }
   }
 

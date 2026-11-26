@@ -357,7 +357,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   wyrm: { kind: 'wyrm', hp: 5500, speed: 0.9, armor: 0.15, flying: true, bounty: 300, lives: 12, radius: 2.6, boss: true, legend: true, threat: 90 },
   djinn: { kind: 'djinn', hp: 11000, speed: 0.85, armor: 0.3, flying: true, bounty: 350, lives: 12, radius: 2.8, boss: true, legend: true, threat: 120 },
   aurora: { kind: 'aurora', hp: 14000, speed: 1.0, armor: 0.3, flying: true, bounty: 400, lives: 14, radius: 3.0, boss: true, legend: true, threat: 150 },
-  phoenix: { kind: 'phoenix', hp: 18000, speed: 1.1, armor: 0.35, flying: true, bounty: 450, lives: 15, radius: 3.0, boss: true, legend: true, echo: 0.6, threat: 180 },
+  phoenix: { kind: 'phoenix', hp: 18000, speed: 1.1, armor: 0.35, flying: true, bounty: 450, lives: 15, radius: 3.0, boss: true, legend: true, threat: 180 },
   abyssKing: { kind: 'abyssKing', hp: 26000, speed: 0.7, armor: 0.4, flying: false, bounty: 0, lives: 20, radius: 3.2, boss: true, legend: true, threat: 240 },
 };
 

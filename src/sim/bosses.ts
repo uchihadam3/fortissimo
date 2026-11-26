@@ -36,8 +36,12 @@ export interface BossSpec {
 }
 
 export const DUEL = {
-  /** bars of entrance before the first tell */
+  /** bars of entrance before the first tell (a legend takes longer to arrive) */
   entrance: 2,
+  legendEntrance: 3,
+  /** the black phoenix: at its last phase it burns down and is reborn with this share of its health, immune meanwhile (seconds) */
+  rebirthHp: 0.6,
+  rebirthTime: 3.4,
   /** a blow resolves (lands for real) this long after its beat if it was not parried: beats */
   resolveBeats: 1,
   /** a perfect parry reflects: boss damage = maxHp × reflect (× (1 + power/100)) */
