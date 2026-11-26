@@ -12,6 +12,7 @@ import { Core } from './core';
 import { cleanBand, Director, FULL_BAND } from './music';
 import { Motifs } from './motifs';
 import { Renderer } from './render';
+import { Rhythm } from './rhythm';
 import { Sfx } from './sfx';
 import { makeTheme } from './songs';
 import { BufferBank } from './synth';
@@ -41,6 +42,7 @@ class Engine {
   amb: Ambience | null = null;
   cine: Cinema | null = null;
   motifs: Motifs | null = null;
+  rhythm: Rhythm | null = null;
   private renderer: Renderer | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private unlocking: Promise<void> | null = null;
@@ -54,6 +56,8 @@ class Engine {
   muffle = 0;
   /** the band last reported (kept across unlock) */
   band: BandMix = FULL_BAND;
+  /** the player's groove (kept across unlock) */
+  groove = 0;
   /** the land of the story (battle songs, ambience, land cues) */
   world: WorldId | null = null;
 
@@ -116,11 +120,13 @@ class Engine {
         bank.warm('pizz', 29, 62, 1);
         this.director = new Director(core, bank, makeTheme);
         this.director.band = this.band;
+        this.director.groove = this.groove;
         this.director.world = this.world;
         this.sfx = new Sfx(core, bank, this.director);
         this.towers = new Towers(core, bank, this.director);
         this.amb = new Ambience(core, bank);
         this.motifs = new Motifs(core, bank, this.director);
+        this.rhythm = new Rhythm(core, bank, this.director);
         this.cine = new Cinema(core, bank, this.director);
         this.cine.onTrack = (id, t0, bpm) => {
           this.song = id ? { id, t0: this.clock.toApi(t0), spb: 60 / bpm, beatsPerBar: 4 } : null;
@@ -426,13 +432,33 @@ const api: AudioAPI = {
     if (E.live) E.motifs?.join(kind);
   }),
 
-  // v3 rhythm API: no-ops until the audio pass implements them
-  beatTap: guard('beatTap', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
-  setGroove: guard('setGroove', (_level: number) => {}),
-  solo: guard('solo', (_kind: TowerKind, _level: number, _t: number, _pan: number, _voice: number) => {}),
-  callNote: guard('callNote', (_i: number, _t: number) => {}),
-  echoNote: guard('echoNote', (_i: number, _t: number, _ok: boolean) => {}),
-  echoResult: guard('echoResult', (_success: boolean) => {}),
+  // v3 rhythm play: the player conducts
+  beatTap: guard('beatTap', (t: number, q: 'perfect' | 'good' | 'miss', pan: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.beatTap(tc, q === 'perfect' || q === 'miss' ? q : 'good', num(pan, 0));
+  }),
+  setGroove: guard('setGroove', (level: number) => {
+    const prev = E.groove;
+    E.groove = clamp(Math.round(num(level, 0)), 0, 4);
+    const tLand = E.director?.setGroove(E.groove) ?? null;
+    // the full groove arrives with a riser into its bar line and a drop on it
+    if (E.groove === 4 && prev < 4 && tLand !== null && E.live) E.rhythm?.grooveRise(tLand);
+  }),
+  solo: guard('solo', (kind: TowerKind, level: number, t: number, pan: number, voice: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.solo(kind, num(level, 0), tc, num(pan, 0), num(voice, 0));
+  }),
+  callNote: guard('callNote', (i: number, t: number) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.callNote(num(i, 0), tc);
+  }),
+  echoNote: guard('echoNote', (i: number, t: number, ok: boolean) => {
+    const tc = E.at(t);
+    if (tc !== null) E.rhythm?.echoNote(num(i, 0), tc, ok !== false);
+  }),
+  echoResult: guard('echoResult', (success: boolean) => {
+    if (E.live) E.rhythm?.echoResult(!!success);
+  }),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();
