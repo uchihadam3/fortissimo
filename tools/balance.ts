@@ -140,7 +140,7 @@ for (const l of CAMPAIGN) {
     const j = playBot(d, 'good', { mode, rhythm }).j;
     const dmg = Object.entries(j.stats.damageByKind).map(([k, v]) => `${k} ${Math.round(v! / 1000)}k`).join(' ');
     const st = j.stats;
-    console.log(`      conductor: power ${Math.round(st.powerSum / Math.max(1, st.walkBars))} · accuracy ${Math.round(j.accuracy * 100)}% · crescendo ${j.crescendo} · solos ${st.solos} (${st.perfectSolos} perfect) · strikes ${st.strikes} · notes on the beat ${st.onBeatNotes} · echoes ${st.echoes} · chords ${st.chords}`);
+    console.log(`      conductor: power ${Math.round(st.powerSum / Math.max(1, st.walkBars))} · accuracy ${Math.round(j.accuracy * 100)}% · crescendo ${j.crescendo} · solos ${st.solos} (${st.perfectSolos} perfect) · strikes ${st.strikes} · notes on the beat ${st.onBeatNotes} · echoes ${st.echoes} · chords ${st.chords} · duel: parried ${st.parries} (${st.reflects} reflected), blows taken ${st.blowsTaken}, bosses beaten ${st.bossesBeaten}`);
     console.log(`      conductor: towers ${j.towers.map((x) => x.kind.slice(0, 2) + x.level).join(' ')} · harmony ${j.band.harmony} duets ${j.band.duets.map((x) => x.id).join(',')} · coins ${j.coins} · kills ${j.stats.kills} · ff ${j.stats.ffUses} · heals ${j.stats.heals} · ${dmg}`);
   }
 }

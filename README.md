@@ -73,6 +73,18 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 - **Crescendo:** cada movimento tocado com a força média alta acende uma estrela de crescendo (ao lado
   da barra): a banda fica um pouco mais forte até o fim da viagem e a força nunca mais esvazia abaixo
   dela. No fim da viagem aparecem a sua precisão (%), a maior sequência e as estrelas de crescendo.
+- **Os chefes (duelo no ritmo):** toda fase termina com um **sub-chefe** perto do sino (o Sapo-Borrão,
+  o Besouro-Bumbo, o Corvo-Cinza, o Verme-das-Dunas…), as fases de guardião trazem dois sub-chefes no
+  meio da luta e o guardião no fim, e os caminhos extras terminam com uma **lenda** (a Serpente-Vagalume,
+  o Gênio da Miragem, o Dragão da Aurora, a Fênix Negra e o Rei do Abismo). Cada chefe tem a sua
+  música, o seu nome e uma barra de vida com as marcas das fases (2 nos sub-chefes, 3 nos guardiões e
+  nas lendas). O chefe **ataca no tempo**: ele se prepara e um **anel vermelho** se fecha sobre a batuta
+  (com uma bolinha vermelha para cada golpe que vem); os cantores e as lendas tocam o ritmo dos golpes
+  um compasso antes, como uma chamada. Toque (na batuta, num lugar vazio ou no próprio chefe) **no
+  tempo em que o golpe cai**: perfeito **devolve** o golpe (dano e o chefe cambaleia), bom **bloqueia**.
+  Golpe que passa tira vidas, cala um músico por dois compassos e derruba a força, mas com a força alta
+  a tartaruga fica dentro de um **escudo de som dourado** que absorve boa parte do golpe (com a barra
+  cheia, ele quica e não tira vida nenhuma). Sequências longas deixam a janela do tempo um pouco maior.
 - **O eco do Maestro:** nos respiros o Maestro toca uma frase de 4 notas (as bolinhas acendem sobre a
   batuta). No compasso seguinte, repita na batuta. Cada nota conta na força. Acertou: notas douradas de bônus e um
   **acorde** que atinge todas as criaturas no começo do próximo movimento. As frases ficam mais
