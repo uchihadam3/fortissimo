@@ -462,7 +462,7 @@ export class Hud {
     const beatInBar = ((Math.floor(beatPos) % beatsPerBar) + beatsPerBar) % beatsPerBar;
     const next = (beatInBar + 1) % beatsPerBar;
     const [a, b] = this.approach;
-    a.style.transform = `scale(${(1 + 0.95 * (1 - u)).toFixed(3)})`;
+    a.style.transform = `scale(${(1 + 0.7 * (1 - u)).toFixed(3)})`;
     a.style.opacity = (0.15 + 0.85 * u).toFixed(3);
     a.classList.toggle('down', next === 0);
     if (eighths) {

@@ -192,7 +192,7 @@ export class JourneyBattle {
       if (g <= 0) return;
       this.view.fx.dust(pos.clone().setY(pos.y + 0.2), this.view.look.land.dirt, 4 * g);
       this.view.shake((front ? 0.025 : 0.015) * g);
-      if (g >= 3) this.view.fx.ring(pos.clone().setY(pos.y + 0.15), 1.6 + g * 0.6, GROOVE_COLOR[g], 0.4, 0.06);
+      if (g >= 3) this.view.fx.ring(pos.clone().setY(pos.y + 0.15), 1.6 + g * 0.6, GROOVE_COLOR[g], 0.4, 0.08);
     };
     // the first land also gets gentle nudges: an idle player with notes to spend is shown the free plate
     if (opts.tutorials && (def.tutorial?.length || def.world === 'meadow')) {
@@ -539,7 +539,7 @@ export class JourneyBattle {
     const col = GROOVE_COLOR[g];
     v.fx.burst(heart.clone().setY(heart.y + 0.6), col, (q === 'perfect' ? 10 : 5) + g * 4, 2.4 + g * 0.5, 0.16, 0.5);
     const tp = v.turtle.group.position;
-    v.fx.ring(new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.25, tp.z), 6.5 + g * 1.5, col, 0.35, 0.05 + g * 0.015);
+    v.fx.ring(new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.25, tp.z), 5 + g, col, 0.35, 0.03);
     for (const tv of v.towers.values()) tv.pulse();
     if (q === 'perfect') {
       v.punch = Math.min(1.4, 0.45 + 0.22 * g);
@@ -567,13 +567,13 @@ export class JourneyBattle {
     const v = this.view;
     const tp = v.turtle.group.position;
     const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.3, tp.z);
-    v.fx.ring(g, 10 + l * 4, GROOVE_COLOR[l], 0.8, 0.12);
+    v.fx.ring(g, 10 + l * 4, GROOVE_COLOR[l], 0.8, 0.05);
     const heart = v.turtle.heartWorld(new THREE.Vector3());
     v.fx.burst(heart, GROOVE_COLOR[l], 20 + l * 10, 4, 0.22, 0.9);
     v.shake(0.1 + 0.06 * l);
     if (l >= 4) {
-      v.fx.ring(g, 30, '#fff1c2', 1.3, 0.2);
-      v.fx.flash(heart, 10, '#fff1c2', 0.4);
+      v.fx.ring(g, 30, '#fff1c2', 1.3, 0.05);
+      v.fx.flash(heart, 4, '#fff1c2', 0.4);
       v.ffGlow = 1;
       v.punch = 1.6;
       v.shake(0.45);
@@ -614,9 +614,9 @@ export class JourneyBattle {
     tv.bounce = perfect ? 0.09 : 0.06;
     const wp = tv.group.getWorldPosition(new THREE.Vector3());
     const col = TOWERS[tw.kind].color;
-    v.fx.flash(wp.clone().setY(wp.y + 1.5), perfect ? 4 : 3, col, 0.35);
+    v.fx.flash(wp.clone().setY(wp.y + 1.5), perfect ? 2.6 : 2, col, 0.3);
     v.fx.burst(wp.clone().setY(wp.y + 1.5), col, perfect ? 50 : 32, 4.5, 0.24, 1);
-    v.fx.ring(wp.clone().setY(wp.y + 0.2), 4, col, 0.6, 0.12);
+    v.fx.ring(wp.clone().setY(wp.y + 0.2), 4, col, 0.6, 0.08);
     v.punch = perfect ? 1.5 : 1;
     v.shake(perfect ? 0.25 : 0.15);
     this.hud.kick(perfect ? 1 : 0.6);
@@ -643,8 +643,8 @@ export class JourneyBattle {
     switch (ev.kind) {
       case 'drum': {
         const p = ground(ev.x, ev.z);
-        v.fx.ring(p, ev.r, '#ff9a4c', 0.5, 0.3);
-        v.fx.ring(p, ev.r * 0.6, '#ffcf8a', 0.35, 0.2);
+        v.fx.ring(p, ev.r, '#ff9a4c', 0.5, 0.12);
+        v.fx.ring(p, ev.r * 0.6, '#ffcf8a', 0.35, 0.1);
         v.fx.dust(p, v.look.land.dirt, 40);
         burstOn(ev.hits, '#ffb347');
         v.shake(0.3);
@@ -653,9 +653,9 @@ export class JourneyBattle {
       }
       case 'bell': {
         const p = ground(ev.x, ev.z);
-        v.fx.ring(p, ev.r, '#9fe3ff', 1.3, 0.14);
-        v.fx.ring(p, ev.r * 0.7, '#e0f6ff', 1.0, 0.08);
-        v.fx.flash(p.clone().setY(p.y + 3), 5, '#bfefff', 0.4);
+        v.fx.ring(p, ev.r, '#9fe3ff', 1.3, 0.06);
+        v.fx.ring(p, ev.r * 0.7, '#e0f6ff', 1.0, 0.05);
+        v.fx.flash(p.clone().setY(p.y + 3), 3, '#bfefff', 0.35);
         for (const id of ev.hits) v.enemies.get(id)?.slowed();
         break;
       }
@@ -671,7 +671,7 @@ export class JourneyBattle {
       case 'choir': {
         const tv = v.towers.get(ev.tower.id);
         const wp = tv ? tv.group.getWorldPosition(new THREE.Vector3()) : ground(ev.x, ev.z, 2);
-        v.fx.ring(ground(wp.x, wp.z), 26, '#fff1c2', 1.4, 0.1);
+        v.fx.ring(ground(wp.x, wp.z), 26, '#fff1c2', 1.4, 0.04);
         v.fx.burst(wp.clone().setY(wp.y + 2), '#fff1c2', 50, 3, 0.24, 1.6, true, -1.2);
         for (const t of v.towers.values()) {
           const p = t.group.getWorldPosition(new THREE.Vector3());
@@ -682,8 +682,8 @@ export class JourneyBattle {
       }
       case 'bass': {
         const p = ground(ev.x, ev.z);
-        v.fx.ring(p, ev.r, '#b48cff', 0.7, 0.35);
-        v.fx.flash(p.clone().setY(p.y + 1), 4, '#9b6bff', 0.35);
+        v.fx.ring(p, ev.r, '#b48cff', 0.7, 0.15);
+        v.fx.flash(p.clone().setY(p.y + 1), 3, '#9b6bff', 0.3);
         v.fx.burst(p, '#b48cff', 40, 6, 0.3, 0.7);
         v.fx.dust(p, v.look.land.dirt, 30);
         burstOn(ev.hits, '#d9c2ff');
@@ -844,7 +844,8 @@ export class JourneyBattle {
     // calls of a breather already answered, or whose time has passed, are dropped
     while (this.calls.length) {
       const c = this.calls[0];
-      const over = vt > c.echoStart + s.barDur + RHYTHM.good;
+      // (a little grace: a tap that came in during a slow frame is still heard)
+      const over = vt > c.echoStart + s.barDur + RHYTHM.good + 0.25;
       if (!over && !(c.won && vt > c.echoStart + s.barDur)) break;
       if (!c.won && c.taps > 0) {
         audio.echoResult(false);
@@ -986,7 +987,7 @@ export class JourneyBattle {
       // groove 4: every downbeat rings out over the land
       if (g >= 4 && !this.paused && beat % this.clock.beatsPerBar === 0) {
         const tp = this.view.turtle.group.position;
-        this.view.fx.ring(new THREE.Vector3(tp.x, this.view.land.heightAt(tp.x, tp.z) + 0.3, tp.z), 16, GROOVE_COLOR[4], 0.7, 0.08);
+        this.view.fx.ring(new THREE.Vector3(tp.x, this.view.land.heightAt(tp.x, tp.z) + 0.3, tp.z), 16, GROOVE_COLOR[4], 0.7, 0.035);
       }
     }
     if (this.soloCineUntil >= 0 && vt >= this.soloCineUntil) {
@@ -1180,7 +1181,7 @@ export class JourneyBattle {
             }
             const heart = this.view.turtle.heartWorld(new THREE.Vector3());
             this.view.fx.burst(heart, '#7dff9a', 40, 4, 0.22, 1);
-            this.view.fx.ring(heart.clone().setY(this.view.land.heightAt(heart.x, heart.z) + 0.3), 12, '#ffd36b', 0.9, 0.1);
+            this.view.fx.ring(heart.clone().setY(this.view.land.heightAt(heart.x, heart.z) + 0.3), 12, '#ffd36b', 0.9, 0.05);
           });
           break;
         }
@@ -1192,9 +1193,9 @@ export class JourneyBattle {
             const v = this.view;
             const tp = v.turtle.group.position;
             const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.3, tp.z);
-            v.fx.ring(g, 34, '#7dff9a', 1.2, 0.16);
-            v.fx.ring(g, 22, '#ffd36b', 0.9, 0.12);
-            v.fx.flash(g.clone().setY(g.y + 4), 10, '#fff1c2', 0.4);
+            v.fx.ring(g, 34, '#7dff9a', 1.2, 0.06);
+            v.fx.ring(g, 22, '#ffd36b', 0.9, 0.05);
+            v.fx.flash(g.clone().setY(g.y + 4), 4, '#fff1c2', 0.35);
             for (const id of ev.hits) {
               const e = v.enemies.get(id);
               if (e) v.fx.burst(e.pos.clone().setY(e.pos.y + 1.2), '#ffe9a8', 10, 3, 0.2, 0.5);
