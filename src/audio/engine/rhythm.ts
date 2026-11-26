@@ -117,6 +117,16 @@ export class Rhythm {
     return ((b % g.beats) + g.beats) % g.beats;
   }
 
+  /** how long (s) `midi` stays a chord tone from t (at most `maxBeats` beats) */
+  private holdBeats(t: number, midi: number, spb: number, maxBeats: number): number {
+    const pc = pcOf(midi);
+    for (let k = 1; k <= maxBeats * 2; k++) {
+      const c = this.director.chordAt(t + (k * spb) / 2 - 0.001);
+      if (c && !c.pcs.includes(pc)) return Math.max(spb * 0.45, (k * spb) / 2 - 0.02);
+    }
+    return maxBeats * spb;
+  }
+
   private get palette(): Palette {
     return PALETTES[this.director.world ?? 'menu'] ?? PALETTES.menu;
   }
@@ -234,7 +244,7 @@ export class Rhythm {
           this.play('harp', chW, at(b), tones[Math.max(0, tones.length - 1 - ((k * 2) % tones.length))] ?? 72, (0.5 - 0.02 * k) * V, 1.1 * spb, { release: 0.4 });
         }
         const last = chordTones(cAt(3.5), 52, 79);
-        last.forEach((m, k) => this.play('harp', chW, at(3.5) + k * 0.018, m, 0.42 * V, 2 * spb, { release: 0.6 }));
+        last.forEach((m, k) => this.play('harp', chW, at(3.5) + k * 0.018, m, 0.42 * V, this.holdBeats(at(3.5), m, spb, 2), { release: 0.4 }));
         break;
       }
       case 'drum': {
@@ -265,10 +275,10 @@ export class Rhythm {
           const tones = chordTones(cAt(b), 67, 91);
           if (!tones.length) continue;
           const m = tones[tones.length - 1 - Math.min(tones.length - 1, order[k])];
-          this.play('tbell', chW, at(b), m > 84 ? m - 12 : m, (k % 4 === 0 ? 0.5 : 0.34) * V, 1.5 * spb, { release: 1 });
+          this.play('tbell', chW, at(b), m > 84 ? m - 12 : m, (k % 4 === 0 ? 0.5 : 0.34) * V, Math.min(1.5 * spb, this.holdBeats(at(b), m, spb, 2)), { release: 0.5 });
           this.play('celesta', chW, at(b), m + 12 <= 98 ? m + 12 : m, 0.22 * V, 0.8 * spb, { release: 0.6 });
         }
-        this.play('tbell', ch, at(0), bassNote(cAt(0), 55), 0.5 * V, 4 * spb, { release: 2 });
+        this.play('tbell', ch, at(0), bassNote(cAt(0), 55), 0.5 * V, this.holdBeats(at(0), bassNote(cAt(0), 55), spb, 4), { release: 1 });
         this.play('glass', chW, at(3.5), chordTones(cAt(3.5), 86, 98)[0] ?? 91, 0.3 * V, 2 * spb, { release: 1 });
         break;
       }
@@ -329,17 +339,37 @@ export class Rhythm {
         break;
       }
       case 'choir': {
-        // a chord swell: the voices enter one by one, the full choir blooms, the top voice rises
-        const parts: [number, number, number][] = [[0, 55, 62], [1, 62, 67], [2, 67, 72], [2, 72, 77]];
-        for (const [b, lo, hi] of parts) {
-          const c = cAt(b);
-          const m = chordTones(c, lo, hi)[0] ?? lo;
-          this.play('choirx', chW, at(b), m, (0.36 + 0.05 * b) * V, (4 - b) * spb + 0.3, { release: 0.7 });
-          this.play('choir', chW, at(b) + 0.03, m, 0.25 * V, (4 - b) * spb + 0.3, { release: 0.9 });
+        // a chord swell: the voices enter one by one (beats 0, 1, 2, the descant on 3) and the full
+        // choir blooms; every voice moves to the nearest chord tone whenever the harmony changes
+        const parts: [number, number, number][] = [[0, 55, 62], [1, 62, 67], [2, 67, 72], [2, 72, 77], [3, 76, 84]];
+        const cuts = new Set<number>([0, 1, 2, 3, 4]);
+        for (let h = 0.5; h < 4; h += 0.5) if (cAt(h).sym !== cAt(h - 0.5).sym) cuts.add(h);
+        const edges = [...cuts].sort((x, y) => x - y);
+        const held: ({ m: number; from: number } | null)[] = parts.map(() => null);
+        const emit = (k: number, to: number) => {
+          const n = held[k];
+          if (!n) return;
+          const first = n.from === parts[k][0];
+          const vel = (0.36 + 0.05 * parts[k][0] + (k === 4 ? 0.06 : 0)) * V;
+          this.play('choirx', chW, at(n.from), n.m, first ? vel : vel * 0.7, (to - n.from) * spb + (to >= 4 ? 0.3 : 0.02), { release: to >= 4 ? 0.7 : 0.08 });
+          if (first) this.play('choir', chW, at(n.from) + 0.03, n.m, 0.25 * V, (4 - n.from) * spb + 0.3, { release: 0.9 });
+          held[k] = null;
+        };
+        for (let e = 0; e < edges.length - 1; e++) {
+          const b0 = edges[e];
+          const c = cAt(b0);
+          parts.forEach(([entry, lo, hi], k) => {
+            if (entry > b0) return;
+            const tones = chordTones(c, lo, hi);
+            const prev = held[k]?.m ?? (lo + hi) / 2;
+            const m = tones.length ? tones.reduce((a, x) => (Math.abs(x - prev) < Math.abs(a - prev) ? x : a)) : Math.round(prev);
+            if (held[k] && held[k]!.m === m) return;
+            emit(k, b0);
+            held[k] = { m, from: b0 };
+          });
         }
-        const top = chordTones(cAt(3), 76, 84);
-        if (top.length) this.play('choirx', chW, at(3), top[0], 0.45 * V, spb + 0.6, { release: 0.8 });
-        this.play('tbell', chW, at(0), bassNote(cAt(0), 60), 0.22 * V, 3 * spb, { release: 1.5 });
+        parts.forEach((_, k) => emit(k, 4));
+        this.play('tbell', chW, at(0), bassNote(cAt(0), 60), 0.22 * V, Math.min(3 * spb, this.holdBeats(at(0), bassNote(cAt(0), 60), spb, 3)), { release: 1.5 });
         this.play('crash', this.ch(0, true), at(3), 60, 0.16 * V, 2, { release: 1 });
         break;
       }
@@ -351,7 +381,7 @@ export class Rhythm {
           if (iv === null) continue;
           const b = k * 0.25;
           const c = cAt(b);
-          const r = bassNote(c, 36);
+          const r = this.rootIn(c, 36, 47);
           const m = iv === 7 ? chordTones(c, r + 5, r + 8)[0] ?? r + 7 : r + iv;
           const pop = iv === 12;
           this.play('tbass', ch, at(b), m, (pop ? 0.6 : 0.75) * V * (k % 4 === 0 ? 1.1 : 1), 0.22 * spb, { release: 0.06 });

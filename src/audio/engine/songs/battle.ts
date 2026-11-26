@@ -316,15 +316,17 @@ export abstract class Battle extends AdaptiveSong {
     const phraseStart = f.i % 4 === 0;
     // choir swells: an 'ah' chord rising into the next phrase (every bar at harmony 5)
     if (phraseEnd || L.h >= 5) {
-      const v = (phraseEnd ? 0.16 : 0.1) * (L.h >= 5 ? 1.15 : 1);
+      const v = (phraseEnd ? 0.16 : 0.11) * (L.h >= 5 ? 1.2 : 1);
       this.chords(b, f, 'tutti-ch', 'choir', K.choir, 60, 76, 3, v, 0.4);
     }
     if (L.h >= 4) {
       // brass: a swell across the phrase's last bar, a stab on the downbeat it lands on
       if (phraseEnd && !b.drop) this.chords(b, f, 'tutti-sw', { ...LOWBRASS(0.6), attack: 3.2 * b.spb, release: 0.5 }, K.brass, 50, 67, 3, 0.4, 0.15);
-      if (phraseStart) this.stabs(b, f, 'tutti-st', 'brass', K.brass, 52, 69, 3, [0], 0.42, 0.9);
+      if (phraseStart) this.stabs(b, f, 'tutti-st', 'brass', K.brass, 52, 69, 3, [0], 0.48, 0.9);
     }
     if (L.h >= 5 && phraseStart && !b.drop) b.p.hit('crash', K.perc, this.T(b, 0, 0.001), I >= 2 ? 0.26 : 0.2);
+    // the full band sings the hook: the choir hums the towers' tune with them
+    if (L.h >= 5) this.tune(b, f, 'choiroo', K.choir, 0.15, { legato: 1.0, release: 0.5 });
   }
 
   /**

@@ -97,10 +97,10 @@ export class Towers {
     this.buses = WETS.map((wet) => BUS_PANS.map((pan) => new Channel(core, core.towerBus, core.sfxWet, { pan, wet, gain: 1 })));
     // tower instruments first (they are the melody of every battle)
     bank.warm('harp', 55, 96, 3);
-    bank.warm('tdrum', 44, 62, 3);
+    bank.warm('tdrum', 47, 67, 3);
     bank.warm('tom', 41, 50, 3);
-    bank.warm('tbass', 40, 52, 3);
-    bank.warm('choirx', 58, 80, 3);
+    bank.warm('tbass', 40, 60, 3);
+    bank.warm('choirx', 58, 84, 3);
     bank.warm('tamb', 60, 60, 3);
     bank.warm('rim', 60, 60, 4);
     bank.warm('taiko', 30, 46, 4);
@@ -317,13 +317,12 @@ export class Towers {
         // the battle drum: a tight, bright snare-tom tuned to the chord (root, or the fifth for the
         // second drum) — the backing keeps the turtle's deep footstep drum, this one cuts through it
         const root = this.rootIn(c, 53, 64);
-        const fifth = chordTones(c, root + 5, root + 9)[0] ?? root;
+        let fifth = chordTones(c, root + 5, root + 9)[0] ?? root;
+        if (fifth > 66) fifth -= 12;
         const m = v % 2 === 0 ? root : fifth;
         this.note('tdrum', ch, t, m, vel * accent, 0.5, { release: 0.12 }, kind);
-        // a little weight under it (a tom an octave down, not the footstep)
-        this.note('tom', ch, t, Math.max(41, m - 12), vel * 0.1, 0.35, { release: 0.15 }, kind);
         const sx = g.spb / 4;
-        // level 1: a ghost stroke on the next 16th ("ta-ka"); level 2: a ruff into the hit and a rim crack
+        // level 1: a ghost stroke on the next 16th ("ta-ka"); level 2: "ta-ka-ta" and a rim crack
         if (lv >= 1) this.note('tdrum', ch, t + sx, m, vel * 0.36, 0.25, { release: 0.08 }, kind);
         if (lv === 2) {
           this.note('tdrum', ch, t + 2 * sx, fifth === m ? root : fifth, vel * 0.5, 0.3, { release: 0.1 }, kind);
@@ -405,7 +404,7 @@ export class Towers {
           const hm = nearestChordTone(c, fold(guide, 57, 70));
           const dur = Math.min(1.6 * g.spb, this.holdFor(t, hm, g.spb, 2));
           this.note('brass', ch, t, hm, vel * accent, dur, { release: 0.28 }, kind);
-          this.note('brass', ch, t + 0.006, root, vel * 0.6, dur, { release: 0.28 }, kind);
+          this.note('brass', ch, t, root, vel * 0.6, dur, { release: 0.28 }, kind);
           if (lv === 2) this.note('brass', ch, t, hm + 12 <= 77 ? hm + 12 : hm, vel * 0.4, dur * 0.85, { release: 0.25 }, kind);
           break;
         }
@@ -482,6 +481,7 @@ export class Towers {
 
   impact(kind: TowerKind, t: number, pan: number, strength: number): void {
     const s = clamp(Number.isFinite(strength) ? strength : 0.5, 0, 1.5);
+    if (!KIND[kind]) return;
     if (kind === 'bell' || kind === 'choir' || kind === 'shaker') return;
     const g = this.grid(t);
     const cap = kind === 'bass' || kind === 'horn' ? 1 : 2;

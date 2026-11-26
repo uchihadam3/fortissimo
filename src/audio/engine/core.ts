@@ -271,12 +271,12 @@ export class Core {
 
   /**
    * The size of the band (harmony 0…5): a lone musician's backing is 3 dB quieter and narrower
-   * (side ×0.7); the full band's is at full level and wide (side ×1.5).
+   * (side ×0.6); the full band's is at full level and wide (side ×1.7).
    */
   setBandSize(harmony: number, t = this.now): void {
     const h = clamp(Number.isFinite(harmony) ? harmony : 5, 0, 5);
     const gain = Math.pow(10, (-3 + 0.6 * h) / 20);
-    const side = 0.7 + 0.16 * h;
+    const side = 0.6 + 0.22 * h;
     const at = Math.max(this.now, t);
     const set = (p: AudioParam, v: number) => {
       p.cancelScheduledValues(at);
