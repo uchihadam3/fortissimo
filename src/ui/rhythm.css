@@ -223,10 +223,10 @@
 #baton-wrap .tell-n i { width: 9px; height: 9px; border-radius: 50%; background: #ff4a5e; box-shadow: 0 0 8px #ff4a5e; display: block; }
 
 #boss-bar {
-  position: absolute; left: 50%; top: calc(70px + var(--safe-t)); transform: translate(-50%, -10px); width: min(56vw, 520px);
-  opacity: 0; transition: opacity .4s, transform .4s; pointer-events: none;
+  position: absolute; left: 50%; top: calc(70px + var(--safe-t)); transform: translateX(-50%); width: min(56vw, 520px);
+  opacity: 0; transition: opacity .4s; pointer-events: none;
 }
-#boss-bar.on { opacity: 1; transform: translate(-50%, 0); }
+#boss-bar.on { opacity: 1; }
 #boss-bar .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 #boss-bar .ico { width: 30px; height: 30px; display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
 #boss-bar .ico svg { width: 100%; height: 100%; display: block; }
