@@ -271,9 +271,17 @@ export interface AudioAPI {
    * variant of the land's theme with the creature's own motif and its own rhythm signature.
    * Guardians (bossBlot, bossScarab, bossMoth, bossGolem, silence): a full theme each, per land.
    * Legends (wyrm, djinn, aurora, phoenix, abyssKing): unique, epic, unforgettable themes.
+   * Implementation notes: the fight plays INSIDE the level's song — same tempo, same clock, same
+   * bar grid (songClock() does not change), so the duel stays on the beat; the towers' notes follow
+   * the boss's harmony and its tune. A riser leads into the fight's first bar (call it ≥ 1 bar
+   * ahead for the full riser); bossTheme(null) plays a victory flourish on the bar where the song
+   * resumes. Battle songs only (no-op in cinematics). Kinds without a theme are ignored.
    */
   bossTheme(kind: EnemyKind | null, t: number): void;
-  /** The boss enters phase n (1, 2, 3…): the music escalates (key lift, tempo feel, new layers). */
+  /**
+   * The boss enters phase n (1, 2, 3…; mini-bosses have 2, guardians and legends 3) from the next bar
+   * line ≥ t: the music escalates (key lift, double-time drums, choir, brass), with a phase hit.
+   */
   bossPhase(phase: number, t: number): void;
   /**
    * The boss winds up an attack on the beat: one count-in hit at t (called for each warning beat;

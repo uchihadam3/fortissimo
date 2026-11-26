@@ -6,7 +6,7 @@
  * grid the game uses for towers. Themes expose their harmony as a pure function of the bar index
  * (`chordAt`) so tower notes can be chosen before the backing for that bar exists.
  */
-import type { SongId, WorldId } from '../../sim/defs';
+import type { EnemyKind, SongId, WorldId } from '../../sim/defs';
 import type { BandMix } from '../api';
 import type { Core, ReverbMode } from './core';
 import { BufferBank, Channel, type BufInst, type BufNoteOpts, type ChannelOpts, oscStack, playBuf, type StackOpts } from './synth';
@@ -124,6 +124,8 @@ export class Player {
   private blog: { bar: number; mix: BandMix }[];
   private mlog: { bar: number; index: number; total: number }[] = [];
   private glog: { bar: number; level: number }[];
+  /** the boss fights (v5): from `bar` on the music is that boss's (kind null = the song itself) */
+  private slog: { bar: number; kind: EnemyKind | null; phase: number }[] = [{ bar: -1e9, kind: null, phase: 0 }];
   /** highest bar whose harmony has been handed out (to towers) before it was composed */
   private observed = -1;
   private readonly ff: FFWindow[] = [];
@@ -315,6 +317,43 @@ export class Player {
     if (this.glog.length > 64) this.glog.splice(1, this.glog.length - 64);
     this.theme.invalidate(firstFree);
     return firstFree;
+  }
+
+  // ───────────────────────────── boss fights (v5) ─────────────────────────────
+
+  /** the boss whose music plays in `bar` (null: the song), the bar it began and the bar its phase began */
+  bossAt(bar: number): { kind: EnemyKind; phase: number; from: number; phaseFrom: number } | null {
+    let k = 0;
+    for (let i = 0; i < this.slog.length; i++) if (this.slog[i].bar <= bar) k = i;
+    const e = this.slog[k];
+    if (!e.kind) return null;
+    let from = k;
+    while (from > 0 && this.slog[from - 1].kind === e.kind) from--;
+    return { kind: e.kind, phase: e.phase, from: this.slog[from].bar, phaseFrom: e.bar };
+  }
+
+  /** a boss fight (or the song again: null) from the first free bar line at or after t; returns that bar */
+  setBoss(kind: EnemyKind | null, t: number, now: number): number {
+    const want = Math.ceil((t - this.t0) / this.barDur - 1e-6);
+    const bar = Math.max(want, this.firstFree(now));
+    this.slog = this.slog.filter((e) => e.bar < bar);
+    const cur = this.slog[this.slog.length - 1];
+    if ((cur.kind ?? null) !== kind) this.slog.push({ bar, kind, phase: kind ? 1 : 0 });
+    if (this.slog.length > 64) this.slog.splice(1, this.slog.length - 64);
+    this.theme.invalidate(bar);
+    return bar;
+  }
+
+  /** the boss enters phase n from the first free bar line at or after t (no-op without a boss) */
+  setBossPhase(phase: number, t: number, now: number): number | null {
+    const want = Math.ceil((t - this.t0) / this.barDur - 1e-6);
+    const bar = Math.max(want, this.firstFree(now));
+    const cur = this.bossAt(bar);
+    if (!cur || cur.phase === phase) return null;
+    this.slog = this.slog.filter((e) => e.bar < bar);
+    this.slog.push({ bar, kind: cur.kind, phase });
+    this.theme.invalidate(bar);
+    return bar;
   }
 
   /**
@@ -701,6 +740,20 @@ export class Director {
   }
 
   /** the player's groove changes from the next free bar line; returns when (context time), or null */
+  /** a boss fight's music from the next bar line ≥ t (battle songs only); returns its start time */
+  bossTheme(kind: EnemyKind | null, t: number): number | null {
+    const p = this.current;
+    if (!p || p.stopped || !p.theme.followsBand) return null;
+    return p.barStart(p.setBoss(kind, t, this.core.now));
+  }
+
+  bossPhase(phase: number, t: number): number | null {
+    const p = this.current;
+    if (!p || p.stopped || !p.theme.followsBand) return null;
+    const bar = p.setBossPhase(phase, t, this.core.now);
+    return bar === null ? null : p.barStart(bar);
+  }
+
   setGroove(level: number): number | null {
     this.groove = clamp(Math.round(Number.isFinite(level) ? level : 0), 0, 4);
     const p = this.current;

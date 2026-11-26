@@ -8,7 +8,7 @@ import { audio } from './index';
 import type { CinematicCue, SongId } from './api';
 import { DUETS, SONGS, TOWERS, type DuetId, type EnemyKind, type Section, type TowerKind, type WorldId } from '../sim/defs';
 import { audioDebug } from './engine/engine';
-import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderCinema, renderEvents, renderPower, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
+import { bandOf, defaultArmy, ENDING, ENDING2, harmonyCheck, INTRO, INTRO2, makeRig, measure, octaves, onsetTest, renderAmbience, renderBalance, renderBoss, renderCinema, renderEvents, renderPower, renderRhythm, renderCue, renderDeaths, renderDuets, renderJourney, renderMotifs, renderSfx, renderSong, renderStress, standardJourney, wavBase64 } from './engine/analysis';
 
 const SONG_IDS = Object.keys(SONGS) as SongId[];
 const KINDS: TowerKind[] = ['harp', 'drum', 'bell', 'shaker', 'crystal', 'horn', 'choir', 'bass'];
@@ -76,7 +76,7 @@ setInterval(() => {
 const lab = {
   audio,
   debug: audioDebug,
-  offline: { renderBalance, renderEvents, renderPower, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
+  offline: { renderBalance, renderBoss, renderEvents, renderPower, renderRhythm, renderSong, renderCinema, renderStress, onsetTest, renderAmbience, renderSfx, renderJourney, standardJourney, renderCue, renderMotifs, renderDuets, renderDeaths, harmonyCheck, octaves, bandOf, measure, wavBase64, defaultArmy, makeRig, INTRO, ENDING, INTRO2, ENDING2 },
   reset() {
     meter.peak = 0;
     meter.sum = 0;
@@ -274,6 +274,31 @@ button(v4, 'power drop', () => {
 });
 button(cRow, 'success', () => audio.echoResult(true));
 button(cRow, 'fail', () => audio.echoResult(false));
+
+// ── v5: boss fights (start the boss's level song first: meadow/desert/ice/forge/citadel, boss, finale) ──
+const bs = section('Boss fights (v5)', 'Start a battle song (the boss\'s level song), then a boss: its music starts on the next bar line. Phases change on bar lines; "duel" plays three tells and the blow\'s beat.');
+const BOSS_ROWS: [string, EnemyKind[]][] = [
+  ['mini-bosses', ['toad', 'drumBeetle', 'crow', 'sandworm', 'croc', 'sphinx', 'yeti', 'siren', 'stag', 'salamander', 'magmaCrab', 'smith', 'gargoyle', 'organist', 'twin']],
+  ['guardians', ['bossBlot', 'bossScarab', 'bossMoth', 'bossGolem', 'silence']],
+  ['legends', ['wyrm', 'djinn', 'aurora', 'phoenix', 'abyssKing']],
+];
+for (const [label, kinds] of BOSS_ROWS) {
+  const r = row(bs, label);
+  for (const k of kinds) button(r, k, () => audio.bossTheme(k, audio.now() + 0.1));
+}
+const duel = row(bs, 'the fight');
+button(duel, '■ end (victory)', () => audio.bossTheme(null, audio.now() + 0.1));
+for (const n of [1, 2, 3]) button(duel, `phase ${n}`, () => audio.bossPhase(n, audio.now() + 0.1));
+const duelRun = (end: (t: number) => void) => {
+  const c = audio.songClock();
+  const b0 = nextBar();
+  const spb = c?.spb ?? 0.6;
+  for (let k = 0; k < 4; k++) audio.bossTell(b0 + k * spb, 0.3, k === 3);
+  end(b0 + 3 * spb);
+};
+button(duel, 'duel → perfect parry', () => duelRun((t) => audio.parry(t, 'perfect', 0.3)));
+button(duel, 'duel → good parry', () => duelRun((t) => audio.parry(t, 'good', 0.3)));
+button(duel, 'duel → blow lands', () => duelRun((t) => audio.bossBlow(t, 0.3, 1)));
 
 const res = row(bt, 'results');
 button(res, 'arrive → victory', () => {

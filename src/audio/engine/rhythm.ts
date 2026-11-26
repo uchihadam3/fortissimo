@@ -107,6 +107,8 @@ export class Rhythm {
   private tapRun = 0;
   private lastSolo = -1;
   private lastDrop = -1e9;
+  private lastTell = -1e9;
+  private tellIdx = 0;
   private drops: number[] = [];
   /** a trim for everything played (the verdict of the echo plays a little softer) */
   private level = 1;
@@ -119,7 +121,7 @@ export class Rhythm {
     this.fx = new Fx(core, bank);
     this.chs = PANS.map((pan) => new Channel(core, core.rhythmBus, core.sfxWet, { pan, wet: 0.12, gain: 1 }));
     this.wetChs = PANS.map((pan) => new Channel(core, core.rhythmBus, core.sfxWet, { pan, wet: 0.35, gain: 1 }));
-    for (const [inst, lo, hi] of [['tdrum', 47, 67], ['rim', 60, 60], ['tek', 60, 60], ['tamb', 60, 60], ['celesta', 72, 98], ['glass', 76, 98], ['clap', 60, 60], ['crash', 60, 60], ['snare', 60, 60], ['tom', 40, 56], ['timp', 40, 53], ['tbass', 40, 64], ['choirx', 55, 80], ['choir', 55, 80], ['brass', 45, 75], ['harp', 48, 96], ['zap', 70, 99], ['tbell', 60, 84], ['shaker', 60, 60], ['anvil', 72, 92], ['boom', 26, 40], ['kalimba', 72, 91], ['koto', 69, 88], ['oud', 57, 76], ['wood', 50, 62], ['tick', 60, 60], ['choiroo', 48, 66]] as [BufInst, number, number][]) bank.warm(inst, lo, hi, 4);
+    for (const [inst, lo, hi] of [['tdrum', 47, 67], ['rim', 60, 60], ['tek', 60, 60], ['tamb', 60, 60], ['celesta', 72, 98], ['glass', 76, 98], ['clap', 60, 60], ['crash', 60, 60], ['snare', 60, 60], ['tom', 40, 56], ['timp', 40, 53], ['tbass', 40, 64], ['choirx', 55, 80], ['choir', 55, 80], ['brass', 45, 75], ['harp', 48, 96], ['zap', 70, 99], ['tbell', 60, 84], ['shaker', 60, 60], ['anvil', 72, 92], ['boom', 26, 40], ['kalimba', 72, 91], ['koto', 69, 88], ['oud', 57, 76], ['wood', 50, 62], ['tick', 60, 60], ['choiroo', 48, 66], ['gong', 60, 60], ['taiko', 28, 40], ['dum', 60, 60]] as [BufInst, number, number][]) bank.warm(inst, lo, hi, 4);
   }
 
   // ───────────────────────────── helpers ─────────────────────────────
@@ -270,7 +272,7 @@ export class Rhythm {
     const ch = this.ch(pan * 0.7, true);
     if (q === 'miss') {
       // a dull, muted clink (no melody)
-      this.play('tick', this.ch(pan * 0.7), t, 58, 0.5 * PICK, 0.06, { lp: 1800 });
+      this.play('tick', this.ch(pan * 0.7), t, 58, 0.5 * PICK, 0.06, { lp: 1000 });
       this.play('wood', this.ch(pan * 0.7), t, 62, 0.2 * PICK, 0.06, { release: 0.04, lp: 1300, cents: -35 });
       return;
     }
@@ -367,6 +369,122 @@ export class Rhythm {
     this.fx.burst(ch.input, t, { noise: 'pink', type: 'bandpass', f: 2400, f1: 320, q: 1.1, a: 0.015, d: 0.4, g: 0.07 * v, cat: 'rhythm' });
     this.play('tom', this.ch(0), t + 0.3, 43, 0.25 * v, 0.2, { release: 0.08, lp: 500 });
     this.core.duck(0.22 * v, 0.45);
+  }
+
+
+  // ───────────────────────────── v5: the duel ─────────────────────────────
+
+  /**
+   * The boss winds up: one tense count-in hit per warning beat, climbing the chord (a muted drum,
+   * a metallic tick and a pitched synth ping a step higher each beat); the landing beat (`last`) is
+   * a sharp accent with a short swell into it — the player's parry or the blow sounds on top.
+   */
+  bossTell(t: number, pan: number, last: boolean): void {
+    const g = this.grid();
+    this.tellIdx = t - this.lastTell < g.spb * 2.5 && t > this.lastTell ? this.tellIdx + 1 : 0;
+    this.lastTell = t;
+    const c = this.chordAt(t);
+    const tones = chordTones(c, 67, 91);
+    const m = tones.length ? tones[Math.min(tones.length - 1, this.tellIdx + (last ? 1 : 0))] : 76;
+    const ch = this.ch(pan * 0.7);
+    if (!last) {
+      this.play('tom', ch, t, 47 + Math.min(6, this.tellIdx * 2), 0.32, 0.2, { release: 0.06, lp: 2500 });
+      this.play('tek', ch, t, 62 + this.tellIdx * 0.6, 0.22, 0.1);
+      this.play('zap', this.ch(pan * 0.7, true), t, m, 0.16, 0.25, { release: 0.15, lp: 6000 });
+      return;
+    }
+    const sw = Math.min(g.spb * 0.9, 0.4);
+    this.fx.burst(ch.input, t - sw, { noise: 'white', type: 'bandpass', f: 1200, f1: 6000, q: 1.4, a: sw * 0.95, d: 0.03, g: 0.05, cat: 'rhythm' });
+    this.play('zap', this.ch(pan * 0.7, true), t, m, 0.22, 0.3, { release: 0.2 });
+    this.play('rim', ch, t, 64, 0.3, 0.1);
+  }
+
+  /** The player parries the blow on the beat: perfect = a triumphant clang and a chord stab (the blow is reflected); good = a solid block. */
+  parry(t: number, q: 'perfect' | 'good', pan: number): void {
+    const c = this.chordAt(t);
+    const ch = this.ch(pan * 0.5);
+    this.play('tdrum', ch, t, this.rootIn(c, 52, 63), 0.5, 0.3, { release: 0.1 });
+    this.play('wood', ch, t, 62, 0.3, 0.1);
+    this.play('tom', this.ch(pan * 0.3), t, 45, 0.36, 0.3, { release: 0.1 });
+    if (q !== 'perfect') return;
+    const w = this.ch(-pan * 0.4, true);
+    const hi = chordTones(c, 79, 91);
+    this.play('anvil', w, t, hi[hi.length - 1] ?? 84, 0.34, 1.2, { release: 0.8 });
+    this.play('tbell', w, t, this.rootIn(c, 60, 71), 0.3, 1.6, { release: 1 });
+    this.play('crash', w, t, 62, 0.3, 1.2, { release: 0.5 });
+    chordTones(c, 55, 70).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.4 : -0.4), t + 0.004 * k, m, 0.3, 0.5 * this.grid().spb, { release: 0.2 }));
+    chordTones(c, 64, 79).slice(0, 3).forEach((m, k) => this.play('choirx', this.ch(k - 1, true), t + 0.01, m, 0.2, 0.45 * this.grid().spb, { release: 0.2 }));
+  }
+
+  /** The blow lands on the colossus: a heavy impact (sub, war drums, a dark crash) and the music reels. */
+  bossBlow(t: number, pan: number, strength: number): void {
+    const s = clamp(Number.isFinite(strength) ? strength : 1, 0.2, 1.5);
+    const c = this.chordAt(t);
+    const low = this.ch(pan * 0.25);
+    this.play('boom', low, t, bassNote(c, 26), 0.5 * s, 0.9, { release: 0.3 });
+    this.play('taiko', low, t, 31, 0.6 * s, 1, { release: 0.4 });
+    this.play('tdrum', this.ch(pan * 0.5), t, this.rootIn(c, 45, 56), 0.45 * s, 0.3, { release: 0.1 });
+    this.play('crash', this.ch(pan * 0.5, true), t, 54, 0.3 * s, 1.2, { release: 0.5, lp: 3500 });
+    this.fx.burst(low.input, t, { noise: 'brown', type: 'lowpass', f: 600, f1: 120, a: 0.004, d: 0.5, g: 0.22 * s, cat: 'rhythm' });
+    this.core.duck(0.3 * Math.min(1, s), 0.4);
+  }
+
+  /**
+   * A boss fight begins at the bar line tStart: a one-bar riser (noise sweep, snare and timpani
+   * rolls) into it and the hit on it (crash, gong, sub, brass) — or, back to the level's song
+   * (enter = false), a victory flourish: a harp sweep and a bright major fanfare on the old key.
+   */
+  bossTransition(tStart: number, enter: boolean, big: number): void {
+    const now = this.core.now;
+    const g = this.grid();
+    const from = Math.max(now + 0.03, tStart - g.barDur);
+    const rise = tStart - from;
+    const ch = this.ch(0, true);
+    const dry = this.ch(0);
+    if (enter) {
+      if (rise > 0.2) {
+        this.fx.burst(ch.input, from, { noise: 'white', type: 'bandpass', f: 300, f1: 5000, q: 1.1, a: rise * 0.97, d: 0.05, g: 0.1 * big, cat: 'rhythm' });
+        const n = Math.floor(rise / (g.spb / 4));
+        for (let k = 0; k < n; k++) {
+          const tk = tStart - (n - k) * (g.spb / 4);
+          this.play('snare', this.ch(0.2), tk, 60, 0.05 + 0.3 * (k / Math.max(1, n)), 0.2, { release: 0.06 });
+          if (k % 2 === 0) this.play('timp', dry, tk, 40, 0.1 + 0.3 * (k / Math.max(1, n)), 0.5, { release: 0.2 });
+        }
+      }
+      const c = this.chordAt(tStart + 0.01);
+      this.play('crash', ch, tStart, 59, 0.5 * big, 3, { release: 1 });
+      this.play('gong', ch, tStart, 60, 0.32 * big, 4, { release: 1.5 });
+      this.play('boom', dry, tStart, bassNote(c, 26), 0.6 * big, 1.5, { release: 0.5 });
+      this.play('taiko', dry, tStart, 31, 0.6 * big, 1.2, { release: 0.4 });
+      chordTones(c, 45, 64).slice(0, 4).forEach((m, k) => this.play('brass', this.ch(k % 2 ? 0.4 : -0.4), tStart, m, 0.36 * big, 1.2 * g.spb, { release: 0.3 }));
+      return;
+    }
+    // the victory flourish (in the harmony the level's song resumes with)
+    const c = this.chordAt(tStart + 0.01);
+    // the chord the song resumes with, voiced bright (root, third, fifth from middle C up)
+    const tri = chordTones(c, 60, 74).slice(0, 3);
+    while (tri.length < 3) tri.push((tri[tri.length - 1] ?? 64) + 12);
+    for (let i = 0; i < 12; i++) {
+      // the sweep runs through the boss's last bar: it follows that bar's harmony
+      const tones = chordTones(this.chordAt(from + (rise * i) / 12 + 0.001), 60, 91);
+      if (tones.length) this.play('harp', ch, from + (rise * i) / 12, tones[Math.min(tones.length - 1, Math.floor((i / 12) * tones.length))], 0.2 + 0.015 * i, 0.8, { release: 0.4 });
+    }
+    this.play('crash', ch, tStart, 62, 0.4, 3, { release: 1 });
+    tri.forEach((m, i) => {
+      this.play('brass', this.ch(i - 1), tStart, m, 0.4, 1.6 * g.spb, { release: 0.4 });
+      this.play('choirx', this.ch(1 - i, true), tStart + 0.01, m + 12 <= 84 ? m + 12 : m, 0.24, 1.8 * g.spb, { release: 0.6 });
+    });
+    this.play('glass', ch, tStart + 0.02, tri[2] + 12 <= 98 ? tri[2] + 12 : tri[2], 0.3, 2, { release: 1 });
+    this.play('timp', dry, tStart, this.rootIn(c, 40, 51), 0.5, 1.5, { release: 0.5 });
+  }
+
+  /** The boss's new phase lands at tStart: a short riser and a heavier hit (gong, brass, choir). */
+  bossPhaseHit(tStart: number, phase: number): void {
+    this.bossTransition(tStart, true, phase >= 3 ? 1.2 : 1);
+    if (phase >= 3) {
+      const c = this.chordAt(tStart + 0.01);
+      chordTones(c, 60, 76).slice(0, 4).forEach((m, k) => this.play('choir', this.ch(k % 2 ? 0.5 : -0.5, true), tStart + 0.02, m, 0.26, 2.2 * this.grid().spb, { release: 0.8 }));
+    }
   }
 
   // ───────────────────────────── solos ─────────────────────────────

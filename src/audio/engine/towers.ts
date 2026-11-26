@@ -404,7 +404,7 @@ export class Towers {
           const hm = nearestChordTone(c, fold(guide, 57, 70));
           const dur = Math.min(1.6 * g.spb, this.holdFor(t, hm, g.spb, 2));
           this.note('brass', ch, t, hm, vel * accent, dur, { release: 0.28 }, kind);
-          this.note('brass', ch, t, root, vel * 0.6, dur, { release: 0.28 }, kind);
+          this.note('brass', ch, t, root, vel * 0.4, dur, { release: 0.28 }, kind);
           if (lv === 2) this.note('brass', ch, t, hm + 12 <= 77 ? hm + 12 : hm, vel * 0.4, dur * 0.85, { release: 0.25 }, kind);
           break;
         }
