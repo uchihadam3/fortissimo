@@ -20,12 +20,12 @@ import {
 import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng, hashString } from '../core/rng';
-import { RHYTHM, SOLO, ECHO, CRESCENDO, COIN_VALUE, STRIKE, grooveOf, powerMul, type TapQuality } from './rhythm';
+import { RHYTHM, SOLO, CRESCENDO, COIN_VALUE, STRIKE, VIRADA, grooveOf, powerMul, viradaPattern, viradaReward, type TapQuality } from './rhythm';
 import { BOSSES, DUEL, bossClass, shieldOf, type BossSpec } from './bosses';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
-export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo' | 'coin' | 'strike' | 'parry';
+export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'virada' | 'coin' | 'strike' | 'parry';
 export type LandmarkKind = 'bell' | 'chimes' | 'organ' | 'harp' | 'spire';
 
 /** sub-steps per 16th note (fixed integration grid) */
@@ -294,10 +294,11 @@ export type SimEvent =
   | { t: number; type: 'solo'; tower: Tower; perfect: boolean; until: number }
   /** a solo's area effect (drum shockwave, bell ring, shaker shower, choir anthem, bass drop) */
   | { t: number; type: 'soloHit'; tower: Tower; kind: TowerKind; x: number; z: number; r: number; hits: number[] }
-  /** the Maestro's call was echoed right: bonus notes, and a chord waits for the next movement */
-  | { t: number; type: 'echoWin'; index: number; coins: number }
-  /** the chord blast of a right echo */
-  | { t: number; type: 'chord'; hits: number[] }
+  // ── v7: the viradas ──
+  /** a virada is cued (two bars ahead): its marks will be tapped on its bar */
+  | { t: number; type: 'viradaCue'; virada: Virada }
+  /** a virada was played: hits of n marks (perfects), and what it brought */
+  | { t: number; type: 'virada'; virada: Virada; hits: number; n: number; perfects: number; full: boolean; perfect: boolean; coins: number; boost: number; ff: number }
   // ── v4: everything on the beat ──
   /** the colossus strikes a creature tapped on the beat */
   | { t: number; type: 'strike'; enemy: Enemy; perfect: boolean; amount: number }
@@ -328,11 +329,13 @@ export interface SimStats {
   duets: number;
   /** highest harmony reached */
   harmonyPeak: number;
-  /** v3: solos played (perfectly timed ones), calls echoed right, chord blasts */
+  /** v3: solos played (perfectly timed ones) */
   solos: number;
   perfectSolos: number;
-  echoes: number;
-  chords: number;
+  /** v7: viradas played, all marks hit, all marks perfect */
+  viradas: number;
+  viradaFull: number;
+  viradaPerfect: number;
   /** groove: the highest level, and its sum over the bars walked (average = grooveSum / walkBars) */
   groovePeak: number;
   grooveSum: number;
@@ -365,7 +368,37 @@ export type SimAction =
   | { sub: number; a: 'power'; p: number; judged: number; hits: number }
   | { sub: number; a: 'strike'; id: number; perfect: boolean }
   | { sub: number; a: 'parry'; blow: number; q: TapQuality }
-  | { sub: number; a: 'echo' };
+  // v7: a virada cued for a journey bar, and how it went
+  | { sub: number; a: 'viradaCue'; bar: number }
+  | { sub: number; a: 'virada'; hits: number; n: number; perfects: number };
+
+/**
+ * v7: a virada (a drum fill tapped on golden marks in the world). It plays on journey bar `bar`; its
+ * strokes are the 16th steps `steps` of that bar (sim/song seconds `times`), from `start` (the bar's
+ * downbeat) to `end` (the next downbeat).
+ */
+export interface Virada {
+  /** 1… in the journey */
+  k: number;
+  bar: number;
+  level: number;
+  steps: number[];
+  times: number[];
+  start: number;
+  end: number;
+  /** cued in a breather (else: on a streak), and the movement that breather leads into (0: none) */
+  breather: boolean;
+  into: number;
+  /** the hardest fills (a legend or a boss in the fight) */
+  hard: boolean;
+  done: boolean;
+}
+
+/** a splitter bursting at the colossus' feet throws its little ones at least this far from the shell */
+const SPLIT_CLEAR = 3.5;
+
+/** bumped when the simulation changes what recorded actions mean (older checkpoints start over) */
+const SIM_REV = 7;
 
 /** Where a fallen journey can start again: the beginning of a movement's breather. */
 export interface Checkpoint {
@@ -385,7 +418,7 @@ export interface Checkpoint {
 
 /** A fingerprint of everything in a journey's data that the simulation depends on. */
 export function journeyVersion(def: JourneyDef): number {
-  return hashString(JSON.stringify([def.bars, def.speed, def.slots, def.coins, def.lives, def.towers, def.waves, def.movements, def.pickups, def.obelisks, def.boss, def.seed, def.curviness]));
+  return hashString(JSON.stringify([SIM_REV, def.bars, def.speed, def.slots, def.coins, def.lives, def.towers, def.waves, def.movements, def.pickups, def.obelisks, def.boss, def.seed, def.curviness]));
 }
 
 interface SpawnReq {
@@ -419,7 +452,7 @@ export class Journey {
   shots: Shot[] = [];
   pickups: Pickup[] = [];
   events: SimEvent[] = [];
-  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0, powerSum: 0, judged: 0, hits: 0, strikes: 0, onBeatNotes: 0, parries: 0, reflects: 0, blowsTaken: 0, bossesBeaten: 0 };
+  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, viradas: 0, viradaFull: 0, viradaPerfect: 0, groovePeak: 0, grooveSum: 0, walkBars: 0, powerSum: 0, judged: 0, hits: 0, strikes: 0, onBeatNotes: 0, parries: 0, reflects: 0, blowsTaken: 0, bossesBeaten: 0 };
   /** the colossus */
   turtle = { s: 0, x: 0, z: 0, dx: 0, dz: -1 };
   walking = false;
@@ -478,10 +511,11 @@ export class Journey {
   /** a choir's solo lifts the whole band until then */
   soloBuffUntil = 0;
   soloBuffMul = 1;
-  /** breathers whose call was echoed right */
-  private echoed = new Set<number>();
-  /** a chord blast waiting for movement `chordFor` to begin (null: none) */
-  chordFor: number | null = null;
+  /** v7: the viradas cued so far (the last ones still to play), the chain level, the virada boost */
+  viradas: Virada[] = [];
+  viradaLevel = 0;
+  viradaBoostUntil = 0;
+  viradaBoostMul = 1;
 
   constructor(readonly def: JourneyDef, bpm: number, opts: { mode?: Mode; path?: JourneyPath } = {}) {
     this.spb = 60 / bpm;
@@ -782,8 +816,10 @@ export class Journey {
         const t = this.towerAt(a.slot);
         return !!t && this.solo(t, a.q ?? (a.perfect ? 'perfect' : 'good')) !== null;
       }
-      case 'echo':
-        return this.echo() > 0;
+      case 'viradaCue':
+        return !!this.viradaCue(a.bar);
+      case 'virada':
+        return this.virada(a.hits, a.n, a.perfects);
     }
   }
 
@@ -886,28 +922,107 @@ export class Journey {
     return [start, end];
   }
 
-  /** can the Maestro's call be answered now (in a breather whose call was not echoed yet)? */
-  canEcho(): boolean {
-    if (this.outcome !== 'playing' || this.movement < 1 || this.echoed.has(this.movement)) return false;
-    // from the breather's first bar to the first bar of its movement (the last echo can end on it)
-    const m = this.movements[this.movement];
-    const jb = this.journeyBar;
-    return jb !== null && jb >= m.bar - m.rest && jb <= m.bar;
+  // ───────────────────────────── the viradas (v7) ─────────────────────────────
+
+  /** the journey bars of a breather that hold a virada */
+  private breatherVirada(vb: number): boolean {
+    for (let i = 1; i < this.movements.length; i++) {
+      const m = this.movements[i];
+      if (vb < m.bar - m.rest || vb >= m.bar) continue;
+      return VIRADA.breather.some((b) => b <= m.rest && vb === m.bar - b);
+    }
+    return false;
   }
 
-  /** The call of this breather was echoed right: bonus golden notes, and a chord for the next movement. */
-  echo(): number {
-    if (!this.canEcho()) return 0;
-    const k = this.movement;
-    this.echoed.add(k);
-    const coins = ECHO.coins + ECHO.perMovement * k;
-    this.coins += coins;
-    this.stats.earned += coins;
-    this.stats.echoes++;
-    this.chordFor = k;
-    this.log.push({ sub: this.sub, a: 'echo' });
-    this.emit({ t: this.time, type: 'echoWin', index: k, coins });
-    return coins;
+  /**
+   * Should a virada play on journey bar `vb` (asked two bars ahead, at the bar line)? In every
+   * breather; otherwise on a streak (`streak`: the player's combo or groove is high), at a phrase end,
+   * not too soon after the last one, when no creature would bite before it is over — and in a duel
+   * only in a bar the bosses rest anyway (a virada never moves their blows). The first virada of a journey that teaches it waits for the first breather.
+   */
+  viradaDue(vb: number, streak: boolean): boolean {
+    const jb = this.journeyBar;
+    if (jb === null || this.outcome !== 'playing' || !this.walking || vb !== jb + VIRADA.cueBars) return false;
+    const last = this.viradas[this.viradas.length - 1];
+    if (last && last.bar >= vb - 2) return false;
+    // a duel: only in a bar the bosses rest anyway (no blow lands in it, no tell on it or just before)
+    const start = (this.startBar! + vb) * this.barDur;
+    for (const b of this.blows) if (!b.resolved && b.t > start - this.spb * 0.5 && b.t < start + this.barDur + this.spb * 0.5) return false;
+    for (const e of this.enemies) if (e.alive && e.def.boss && BOSSES[e.kind] && e.nextAttackBar <= this.startBar! + vb) return false;
+    if (this.breatherVirada(vb)) return true;
+    if (!streak || this.inBreatherBar(vb) || (vb + 1) % VIRADA.phrase !== 0) return false;
+    if (this.def.tutorial?.includes('virada') && !this.viradas.some((v) => v.breather)) return false;
+    if (last && vb - last.bar < VIRADA.gapBars) return false;
+    // a streak's virada waits for a moment the hands are free: nothing about to bite before it is over
+    const T = this.turtle;
+    const clear = (VIRADA.cueBars + 1) * this.barDur;
+    for (const e of this.enemies) {
+      if (!e.alive || e.structure || e.def.boss || e.burrowed) continue;
+      const gap = Math.hypot(e.x - T.x, e.z - T.z) - SHELL_REACH - e.def.radius * 0.5;
+      if (gap < e.speed * clear) return false;
+    }
+    return true;
+  }
+
+  private inBreatherBar(jb: number): boolean {
+    for (let i = 1; i < this.movements.length; i++) {
+      const m = this.movements[i];
+      if (jb >= m.bar - m.rest && jb < m.bar) return true;
+    }
+    return false;
+  }
+
+  /** a virada cued for journey bar `bar` (recorded): the bosses hold their blows around it */
+  viradaCue(bar: number): Virada | null {
+    const jb = this.journeyBar;
+    if (jb === null || this.outcome !== 'playing' || bar < jb + 1 || bar > jb + 4) return null;
+    if (this.viradas.some((v) => v.bar >= bar - 2)) return null;
+    const hard = this.enemies.some((e) => e.alive && e.def.boss && !!BOSSES[e.kind]);
+    const k = this.viradas.length + 1;
+    const steps = viradaPattern(this.def.world, this.def.seed ?? 7, k, this.viradaLevel, hard);
+    const start = (this.startBar! + bar) * this.barDur;
+    const v: Virada = { k, bar, level: this.viradaLevel, steps, times: steps.map((s) => start + s * this.stepDur), start, end: start + this.barDur, breather: this.inBreatherBar(bar), into: this.inBreatherBar(bar) ? this.movementAt(bar) : 0, hard, done: false };
+    this.viradas.push(v);
+    this.log.push({ sub: this.sub, a: 'viradaCue', bar });
+    this.emit({ t: this.time, type: 'viradaCue', virada: v });
+    return v;
+  }
+
+  /** the virada still to be played (cued, not yet reported), if any */
+  viradaPending(): Virada | null {
+    for (const v of this.viradas) if (!v.done) return v;
+    return null;
+  }
+
+  /**
+   * The pending virada was played (judged by the controller): hits of n marks, perfects of them.
+   * All hit: golden notes, the virada boost on the band, the FORTÍSSIMO meter fills, and the chain
+   * grows; half or more: a few notes; with a miss the chain starts over.
+   */
+  virada(hits: number, n: number, perfects: number): boolean {
+    const v = this.viradaPending();
+    if (!v || this.outcome !== 'playing' || this.time < v.start - 1e-9) return false;
+    n = v.steps.length;
+    hits = Math.max(0, Math.min(n, hits | 0));
+    perfects = Math.max(0, Math.min(hits, perfects | 0));
+    v.done = true;
+    const r = viradaReward(this.def.world, v.level, hits, n, perfects, v.into);
+    this.stats.viradas++;
+    if (r.full) this.stats.viradaFull++;
+    if (r.perfect) this.stats.viradaPerfect++;
+    if (r.coins > 0) {
+      this.coins += r.coins;
+      this.stats.earned += r.coins;
+    }
+    if (r.boostBars > 0) {
+      this.viradaBoostUntil = Math.max(this.viradaBoostUntil, v.end + r.boostBars * this.barDur);
+      this.viradaBoostMul = r.boost;
+    }
+    if (r.ff > 0 && this.ffDropT === null) this.ff = Math.min(1, this.ff + r.ff);
+    this.viradaLevel = r.full ? Math.min(VIRADA.maxLevel, v.level + 1) : 0;
+    this.log.push({ sub: this.sub, a: 'virada', hits, n, perfects });
+    this.emit({ t: this.time, type: 'virada', virada: v, hits, n, perfects, full: r.full, perfect: r.perfect, coins: r.coins, boost: r.boost, ff: r.ff });
+    return true;
   }
 
   /** how much damage a full solo charge takes from a fighter (Infinity for musicians that do not hit) */
@@ -1047,30 +1162,6 @@ export class Journey {
       }
     }
   }
-
-  /** the chord of a right echo rings once its movement has creatures to ring at */
-  private chordCheck(jb: number, t: number) {
-    const k = this.chordFor;
-    if (k === null || this.movement < k || jb < this.movements[k].bar) return;
-    const T = this.turtle;
-    let near = 0, any = 0;
-    for (const e of this.enemies) {
-      if (!e.alive || e.structure) continue;
-      any++;
-      if (Math.hypot(e.x - T.x, e.z - T.z) <= ECHO.radius) near++;
-    }
-    if (near < ECHO.crowd && !(jb >= this.movements[k].bar + ECHO.wait && any > 0)) return;
-    this.chordFor = null;
-    this.stats.chords++;
-    const hits: number[] = [];
-    for (const e of this.enemies) {
-      if (!e.alive || e.structure || e.burrowed) continue;
-      hits.push(e.id);
-      this.damage(e, e.def.boss ? ECHO.bossFlat + e.maxHp * ECHO.bossShare : ECHO.flat + e.maxHp * ECHO.share, 'bass', null, t);
-    }
-    this.emit({ t, type: 'chord', hits });
-  }
-
 
   // ───────────────────────────── checkpoints ─────────────────────────────
 
@@ -1295,9 +1386,11 @@ export class Journey {
     }
     while (this.respawns.length && this.respawns[0].t <= t + 1e-9) {
       const r = this.respawns.shift()!;
-      const e = this.addEnemy(r.kind, r.x, r.z, r.hp, r.wave, t, r.elite, true);
+      const c = this.clearOfShell(r.x, r.z);
+      const e = this.addEnemy(r.kind, c.x, c.z, r.hp, r.wave, t, r.elite, true);
+      e.kx += c.kx;
+      e.kz += c.kz;
       this.emit({ t, type: 'echo', enemy: e });
-
     }
     // towers follow the shell
     const tmp = { x: 0, z: 0 };
@@ -1391,7 +1484,6 @@ export class Journey {
         const g = SOLO.perBar * (1 + (SOLO.powerCharge * this.power) / 100);
         for (const tw of this.towers) if (!tw.muted) this.chargeSolo(tw, g, t);
       }
-      this.chordCheck(jb, t);
     }
     // economy (only once the journey is under way)
     if (this.walking && this.outcome === 'playing') {
@@ -1649,7 +1741,7 @@ export class Journey {
   }
 
   private towerMul(tw: Tower, t: number): number {
-    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1) * powerMul(this.power) * (1 + CRESCENDO.damage * this.crescendo) * (t < this.soloBuffUntil ? this.soloBuffMul : 1);
+    return tw.buff * this.harmonyMul * (t < this.ffBoostUntil ? 1.5 : 1) * powerMul(this.power) * (1 + CRESCENDO.damage * this.crescendo) * (t < this.soloBuffUntil ? this.soloBuffMul : 1) * (t < this.viradaBoostUntil ? this.viradaBoostMul : 1);
   }
 
   private towerStep(tw: Tower, k: number, t: number) {
@@ -1949,6 +2041,19 @@ export class Journey {
     if (e.hp <= 0.0001) this.kill(e, t, tw);
   }
 
+  /**
+   * Where a creature born at the colossus' feet (a splitter's little ones, an Echo coming back) really
+   * appears: thrown clear of the shell, with a push outward — never a bite nobody could stop.
+   */
+  private clearOfShell(x: number, z: number): { x: number; z: number; kx: number; kz: number } {
+    const T = this.turtle;
+    const d = Math.hypot(x - T.x, z - T.z);
+    const min = SHELL_REACH + SPLIT_CLEAR;
+    if (d >= min) return { x, z, kx: 0, kz: 0 };
+    const ux = d > 1e-6 ? (x - T.x) / d : T.dx, uz = d > 1e-6 ? (z - T.z) / d : T.dz;
+    return { x: T.x + ux * min, z: T.z + uz * min, kx: ux * STRIKE.push, kz: uz * STRIKE.push };
+  }
+
   private kill(e: Enemy, t: number, tw: Tower | null) {
     if (!e.alive) return;
     e.alive = false;
@@ -1965,9 +2070,12 @@ export class Journey {
       this.blows = this.blows.filter((b) => !b.resolved);
     }
     if (e.def.split) {
+      const c = this.clearOfShell(e.x, e.z);
       for (let i = 0; i < e.def.split.count; i++) {
         const a = (i / e.def.split.count) * Math.PI * 2;
-        this.addEnemy(e.def.split.kind, e.x + Math.cos(a) * 0.9, e.z + Math.sin(a) * 0.9, 1, e.wave, t);
+        const o = this.addEnemy(e.def.split.kind, c.x + Math.cos(a) * 0.9, c.z + Math.sin(a) * 0.9, 1, e.wave, t);
+        o.kx += c.kx;
+        o.kz += c.kz;
       }
     }
     // an Echo comes back once, weaker, one bar later
@@ -2040,6 +2148,8 @@ export class Journey {
       if (bar % 2 === 0 && e !== who) e.invulnUntil = Math.max(e.invulnUntil, t + this.barDur - 1e-6);
     }
     if (!who) return;
+    // a virada is cued: no tell in its bar, no blows landing in it (the boss waits a bar or two)
+    if (this.startBar !== null && this.viradas.some((v) => !v.done && (bar - this.startBar! === v.bar || bar - this.startBar! === v.bar - 1))) return;
     const spec = BOSSES[who.kind]!;
     if (who.burrowed) {
       // the dune worm surfaces to strike
@@ -2307,7 +2417,7 @@ export class Journey {
     const r = (v: number) => Math.round(v * 1e6) / 1e6;
     const en = this.enemies.filter((e) => e.alive).map((e) => `${e.id}:${e.kind}:${r(e.x)},${r(e.z)}:${r(e.hp)}`).join('|');
     const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}:${r(t.solo)}${t.soloFrom >= 0 ? 's' : ''}`).join('|');
-    return `bl${this.blows.length} pa${this.stats.parries} bt${this.stats.blowsTaken} pw${this.power} cr${this.crescendo} st${this.stats.strikes} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
+    return `bl${this.blows.length} pa${this.stats.parries} bt${this.stats.blowsTaken} pw${this.power} cr${this.crescendo} st${this.stats.strikes} v${this.stats.viradas}/${this.stats.viradaFull}/${this.viradaLevel} vb${r(this.viradaBoostUntil)} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
   }
 
   private dist2(a: { x: number; z: number }, b: { x: number; z: number }) {

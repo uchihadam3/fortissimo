@@ -16,16 +16,23 @@
  * which is the view clock (what you hear), so a tap right on a beat you hear is a perfect one,
  * whatever the device's output latency. The tap itself sounds on the grid point it was judged
  * against (the audio engine's request), so the player's percussion always lands in the music. Only what comes of the taps reaches the simulation, as recorded actions
- * (`setPower`, `solo`, `collect`, `strike`, `echo`), so replays and checkpoints stay exact.
+ * (`setPower`, `solo`, `collect`, `strike`, `parry`, `viradaCue`, `virada`), so replays and checkpoints stay exact.
  *
  * v4, everything on the beat: the baton (or any empty spot of the screen), the golden notes, the
  * creatures (the colossus strikes them), the glowing musicians (always their solo: weaker off the
- * beat) and the Maestro's echo all go through one judge and feed one power meter.
+ * beat) and the viradas all go through one judge and feed one power meter.
  *
  * v5, the duel: bosses wind up blows on the beat (red marks close in on the baton; singers and
  * legends play the rhythm a bar ahead). A tap on the landing beat (baton, empty ground or the boss)
  * parries: perfect reflects it, good blocks it; the parry is recorded (`Journey.parry`). Unparried,
  * the blow lands — softened by the golden shield of sound that the power meter raises.
+ *
+ * v7, the viradas (docs/DESIGN-v7.md): on a streak (cued two bars ahead, at a phrase end) and in every
+ * breather, golden marks appear in the world around the colossus; each one's ring closes on a stroke of
+ * the fill and the player taps it there (judged like any tap, as heard). How it went is recorded
+ * (`Journey.virada`): a full virada brings a power jump, golden notes, the virada boost and FORTÍSSIMO.
+ * A boss that calls (the singers, the legends) lights its own marks first; the player answers them on
+ * the beats of its blows (the parry).
  */
 import * as THREE from 'three';
 import { audio } from './sound';
@@ -38,8 +45,9 @@ import { Hud } from '../ui/hud';
 import type { BandMix, SongClock } from '../audio/api';
 import { JourneyTutorial } from './journeyTutorial';
 import { ICON } from '../ui/icons';
-import { Power, RHYTHM, CRESCENDO, callBars, callPattern, grooveOf, powerMul, quality, type TapQuality, type TapTarget } from '../sim/rhythm';
-import type { Enemy, Blow } from '../sim/journey';
+import { Power, RHYTHM, CRESCENDO, VIRADA, grooveOf, powerMul, quality, viradaReward, type TapQuality } from '../sim/rhythm';
+import type { Enemy, Blow, Virada } from '../sim/journey';
+import { MarkSet, placeMarks, worldAt } from '../view/virada';
 import { BOSSES, DUEL, parryQuality, shieldOf } from '../sim/bosses';
 import { LEGEND_HEIGHT, type LegendKind } from '../view/legends';
 import { ENEMY_SCALE } from '../sim/defs';
@@ -92,23 +100,17 @@ const DUET_COLOR = new Map(DUETS.map((d) => [d.id, d.color]));
 /** the groove's colours (baton, sparks on the shell) */
 const GROOVE_COLOR = ['#fff2c2', '#ffd36b', '#ffb347', '#ff7ab8', '#9fe8ff'];
 
-/** one of the Maestro's calls in a breather, and the player's echo of it (sim/song seconds) */
-interface Call {
-  k: number;
-  attempt: number;
-  callStart: number;
-  echoStart: number;
-  pattern: number[];
-  /** when the Maestro plays each note, and when each echo is due */
-  notes: number[];
-  targets: number[];
-  /** per note: 0 waiting · 2 to echo · 3 echoed right · 4 wrong */
-  states: number[];
-  scheduled: boolean;
-  matched: number;
-  wrong: number;
-  taps: number;
-  won: boolean;
+/** a virada being played: its marks (placed when they are about to show) and how each went */
+interface ViradaRun {
+  v: Virada;
+  set: MarkSet | null;
+  res: (TapQuality | null)[];
+}
+
+/** a boss's call drawn in the world: its marks, one per blow */
+interface CallRun {
+  set: MarkSet;
+  blows: Blow[];
 }
 
 /** a charged musician's glow on the shell */
@@ -167,7 +169,11 @@ export class JourneyBattle {
   private shieldFlash = 0;
   private bossCine = -1;
   private tellBeat = -1;
-  private calls: Call[] = [];
+  /** v7: the virada being played, the boss calls drawn in the world, sets fading out */
+  private vir: ViradaRun | null = null;
+  private callRuns: CallRun[] = [];
+  private fading: MarkSet[] = [];
+  private cueBar = -1;
   private glows = new Map<number, Glow>();
   private soloEnds = new Map<number, number>();
   private soloCineUntil = -1;
@@ -367,6 +373,8 @@ export class JourneyBattle {
 
   tap(x: number, y: number, ts?: number) {
     if (this.paused || this.ended || this.cardOpen) return;
+    // a virada's mark (or a boss's call) under the finger comes first
+    if (this.viradaTap(x, y, ts)) return;
     const ndcX = (x / window.innerWidth) * 2 - 1, ndcY = -(y / window.innerHeight) * 2 + 1;
     const p = this.view.pick(ndcX, ndcY);
     if (p) {
@@ -592,11 +600,6 @@ export class JourneyBattle {
     const heard = this.heardAt(ts);
     this.tutorial?.notify('baton');
     if (this.tryParry(heard, x, y)) return;
-    const c = this.echoCall(heard);
-    if (c) {
-      this.echoTap(c, heard, x, y);
-      return;
-    }
     const r = this.power.tap(heard, this.sim.spb, 'baton');
     audio.beatTap(this.soundAt(r.at, r.q), r.q, x === undefined ? -0.35 : (x / window.innerWidth) * 1.4 - 0.7);
     this.judged(r.q, r.at, x, y);
@@ -1059,71 +1062,246 @@ export class JourneyBattle {
     }
   }
 
-  // ───────────────────────────── the Maestro's call & response ─────────────────────────────
+  // ───────────────────────────── the viradas (v7) ─────────────────────────────
 
-  /** a breather begins: the Maestro will call (once or twice) and wait for the echo */
-  private scheduleCalls(k: number, bars: number, t: number) {
+  /** at every bar line (as the simulation reaches it): a virada two bars ahead, on a streak or in a breather */
+  private cueVirada() {
     const s = this.sim;
-    const eighth = s.spb / 2;
-    callBars(bars).forEach((cb, attempt) => {
-      const callStart = t + cb * s.barDur;
-      const echoStart = callStart + s.barDur;
-      const pattern = callPattern(this.def.world, this.def.seed ?? 7, k, attempt);
-      this.calls.push({
-        k, attempt, callStart, echoStart, pattern,
-        notes: pattern.map((p) => callStart + p * eighth), targets: pattern.map((p) => echoStart + p * eighth),
-        states: [0, 0, 0, 0], scheduled: false, matched: 0, wrong: 0, taps: 0, won: false,
-      });
+    const jb = s.journeyBar;
+    if (jb === null || jb === this.cueBar || this.ended) return;
+    this.cueBar = jb;
+    const streak = this.power.combo >= VIRADA.combo || this.power.level >= VIRADA.groove;
+    const vb = jb + VIRADA.cueBars;
+    if (s.viradaDue(vb, streak) && s.viradaCue(vb)) this.consume(s.drain());
+  }
+
+  /** a virada is cued: the music makes room for the fill; its marks come a beat or so before it */
+  private startVirada(v: Virada) {
+    if (this.vir?.v === v) return;
+    if (this.vir && !this.vir.v.done) this.reportVirada(this.lastVt);
+    audio.viradaCue(this.ctx(v.times[0]), this.ctx(v.end), v.steps.length, v.level);
+    this.vir = { v, set: null, res: v.steps.map(() => null) };
+  }
+
+  /** the colossus (where the marks are anchored) */
+  private colossusAnchor = () => this.view.turtle.group.position;
+
+  /** where a virada's marks go now: spread over the free screen, as world points around the colossus */
+  private layoutVirada(v: Virada) {
+    // clear of the HUD and of a boss's call still showing
+    const pts = placeMarks(v.times.length, [...this.hud.avoidRects(), ...this.callRuns.flatMap((c) => c.set.rects())], { seed: v.k + (this.def.seed ?? 7) });
+    const anchor = this.colossusAnchor().clone();
+    const heart = this.view.turtle.heartWorld(new THREE.Vector3());
+    return worldAt(this.view, pts, heart).map((w, i) => ({ off: w.sub(anchor), x: pts[i].x, y: pts[i].y }));
+  }
+
+  private placeVirada(r: ViradaRun) {
+    const v = r.v;
+    r.set = new MarkSet(this.hud.viradaEl, 'gold', v.times, this.colossusAnchor, this.layoutVirada(v), VIRADA.lead * this.sim.spb, null, v.level);
+  }
+
+  /** a boss's call: around the boss on screen, as world points that travel with the colossus (and the camera) */
+  private layoutCall(e: Enemy, n: number) {
+    const ev = this.view.enemies.get(e.id);
+    const bp = ev ? ev.bossPoint(new THREE.Vector3()) : new THREE.Vector3(e.x, 3, e.z);
+    const sc = this.view.screen(bp);
+    const around = sc.behind ? undefined : { x: sc.x, y: sc.y };
+    const pts = placeMarks(n, this.hud.avoidRects(), { seed: e.attacks, around });
+    const anchor = this.colossusAnchor().clone();
+    return worldAt(this.view, pts, bp, 0.96).map((w, i) => ({ off: w.sub(anchor), x: pts[i].x, y: pts[i].y }));
+  }
+
+  /** every few frames: a set whose marks the camera pushed off screen or under the HUD is laid out again */
+  private relayout(vt: number) {
+    if (vt < this.relayoutAt) return;
+    this.relayoutAt = vt + 0.3;
+    const avoid = this.hud.avoidRects();
+    const r = this.vir;
+    if (r?.set && vt >= r.set.from && r.set.bad(avoid)) r.set.move(this.layoutVirada(r.v).map((p) => p.off));
+    for (const c of this.callRuns) if (vt >= c.set.from && c.set.bad(avoid)) c.set.move(this.layoutCall(c.blows[0].enemy, c.blows.length).map((p) => p.off));
+  }
+  private relayoutAt = 0;
+
+  /** a boss calls (it plays the rhythm of its blows a bar ahead): its marks light up in the world, the player answers */
+  private startCall(e: Enemy, tells: number[], blows: Blow[]) {
+    if (!this.view.enemies.get(e.id) || !blows.length) return;
+    const lit = blows.map((_, i) => tells[i] ?? -1);
+    const set = new MarkSet(this.hud.viradaEl, 'boss', blows.map((b) => b.t), this.colossusAnchor, this.layoutCall(e, blows.length), this.sim.barDur, lit, 0);
+    this.callRuns.push({ set, blows });
+  }
+
+  /** a tap on a mark: true when it was one (judged like any tap, against the mark's stroke) */
+  private viradaTap(x: number, y: number, ts?: number): boolean {
+    if (this.paused || this.ended || this.cardOpen) return false;
+    // a boss's call: tapping its mark on the beat is the parry
+    for (const c of this.callRuns) {
+      if (!c.set.at(x, y).length) continue;
+      if (this.tryParry(this.heardAt(ts), x, y)) return true;
+    }
+    const r = this.vir;
+    if (!r?.set || r.v.done) return false;
+    const heard = this.heardAt(ts);
+    const v = r.v;
+    const cand = r.set.at(x, y).filter((i) => r.res[i] === null && Math.abs(heard - v.times[i]) <= 0.3);
+    if (!cand.length) return false;
+    cand.sort((a, b) => Math.abs(heard - v.times[a]) - Math.abs(heard - v.times[b]));
+    const i = cand[0];
+    const q = quality(heard - v.times[i]);
+    this.power.lastTap = heard;
+    this.power.judge(q);
+    this.markResult(r, i, q, x);
+    this.judged(q, v.times[i], x, y);
+    return true;
+  }
+
+  /** mark i of the virada played (or passed): its stroke, its burst, a note flying to the band */
+  private markResult(r: ViradaRun, i: number, q: TapQuality, x?: number) {
+    const v = r.v;
+    const n = v.times.length;
+    r.res[i] = q;
+    const set = r.set;
+    const sx = x ?? set?.marks[i]?.x ?? window.innerWidth / 2;
+    const pan = Math.max(-0.8, Math.min(0.8, (sx / window.innerWidth) * 1.6 - 0.8));
+    audio.viradaHit(i, n, this.soundAt(v.times[i], q), q, pan);
+    if (!set) return;
+    if (q === 'miss') {
+      set.miss(i);
+      return;
+    }
+    set.hit(i, q === 'perfect');
+    const w = set.world(i);
+    const fx = this.view.fx;
+    fx.burst(w, '#ffd36b', q === 'perfect' ? 26 : 16, 3.4, 0.2, 0.6);
+    fx.flash(w, q === 'perfect' ? 1.8 : 1.3, '#fff1c2', 0.22);
+    const heart = () => {
+      const h = this.view.turtle.heartWorld(new THREE.Vector3());
+      return h.setY(h.y + 1);
+    };
+    fx.shoot('note', w, heart, this.lastVt, this.lastVt + 0.5, '#ffd36b');
+    this.later(this.lastVt + 0.5, () => {
+      for (const tv of this.view.towers.values()) tv.pulse();
     });
   }
 
-  /** the call whose echo bar a tap heard at `heard` falls in */
-  private echoCall(heard: number): Call | null {
-    const c = this.calls[0];
-    if (!c || c.won) return null;
-    return heard >= c.echoStart - RHYTHM.good && heard <= c.echoStart + this.sim.barDur + RHYTHM.good ? c : null;
+  /** every frame: marks that pass unhit are misses; when all are played, the virada is told to the simulation */
+  private updateVirada(vt: number) {
+    const s = this.sim;
+    // a virada cued before a checkpoint (or before a slow frame) that has no marks yet
+    const pend = s.viradaPending();
+    if (pend && (!this.vir || this.vir.v !== pend) && !this.ended) {
+      if (pend.times[0] - vt < 0.25) {
+        s.virada(0, pend.steps.length, 0);
+        this.consume(s.drain());
+      } else this.startVirada(pend);
+    }
+    const project = (w: THREE.Vector3) => this.view.screen(w);
+    const r = this.vir;
+    if (r && !this.ended) {
+      const v = r.v;
+      if (!r.set && vt >= v.times[0] - VIRADA.lead * s.spb - 0.3) this.placeVirada(r);
+      r.set?.update(vt, project);
+      if (!this.paused) {
+        for (let i = 0; i < v.times.length; i++) {
+          if (r.res[i] !== null || vt <= v.times[i] + RHYTHM.good + 0.06) continue;
+          this.power.lastTap = Math.max(this.power.lastTap, v.times[i]);
+          this.power.judge('miss');
+          this.markResult(r, i, 'miss');
+          const m = r.set?.marks[i];
+          this.judged('miss', v.times[i], m?.x, m?.y);
+        }
+        if (r.res.every((q) => q !== null)) this.reportVirada(vt);
+      }
+    }
+    // the bosses' calls: each mark follows its blow (parried: it bursts gold; landed: it goes grey)
+    for (const c of this.callRuns) {
+      c.blows.forEach((b, i) => {
+        if (c.set.marks[i].state !== 0) return;
+        if (b.q === 'perfect' || b.q === 'good') c.set.hit(i, b.q === 'perfect');
+        else if (b.resolved || vt > b.t + 0.32 || !b.enemy.alive) c.set.miss(i);
+      });
+      c.set.update(vt, project, () => {
+        const ev = this.view.enemies.get(c.blows[0].enemy.id);
+        if (ev) this.view.fx.burst(ev.bossPoint(new THREE.Vector3()), '#ff5a8a', 10, 2.4, 0.18, 0.4);
+      });
+      if (c.set.next() < 0 && c.set.until === Infinity) {
+        c.set.finish(vt, c.blows.every((b) => b.q === 'perfect' || b.q === 'good'));
+        this.fading.push(c.set);
+      }
+    }
+    this.callRuns = this.callRuns.filter((c) => !c.set.over && c.set.until === Infinity);
+    if (!this.ended) this.relayout(vt);
+    for (const f of this.fading) f.update(vt, project);
+    this.fading = this.fading.filter((f) => !f.over);
   }
 
-  private echoTap(c: Call, heard: number, x?: number, y?: number) {
-    c.taps++;
-    this.power.lastTap = heard;
-    const n = c.matched;
-    if (n >= 4) {
-      c.wrong++;
-      audio.echoNote(3, this.soundAt(heard, 'miss'), false);
-      this.judged('miss', heard, x, y);
-      return;
+  /** the virada is over: what came of it (recorded), its sound on the downbeat */
+  private reportVirada(vt: number) {
+    const r = this.vir;
+    if (!r || r.v.done) return;
+    const v = r.v;
+    const n = v.times.length;
+    let hits = 0, perfects = 0;
+    for (const q of r.res) {
+      if (q === 'perfect' || q === 'good') hits++;
+      if (q === 'perfect') perfects++;
     }
-    const d = heard - c.targets[n];
-    const q = quality(d);
-    if (q !== 'miss') {
-      c.states[n] = 3;
-      c.matched++;
-      audio.echoNote(n, this.soundAt(c.targets[n], q), true);
-    } else {
-      c.states[n] = 4;
-      c.wrong++;
-      audio.echoNote(n, this.soundAt(c.targets[n], 'miss'), false);
+    const rw = viradaReward(this.def.world, v.level, hits, n, perfects, v.into);
+    if (rw.power > 0) this.power.power = Math.min(100, this.power.power + rw.power);
+    this.syncPower();
+    if (this.sim.virada(hits, n, perfects)) this.consume(this.sim.drain());
+    audio.viradaEnd(this.ctx(v.end), hits, n, rw.perfect);
+    if (r.set) {
+      r.set.finish(vt, rw.full);
+      this.fading.push(r.set);
     }
-    this.judged(q, c.targets[n], x, y);
-    if (c.matched === 4 && c.wrong === 0) {
-      c.won = true;
-      audio.echoResult(true);
-      this.hud.maestroResult(true);
-      if (this.sim.echo() > 0) this.consume(this.sim.drain());
-      this.tutorial?.notify('echo');
-    }
+    this.vir = null;
+    if (hits * 2 >= n) this.tutorial?.notify('virada');
   }
 
-  /** is the Maestro calling (or waiting for the echo) right now? (the glove) */
-  maestro(): { echo: boolean; next: number | null } | null {
-    const c = this.calls[0];
-    if (!c || c.won) return null;
-    const vt = this.lastVt;
-    if (vt < c.callStart - this.sim.barDur * 0.5) return null;
-    const echo = vt >= c.echoStart - 0.2;
-    const next = echo ? c.targets[c.matched] ?? null : null;
-    return { echo, next };
+  /** the next mark to tap (the glove), or null */
+  viradaGuide(): { x: number; y: number; t: number } | null {
+    const r = this.vir;
+    if (!r?.set) return null;
+    const i = r.set.next();
+    const m = i >= 0 ? r.set.marks[i] : null;
+    if (!m || !m.visible || this.lastVt < r.set.from) return null;
+    return { x: m.x, y: m.y, t: m.t };
+  }
+
+  /** the screen rects of the marks showing now (for checks) */
+  viradaRects(): { left: number; top: number; right: number; bottom: number }[] {
+    return [...(this.vir?.set ? [this.vir.set] : []), ...this.callRuns.map((c) => c.set)].flatMap((st) => st.rects());
+  }
+
+  /** a full virada: a golden shock ring from the colossus, the band flares, a shower of notes */
+  private viradaFx(ev: Extract<SimEvent, { type: 'virada' }>) {
+    const v = this.view;
+    const tp = v.turtle.group.position;
+    const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.3, tp.z);
+    const heart = v.turtle.heartWorld(new THREE.Vector3());
+    if (ev.coins > 0) {
+      const sc = v.screen(heart);
+      if (!sc.behind) {
+        this.hud.flyCoins(sc.x, sc.y - 30, Math.min(10, Math.ceil(ev.coins / 3)));
+        this.hud.floatNum(sc.x + 30, sc.y - 70, `+${ev.coins}`);
+      }
+    }
+    if (!ev.full) return;
+    const big = ev.perfect ? 1.25 : 1;
+    v.fx.ring(g, 30 * big, '#ffd36b', 1.1, 0.12);
+    v.fx.ring(g, 18 * big, '#fff1c2', 0.8, 0.08);
+    v.fx.flash(heart, 4.5 * big, '#fff1c2', 0.4);
+    v.fx.burst(heart, '#ffd36b', Math.round(70 * big), 6, 0.3, 1.3, true, -0.8);
+    for (const tv of v.towers.values()) {
+      const wp = tv.group.getWorldPosition(new THREE.Vector3());
+      v.fx.burst(wp.setY(wp.y + 1.6), '#ffe9a8', 16, 2.6, 0.18, 0.8, true, -1);
+      tv.pulse();
+    }
+    v.punch = 1.6;
+    v.ffGlow = 1;
+    v.shake(0.4 * big);
+    this.hud.kick(1);
+    if (ev.perfect) v.bloomWave({ x: tp.x, z: tp.z });
   }
 
   /** the glove's press for tapping at `t` (song seconds on the view clock): down right on it */
@@ -1138,44 +1316,6 @@ export class JourneyBattle {
   beatPress(): number {
     const spb = this.sim.spb;
     return this.pressAt(Math.round(this.lastVt / spb) * spb);
-  }
-
-  private updateCalls(vt: number) {
-    const s = this.sim;
-    // calls of a breather already answered, or whose time has passed, are dropped
-    while (this.calls.length) {
-      const c = this.calls[0];
-      // (a little grace: a tap that came in during a slow frame is still heard)
-      const over = vt > c.echoStart + s.barDur + RHYTHM.good + 0.25;
-      if (!over && !(c.won && vt > c.echoStart + s.barDur)) break;
-      if (!c.won && c.taps > 0) {
-        audio.echoResult(false);
-        this.hud.maestroResult(false);
-      }
-      this.calls.shift();
-      if (c.won) this.calls = this.calls.filter((x) => x.k !== c.k);
-    }
-    const c = this.calls[0];
-    if (!c || this.ended) {
-      this.hud.setMaestro(null);
-      return;
-    }
-    // the Maestro's notes are scheduled a little ahead, at their exact time on the grid
-    if (!c.scheduled && s.time >= c.callStart - 0.35) {
-      c.scheduled = true;
-      c.notes.forEach((t, i) => audio.callNote(i, this.ctx(t)));
-    }
-    if (vt < c.callStart - s.barDur * 0.75) {
-      this.hud.setMaestro(null);
-      return;
-    }
-    const echo = vt >= c.echoStart - 0.05;
-    const states = c.notes.map((t, i) => {
-      if (echo || c.won) return c.states[i] || 2;
-      return vt >= t - 0.02 && vt < t + 0.2 ? 1 : vt >= t + 0.2 ? 2 : 0;
-    });
-    const head = echo ? (vt - c.echoStart) / s.barDur : (vt - c.callStart) / s.barDur;
-    this.hud.setMaestro({ pattern: c.pattern, states, head: head >= 0 && head <= 1 ? head : -1, echo });
   }
 
   private journeyTime(): number {
@@ -1253,6 +1393,7 @@ export class JourneyBattle {
       if (target > this.sim.time) {
         this.sim.advance(target);
         this.consume(this.sim.drain());
+        this.cueVirada();
       }
     }
     const vt = this.paused ? this.lastVt : Math.max(this.lastVt, song - lat - this.offset);
@@ -1319,7 +1460,7 @@ export class JourneyBattle {
       if (!this.ended) this.view.cine = null;
     }
     this.updateGlows(vt, u);
-    this.updateCalls(vt);
+    this.updateVirada(vt);
     this.updateDuel(vt, 1 / 60, u);
   }
 
@@ -1430,6 +1571,11 @@ export class JourneyBattle {
           for (const b of ev.blows) audio.bossTell(this.ctx(b.t), pan, true);
           const e = ev.enemy;
           const beats = Math.round((ev.blows[0].t - ev.t) / this.sim.spb);
+          // a boss that calls: its rhythm lights marks in the world (the player answers them)
+          if (ev.call) {
+            const tells = ev.tells, blows = ev.blows;
+            this.later(ev.t - 0.3, () => !this.ended && this.startCall(e, tells, blows));
+          }
           this.later(ev.t, () => this.view.enemies.get(e.id)?.bossAct('tell', beats));
           // each blow lands on its beat: the boss strikes (unless it was parried right then)
           for (const b of ev.blows) this.later(b.t + 0.13, () => {
@@ -1538,7 +1684,6 @@ export class JourneyBattle {
           break;
         }
         case 'breather':
-          this.scheduleCalls(ev.index, ev.bars, ev.t);
           if (this.intensity > 0 && this.sim.aliveCount() < 4) {
             this.intensity = 0;
             audio.setIntensity(0);
@@ -1594,41 +1739,13 @@ export class JourneyBattle {
           });
           break;
         }
-        case 'echoWin': {
-          const coins = ev.coins;
-          this.later(ev.t, () => {
-            const b = this.hud.batonCenter();
-            if (b) {
-              this.hud.flyCoins(b.x, b.y - 60, Math.min(8, Math.ceil(coins / 6)));
-              this.hud.floatNum(b.x + 40, b.y - 90, `+${coins}`);
-            }
-            const heart = this.view.turtle.heartWorld(new THREE.Vector3());
-            this.view.fx.burst(heart, '#7dff9a', 40, 4, 0.22, 1);
-            this.view.fx.ring(heart.clone().setY(this.view.land.heightAt(heart.x, heart.z) + 0.3), 12, '#ffd36b', 0.9, 0.05);
-          });
+        // ── v7: the viradas ──
+        case 'viradaCue':
+          this.startVirada(ev.virada);
           break;
-        }
-        case 'chord': {
-          // the Maestro's chord: the choir and the low strings at once, on everything around
-          audio.towerShot('choir', 2, at, 0, 97);
-          audio.impact('bass', at, 0, ev.hits.length);
-          this.later(ev.t, () => {
-            const v = this.view;
-            const tp = v.turtle.group.position;
-            const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.3, tp.z);
-            v.fx.ring(g, 34, '#7dff9a', 1.2, 0.06);
-            v.fx.ring(g, 22, '#ffd36b', 0.9, 0.05);
-            v.fx.flash(g.clone().setY(g.y + 4), 4, '#fff1c2', 0.35);
-            for (const id of ev.hits) {
-              const e = v.enemies.get(id);
-              if (e) v.fx.burst(e.pos.clone().setY(e.pos.y + 1.2), '#ffe9a8', 10, 3, 0.2, 0.5);
-            }
-            v.shake(0.5);
-            v.punch = 1.2;
-            this.hud.kick(1);
-          });
+        case 'virada':
+          this.later(ev.t, () => this.viradaFx(ev));
           break;
-        }
       }
     }
     this.view.push(events);
@@ -1679,6 +1796,8 @@ export class JourneyBattle {
     const ffOn = !!this.def.ff;
     this.hud.setFF(s.ffDropT !== null ? 1 : s.ff, s.ffReady(), s.ffDropT !== null || vt < s.ffBoostUntil, ffOn);
     for (const tv of this.view.towers.values()) tv.boosted = vt < s.ffBoostUntil;
+    // the virada boost: the plates of the shell glow gold while it lasts
+    this.view.viradaBoost = vt < s.viradaBoostUntil ? Math.min(1, (s.viradaBoostUntil - vt) / s.barDur) : 0;
     // music intensity (calm in the breathers)
     if (!this.ended) {
       const alive = s.aliveCount();
@@ -1751,7 +1870,10 @@ export class JourneyBattle {
     }
     this.hud.rhythmSummary(this.sim.accuracy, this.sim.stats.judged, this.power.best, this.sim.crescendo, this.sim.movements.length);
     this.soloCineUntil = -1;
-    this.calls = [];
+    this.vir?.set?.dispose();
+    this.vir = null;
+    for (const c of this.callRuns) c.set.dispose();
+    this.callRuns = [];
     this.deselect();
     this.hud.showGo(false);
     const checkpoint = outcome === 'defeat' ? this.sim.checkpoint() : null;

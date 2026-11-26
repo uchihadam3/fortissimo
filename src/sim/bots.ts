@@ -11,18 +11,20 @@
  * v4: any bot can also play the rhythm (`rhythm`, 0…1): on every beat it taps something — a
  * creature close to the colossus, a golden note, a glowing musician, or the baton — with a timing
  * that grows with its skill (miss chance 0.35 × (1 − skill)^1.5, the rest perfect with chance
- * skill^1.3), feeding the same power meter as the player; it echoes the Maestro's calls when its
- * four taps land. Without rhythm a bot's notes are taken off the beat most of the time (as a
+ * skill^1.3), feeding the same power meter as the player; it plays the viradas (each mark with
+ * the same timing; meanwhile its hands are busy).
+ * - flawless: the good bot with a perfect rhythm, a strike every beat (every eighth from groove 3) on
+ *           the creature that would bite soonest, every blow parried, every virada hit. Without rhythm a bot's notes are taken off the beat most of the time (as a
  * player tapping at random would). The novice plays with a shaky rhythm (0.3) by default.
  */
-import { Journey, type JourneyDef, type Mode, type SimEvent, type Tower } from './journey';
+import { Journey, type Enemy, type JourneyDef, type Mode, type SimEvent, type Tower } from './journey';
 import { ENEMIES, SONGS, TOWERS, SECTION_OF, duetOf, type EnemyKind, type TowerKind } from './defs';
-import { SLOTS, SLOT_NEIGHBOURS } from './shell';
-import { Power, callBars, type TapQuality } from './rhythm';
+import { SLOTS, SLOT_NEIGHBOURS, SHELL_REACH } from './shell';
+import { Power, RHYTHM, VIRADA, viradaReward, type TapQuality } from './rhythm';
 import { DUEL } from './bosses';
 import { Rng } from '../core/rng';
 
-export type BotKind = 'good' | 'novice' | 'spam';
+export type BotKind = 'good' | 'novice' | 'spam' | 'flawless';
 
 export interface BotResult {
   j: Journey;
@@ -270,28 +272,42 @@ class BotRhythm {
   readonly power = new Power();
   private rng: Rng;
   private beat = -1;
-  private tried = new Set<string>();
+  private cueBar = -1;
+  private marks = { n: 0, hits: 0, perfects: 0 };
   private parried = new Set<number>();
   private blowsSeen = 0;
   private readonly missP: number;
   private readonly perfectP: number;
-  constructor(private j: Journey, private skill: number, private reach: number) {
-    this.rng = new Rng(((j.def.seed ?? 7) * 7907 + Math.round(skill * 1000)) >>> 0);
+  private eighth = -1;
+  constructor(private j: Journey, private skill: number, private reach: number, private flawless = false, salt = 0) {
+    this.rng = new Rng(((j.def.seed ?? 7) * 7907 + Math.round(skill * 1000) + salt * 104729) >>> 0);
     this.missP = 0.35 * Math.pow(1 - skill, 1.5);
     this.perfectP = Math.pow(skill, 1.3);
   }
   private quality(): TapQuality {
+    if (this.flawless) return 'perfect';
     if (this.rng.next() < this.missP) return 'miss';
     return this.rng.next() < this.perfectP ? 'perfect' : 'good';
   }
   step() {
     const j = this.j;
     if (!j.started || j.outcome !== 'playing') return;
-    const b = Math.floor(j.time / j.spb + 1e-9);
-    if (this.beat < 0) this.beat = b;
-    while (this.beat < b) {
-      this.beat++;
-      this.tap();
+    if (this.flawless) {
+      // every beat, and every eighth from groove 3 (as the baton counts them)
+      const e8 = Math.floor(j.time / (j.spb / 2) + 1e-9);
+      if (this.eighth < 0) this.eighth = e8;
+      while (this.eighth < e8) {
+        this.eighth++;
+        if (this.onMarks(this.eighth * (j.spb / 2))) continue;
+        if (this.eighth % 2 === 0 || this.power.level >= RHYTHM.eighthsFrom) this.tapFlawless();
+      }
+    } else {
+      const b = Math.floor(j.time / j.spb + 1e-9);
+      if (this.beat < 0) this.beat = b;
+      while (this.beat < b) {
+        this.beat++;
+        if (!this.onMarks(this.beat * j.spb)) this.tap();
+      }
     }
     // a boss's blow on its beat: parried as well as the hands allow (the tap feeds the meter)
     for (const bl of j.blows) {
@@ -309,24 +325,37 @@ class BotRhythm {
       this.blowsSeen = j.stats.blowsTaken;
       this.sync();
     }
-    // the Maestro's call: after each echo bar of a breather, echoed right when its four taps land
-    if (j.canEcho()) {
-      const m = j.movements[j.movement];
-      const jb = j.journeyBar ?? 0;
-      callBars(m.rest).forEach((cb, i) => {
-        const key = `${j.movement}:${i}`;
-        if (this.tried.has(key) || jb < m.bar - m.rest + cb + 2) return;
-        this.tried.add(key);
-        let ok = true;
-        for (let k = 0; k < 4; k++) {
-          const q = this.quality();
-          this.power.judge(q);
-          if (q === 'miss') ok = false;
-        }
-        if (ok) j.echo();
-        this.sync();
-      });
+    // the viradas: cued two bars ahead on a streak (or in a breather); every mark tapped on its stroke
+    const jb = j.journeyBar;
+    if (jb !== null && jb !== this.cueBar) {
+      this.cueBar = jb;
+      const streak = this.power.combo >= VIRADA.combo || this.power.level >= VIRADA.groove;
+      if (j.viradaDue(jb + VIRADA.cueBars, streak)) j.viradaCue(jb + VIRADA.cueBars);
     }
+    const v = j.viradaPending();
+    if (v) {
+      while (this.marks.n < v.times.length && v.times[this.marks.n] <= j.time + 1e-9) {
+        const q = this.quality();
+        this.power.judge(q);
+        this.marks.n++;
+        if (q !== 'miss') this.marks.hits++;
+        if (q === 'perfect') this.marks.perfects++;
+      }
+      if (this.marks.n >= v.times.length && j.time >= v.times[v.times.length - 1] + RHYTHM.good) {
+        const { hits, perfects } = this.marks;
+        const n = v.times.length;
+        this.marks = { n: 0, hits: 0, perfects: 0 };
+        const r = viradaReward(j.def.world, v.level, hits, n, perfects, v.into);
+        if (r.power > 0) this.power.power = Math.min(100, this.power.power + r.power);
+        this.sync();
+        j.virada(hits, n, perfects);
+      } else this.sync();
+    }
+  }
+  /** the hands are on a virada's marks (no other tap then) */
+  private onMarks(t: number): boolean {
+    const v = this.j.viradaPending();
+    return !!v && t >= v.times[0] - this.j.spb * 0.5 && t < v.end;
   }
   /** one tap on this beat: what a player would tap now */
   private tap() {
@@ -364,17 +393,74 @@ class BotRhythm {
     }
     this.sync();
   }
+  /** the creature that will bite soonest (lives weigh), within striking reach, biting within `within` seconds */
+  private mostDangerous(within: number): Enemy | null {
+    const j = this.j;
+    const T = j.turtle;
+    let best: Enemy | null = null;
+    let bs = Infinity;
+    for (const e of j.enemies) {
+      if (!e.alive || e.structure || !j.canStrike(e)) continue;
+      const d = Math.hypot(e.x - T.x, e.z - T.z);
+      const gap = Math.max(0, d - SHELL_REACH - e.def.radius * 0.5);
+      const eta = e.def.boss ? 30 + gap : gap / Math.max(0.3, e.speed);
+      if (eta > within) continue;
+      const s = eta / Math.max(1, e.lives);
+      if (s < bs) {
+        bs = s;
+        best = e;
+      }
+    }
+    return best;
+  }
+  /**
+   * The flawless hands: the creature that would bite soonest first, then a glowing musician, then a
+   * creature still on its way (struck early, it can be struck again before it bites), the notes.
+   */
+  private tapFlawless() {
+    const j = this.j;
+    const T = j.turtle;
+    this.power.judge('perfect');
+    const foe = this.mostDangerous(8);
+    if (foe && !foe.def.boss) {
+      j.strike(foe.id, true);
+      this.sync();
+      return;
+    }
+    for (const t of j.towers) {
+      if (!j.canSolo(t)) continue;
+      const busy = t.kind === 'shaker' || j.enemies.some((e) => e.alive && !e.structure && Math.hypot(e.x - t.x, e.z - t.z) < 14);
+      if (!busy) continue;
+      j.solo(t, 'perfect');
+      this.sync();
+      return;
+    }
+    const far = this.mostDangerous(14);
+    if (far && !far.def.boss) {
+      j.strike(far.id, true);
+      this.sync();
+      return;
+    }
+    for (const p of j.pickups) {
+      if (p.taken || p.lost || Math.hypot(p.x - T.x, p.z - T.z) >= this.reach) continue;
+      j.collect(p.id, 'perfect');
+      this.sync();
+      return;
+    }
+    if (foe) j.strike(foe.id, true);
+    this.sync();
+  }
   private sync() {
     const p = this.power;
     this.j.setPower(p.power, p.judged, p.perfects + p.goods);
   }
 }
 
-export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spam?: TowerKind; limit?: number; rhythm?: number; onTick?: (j: Journey) => void; until?: (j: Journey) => boolean; onEvents?: (evs: SimEvent[], j: Journey) => void } = {}): BotResult {
+export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spam?: TowerKind; limit?: number; rhythm?: number; salt?: number; onTick?: (j: Journey) => void; until?: (j: Journey) => boolean; onEvents?: (evs: SimEvent[], j: Journey) => void } = {}): BotResult {
   const j = new Journey(def, SONGS[def.song].bpm, { mode: opts.mode ?? 'normal' });
   // the novice keeps a shaky beat unless told otherwise
-  const skill = opts.rhythm ?? (kind === 'novice' ? 0.3 : 0);
-  const rhythm = skill > 0 ? new BotRhythm(j, Math.min(1, skill), kind === 'novice' ? 20 : 30) : null;
+  const skill = kind === 'flawless' ? 1 : opts.rhythm ?? (kind === 'novice' ? 0.3 : 0);
+  const rhythm = skill > 0 ? new BotRhythm(j, Math.min(1, skill), kind === 'novice' ? 20 : 30, kind === 'flawless', opts.salt ?? 0) : null;
   const kinds = kind === 'spam' ? [opts.spam ?? 'harp'] : def.towers;
   const nov = { next: 0, tick: 0 };
   const dt = kind === 'novice' ? 4 : 0.2;

@@ -33,6 +33,8 @@ class SlotPad {
   private ring: THREE.Mesh;
   state = 0; // 0 idle, 1 affordable, 2 selected
   occupied = false;
+  /** v7: the virada boost (0…1): every plate glows gold on the beat while it lasts */
+  boost = 0;
   private glow = 0;
 
   constructor(readonly id: number) {
@@ -53,11 +55,12 @@ class SlotPad {
   }
 
   update(dt: number, bp: number) {
-    const target = this.state === 2 ? 1 : this.occupied ? 0 : this.state === 1 ? 0.45 + 0.4 * Math.exp(-bp * 4) : 0.18;
+    let target = this.state === 2 ? 1 : this.occupied ? 0 : this.state === 1 ? 0.45 + 0.4 * Math.exp(-bp * 4) : 0.18;
+    if (this.boost > 0) target = Math.max(target, this.boost * (0.55 + 0.45 * Math.exp(-bp * 4)));
     this.glow = damp(this.glow, target, 10, dt);
     this.ringMat.opacity = this.glow;
     this.ring.visible = this.glow > 0.02;
-    this.ring.scale.setScalar(1 + (this.state === 1 && !this.occupied ? Math.exp(-bp * 5) * 0.08 : 0));
+    this.ring.scale.setScalar(1 + (this.state === 1 && !this.occupied ? Math.exp(-bp * 5) * 0.08 : 0) + this.boost * (0.12 + Math.exp(-bp * 5) * 0.18));
   }
 }
 
@@ -113,6 +116,8 @@ export class JourneyView {
   restoredLife = 0;
   private waveR = -1;
   ffGlow = 0;
+  /** v7: the virada boost (0…1, the plates glow gold on the beat while it lasts) */
+  viradaBoost = 0;
   private trail: { x: number; z: number }[] = [];
   /** cinematics: scales the colour around the colossus (0 = none) */
   colorScale = 1;
@@ -957,7 +962,10 @@ export class JourneyView {
       }
     }
     for (const tv of this.towers.values()) tv.update(dt, t, beatPos);
-    for (const p of this.pads) p.update(dt, bp);
+    for (const p of this.pads) {
+      p.boost = p.group.visible ? this.viradaBoost : 0;
+      p.update(dt, bp);
+    }
     for (const p of this.pickups.values()) p.update(dt, t, this.land.heightAt(p.group.position.x, p.group.position.z));
     this.mists = this.mists.filter((m) => {
       const keep = m.update(dt, t);

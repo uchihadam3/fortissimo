@@ -1,12 +1,15 @@
 /**
  * Plays every journey headless with the bots and reports the outcome.
- *   npx tsx tools/balance.ts [levelId…] [--mode virtuoso] [--bots good,conductor,weak,novice,spam] [--rhythm 0.6] [--detail]
+ *   npx tsx tools/balance.ts [levelId…] [--mode virtuoso] [--bots flawless,good,conductor,weak,novice,spam] [--rhythm 0.6] [--detail]
  *   npx tsx tools/balance.ts --tune [levelId…] [--rhythm 0.6]   (difficulty factors per movement for TUNE)
+ *   npx tsx tools/balance.ts --runs 6 …   (each rhythm bot plays N times with other hands: mean lives, wins)
  *
  * good:      varied band, duets, golden notes, upgrades, placement by threat direction; no rhythm
  * virtuoso:  the good bot with an excellent rhythm (0.9: nearly every tap perfect, power ≈ 90)
  * conductor: the good bot keeping the beat like a decent player (rhythm skill `--rhythm`, default
- *            0.6: power ≈ 60, taps notes and creatures on the beat, solos, most of the calls)
+ *            0.6: power ≈ 60, taps notes and creatures on the beat, solos, most of the viradas)
+ * flawless:  a perfect rhythm, a strike every beat (eighths from groove 3) on the creature that would
+ *            bite soonest, every blow parried, every virada hit: must keep every life everywhere
  * weak:      the good bot with a sloppy hand (rhythm 0.3: power ≈ 20)
  * novice:    slow decisions, obvious moves (the next instrument on the first free plate); sloppy rhythm (0.3)
  * spam:      one instrument only (the best of all single-instrument bands is shown)
@@ -23,7 +26,9 @@ const bots = (args.includes('--bots') ? args[args.indexOf('--bots') + 1] : 'virt
 const rhythmArg = args.includes('--rhythm') ? args[args.indexOf('--rhythm') + 1] : '0.6';
 const rhythm = Number(rhythmArg);
 const detail = args.includes('--detail');
-const skip = new Set([mode, bots.join(','), rhythmArg]);
+const runsArg = args.includes('--runs') ? args[args.indexOf('--runs') + 1] : '1';
+const runs = Math.max(1, Number(runsArg) | 0);
+const skip = new Set([mode, bots.join(','), rhythmArg, runsArg]);
 const ids = args.filter((a) => !a.startsWith('--') && !skip.has(a));
 
 /** lives the good bot may lose over a whole journey when it plays at the edge of its skill */
@@ -128,10 +133,24 @@ for (const l of CAMPAIGN) {
   const movs = d.movements?.length ?? 1;
   const plates = `${d.slots}→${Math.min(12, d.slots + movs - 1)}`;
   let s: ReturnType<typeof playSpam> | null = null;
+  const play = (b: string, salt: number) => {
+    if (b === 'novice') return playBot(d, 'novice', { mode, salt });
+    if (b === 'flawless') return playBot(d, 'flawless', { mode, salt });
+    return playBot(d, 'good', { mode, salt, rhythm: b === 'conductor' ? rhythm : b === 'weak' ? 0.3 : b === 'virtuoso' ? 0.9 : 0 });
+  };
   const cells = bots.map((b) => {
     if (b === 'spam') return cell((s = playSpam(d, mode)));
-    if (b === 'novice') return cell(playBot(d, 'novice', { mode }));
-    return cell(playBot(d, 'good', { mode, rhythm: b === 'conductor' ? rhythm : b === 'weak' ? 0.3 : b === 'virtuoso' ? 0.9 : 0 }));
+    if (runs === 1) return cell(play(b, 0));
+    // other hands (the bots' timing dice): mean lives (a defeat counts 0) and wins
+    let lives = 0, wins = 0;
+    for (let k = 0; k < runs; k++) {
+      const j = play(b, k).j;
+      if (j.outcome === 'victory') {
+        wins++;
+        lives += j.lives;
+      }
+    }
+    return `${(lives / runs).toFixed(1).padStart(4)} ${wins}/${runs}`.padEnd(17);
   });
   console.log(
     `${l.id.padEnd(3)} ${l.kind.padEnd(6)} ${String(d.bars).padStart(4)} ${min.toFixed(1).padStart(4)} ${String(movs).padStart(4)} ${plates.padStart(6)}  | ${cells.join(' ')}${s ? ` ${(s as { kind: string }).kind}` : ''}`,
@@ -140,7 +159,7 @@ for (const l of CAMPAIGN) {
     const j = playBot(d, 'good', { mode, rhythm }).j;
     const dmg = Object.entries(j.stats.damageByKind).map(([k, v]) => `${k} ${Math.round(v! / 1000)}k`).join(' ');
     const st = j.stats;
-    console.log(`      conductor: power ${Math.round(st.powerSum / Math.max(1, st.walkBars))} · accuracy ${Math.round(j.accuracy * 100)}% · crescendo ${j.crescendo} · solos ${st.solos} (${st.perfectSolos} perfect) · strikes ${st.strikes} · notes on the beat ${st.onBeatNotes} · echoes ${st.echoes} · chords ${st.chords} · duel: parried ${st.parries} (${st.reflects} reflected), blows taken ${st.blowsTaken}, bosses beaten ${st.bossesBeaten}`);
+    console.log(`      conductor: power ${Math.round(st.powerSum / Math.max(1, st.walkBars))} · accuracy ${Math.round(j.accuracy * 100)}% · crescendo ${j.crescendo} · solos ${st.solos} (${st.perfectSolos} perfect) · strikes ${st.strikes} · notes on the beat ${st.onBeatNotes} · viradas ${st.viradas} (${st.viradaFull} full, ${st.viradaPerfect} perfect) · duel: parried ${st.parries} (${st.reflects} reflected), blows taken ${st.blowsTaken}, bosses beaten ${st.bossesBeaten}`);
     console.log(`      conductor: towers ${j.towers.map((x) => x.kind.slice(0, 2) + x.level).join(' ')} · harmony ${j.band.harmony} duets ${j.band.duets.map((x) => x.id).join(',')} · coins ${j.coins} · kills ${j.stats.kills} · ff ${j.stats.ffUses} · heals ${j.stats.heals} · ${dmg}`);
   }
 }

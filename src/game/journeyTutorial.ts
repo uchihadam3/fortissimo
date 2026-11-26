@@ -6,18 +6,19 @@
  * it once (until the plate is opened, or for a few seconds).
  *
  * v3 (the player conducts): after the first wave of the first journey the glove taps the baton in
- * time with its beat ring (until the groove rises); at the first breather it taps the Maestro's
- * echo; in the second journey it taps a glowing musician on the beat (a solo).
+ * time with its beat ring (until the groove rises); in the second journey it taps a glowing musician
+ * on the beat (a solo).
  *
  * v4: after the baton, the glove shows the power meter rising and the musicians brighter for it,
  * then taps a golden note on the beat and a creature on the beat (the colossus strikes it).
  * v5: in the toad's duel at the end of the first journey it taps the baton on the blow's beat (a parry).
+ * v7: the first virada (in the first breather): the glove taps each golden mark as its ring closes.
  */
 import type { JourneyBattle } from './journeyBattle';
 import type { TutorialId } from '../sim/journey';
 import { TOWERS } from '../sim/defs';
 
-type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'echo' | 'coinBeat' | 'strike' | 'parry' | 'none';
+type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'virada' | 'coinBeat' | 'strike' | 'parry' | 'none';
 
 interface Step {
   where: () => { x: number; y: number } | null;
@@ -170,17 +171,20 @@ export class JourneyTutorial {
           timeout: 24,
         });
       }
-      if (id === 'echo') {
-        // the first breather: the glove listens to the Maestro, then taps the echo
+      if (id === 'virada') {
+        // the first virada: the glove taps each golden mark right as its ring closes
         this.steps.push({
-          when: () => b.maestro() !== null,
-          where: () => (b.maestro() ? hud.batonCenter() : null),
-          press: () => {
-            const m = b.maestro();
-            return m && m.echo && m.next !== null ? b.pressAt(m.next) : 0;
+          when: () => b.viradaGuide() !== null,
+          where: () => {
+            const g = b.viradaGuide();
+            return g ? { x: g.x, y: g.y } : null;
           },
-          until: 'echo',
-          timeout: 16,
+          press: () => {
+            const g = b.viradaGuide();
+            return g ? b.pressAt(g.t) : 0;
+          },
+          until: 'virada',
+          timeout: 30,
         });
       }
       if (id === 'solo') {

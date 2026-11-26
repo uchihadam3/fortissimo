@@ -58,6 +58,7 @@ export class Hud {
         <div class="stat harmony"><div class="lights"><span></span><span></span><span></span><span></span><span></span></div></div>
       </div>
       <div class="hud-tr"><button class="round-btn pause" aria-label="pause">${ICON.pause}</button></div>
+      <div id="virada"></div>
       <div id="floats"></div>
       <div id="vignette"></div>
       <div id="radial"></div>
@@ -70,7 +71,6 @@ export class Hud {
       <button id="go" aria-label="go"><span class="ico">${ICON.play}</span></button>
       <div id="groove-glow"></div>
       <div id="baton-wrap">
-        <div id="call"><div class="track">${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<b style="left:${(i + 0.5) * 12.5}%" class="${i % 2 ? 'off' : ''}"></b>`).join('')}</div><div class="notes"></div><i class="head"></i></div>
         <div class="approach"></div><div class="approach off"></div><div class="tell"></div><div class="tell-n"></div>
         <button id="baton" aria-label="baton"><svg class="groove" viewBox="0 0 100 100">${[0, 1, 2, 3].map((i) => `<circle class="seg" cx="50" cy="50" r="45" stroke-dasharray="${SEG.toFixed(1)} 400" transform="rotate(${-90 + 4.5 + i * 90} 50 50)"/>`).join('')}<circle class="prog" cx="50" cy="50" r="37" stroke-dasharray="232.5" stroke-dashoffset="232.5" transform="rotate(-90 50 50)"/></svg><div class="glyph">${BATON}</div></button>
         <div class="sparks"></div>
@@ -99,7 +99,7 @@ export class Hud {
     this.batonWrap = $('#baton-wrap');
     this.approach = [...this.root.querySelectorAll('#baton-wrap .approach')] as HTMLElement[];
     this.sparks = $('#baton-wrap .sparks');
-    this.callEl = $('#call');
+    this.viradaEl = $('#virada');
     this.grooveGlow = $('#groove-glow');
     this.powerEl = $('#power');
     // the baton answers on pointerdown (timing matters), with the event's own time stamp
@@ -449,11 +449,11 @@ export class Hud {
   private batonWrap!: HTMLElement;
   private approach: HTMLElement[] = [];
   private sparks!: HTMLElement;
-  private callEl!: HTMLElement;
+  /** v7: the layer the virada's marks are drawn on (under the rest of the HUD) */
+  viradaEl!: HTMLElement;
   private grooveGlow!: HTMLElement;
   private lastGroove = -1;
   private lastProg = -1;
-  private callKey = '';
   /** a baton tap (pointerdown or key), with the event's time stamp (performance.now() clock) */
   onBaton: (timeStamp: number) => void = () => {};
 
@@ -532,27 +532,23 @@ export class Hud {
   }
 
   /**
-   * The Maestro's call over the baton: a little bar of eight eighths with the call's four notes.
-   * states per note: 0 waiting, 1 the Maestro plays it, 2 to echo, 3 echoed right, 4 wrong; head =
-   * where the bar is (0…1, −1 hidden). Null hides it.
+   * The screen rects the HUD covers now (the virada's marks keep clear of them): the stats, the
+   * pause, the journey bar, the baton and its power meter, FORTÍSSIMO, the boss bar, ▶ and an open
+   * plate menu.
    */
-  setMaestro(c: { pattern: number[]; states: number[]; head: number; echo: boolean } | null) {
-    if (!c) {
-      this.callEl.classList.remove('on');
-      this.callKey = '';
-      return;
+  avoidRects(): { left: number; top: number; right: number; bottom: number; id: string }[] {
+    const out: { left: number; top: number; right: number; bottom: number; id: string }[] = [];
+    const els = [...this.root.querySelectorAll('.hud-tl, .hud-tr, #journey, #baton, #baton-wrap, #power, #ff-btn, #boss-bar, #go, #radial > *')] as HTMLElement[];
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      // the boss bar counts even while hidden (a boss can come in the middle of a virada)
+      if (el.id !== 'boss-bar' && Number(cs.opacity) < 0.05) continue;
+      out.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom, id: el.id || el.className });
     }
-    this.callEl.classList.add('on');
-    this.callEl.classList.toggle('echo', c.echo);
-    const key = c.pattern.join(',') + '/' + c.states.join('');
-    if (key !== this.callKey) {
-      this.callKey = key;
-      const notes = this.callEl.querySelector('.notes') as HTMLElement;
-      notes.innerHTML = c.pattern.map((p, i) => `<i class="s${c.states[i]}" style="left:${(p + 0.5) * 12.5}%"></i>`).join('');
-    }
-    const head = this.callEl.querySelector('.head') as HTMLElement;
-    head.style.display = c.head < 0 ? 'none' : '';
-    head.style.left = `${(Math.max(0, Math.min(1, c.head)) * 100).toFixed(2)}%`;
+    return out;
   }
 
   // ───────── the power meter (v4) ─────────
@@ -686,11 +682,6 @@ export class Hud {
       n.dataset.n = String(count);
       n.innerHTML = Array.from({ length: Math.min(8, count) }, () => '<i></i>').join('');
     }
-  }
-
-  /** the call was echoed right (or not) */
-  maestroResult(ok: boolean) {
-    this.retrigger(this.callEl, ok ? 'win' : 'lose');
   }
 
   /** the whole screen kicks on a perfect tap at high groove, or a solo (a short golden pulse) */

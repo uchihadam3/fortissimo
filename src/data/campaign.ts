@@ -211,7 +211,7 @@ export const TUNE: Record<string, number[]> = {
   f3: [1.97, 4.82, 12.48, 5.42],
   f4: [1.19, 2.91, 7.96, 19.43, 20.6],
   fx: [1.01, 2.47, 3.28, 6.77, 16.53],
-  c1: [1.97, 4.82, 2.21, 5.4],
+  c1: [1.97, 4.82, 1.95, 5.4],
   c2: [1.67, 1.34, 7.23, 17.64],
   c3: [0.76, 1.86, 5.69, 13.88],
   c4: [1.07, 2.62, 3.26, 7.95, 5.4],
@@ -219,7 +219,7 @@ export const TUNE: Record<string, number[]> = {
 };
 
 /**
- * v3: the player conducts (the baton's groove, solos, the Maestro's echoes) and the band is
+ * v3: the player conducts (the baton's groove, solos, the viradas) and the band is
  * stronger for it, so the creatures of every generated movement grow by LIFT on top of TUNE (the
  * first movement of a journey by half as much). Set with the bots (tools/balance.ts): a decent
  * conductor (groove ≈ 2, a solo now and then) wins every main journey with 2–3★, a shaky hand on
@@ -330,7 +330,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm1', world: 'meadow', map: [14, 74], kind: 'main', requires: [],
     def: journey({
       id: 'm1', world: 'meadow', name: { pt: 'O Despertar', en: 'The Awakening' }, slots: 2, coins: 150, towers: T1, newTower: 'harp',
-      tutorial: ['basics', 'baton', 'coin', 'strike', 'echo', 'parry'], pickups: 9, curviness: 0.6,
+      tutorial: ['basics', 'baton', 'coin', 'strike', 'virada', 'parry'], pickups: 9, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 70 }, { kind: 'lake', from: 40, to: 100, side: 1 }, { kind: 'hills', from: 100, to: 140 }, { kind: 'meadow', from: 140, to: 190 }],
       moves: [
         {

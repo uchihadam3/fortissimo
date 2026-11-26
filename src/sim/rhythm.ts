@@ -1,7 +1,7 @@
 /**
  * The player's rhythm (v4: a true rhythm game). Everything the player does is on the beat: the
  * baton (or any empty spot of the screen), the golden notes, the creatures, the glowing musicians,
- * the Maestro's echo. Every judged tap feeds one POWER meter (0…100): perfect fills it, good a
+ * the viradas (v7: drum fills tapped on golden marks in the world). Every judged tap feeds one POWER meter (0…100): perfect fills it, good a
  * little, a miss takes a clear chunk and breaks the combo; it fades when you stop playing. Power
  * makes the band stronger (×1.0 → ×1.6 damage), the FORTÍSSIMO and the solos charge faster, and
  * its thresholds are the music's groove layers (0…4). Each movement played with a high power
@@ -11,15 +11,16 @@
  * Judging a tap against the beat happens in the controller (it knows when the player heard the
  * music); the simulation only receives what came of it, as recorded actions: the power and the
  * tally of judged taps (`Journey.setPower`), a solo (`Journey.solo`), a collected note with its
- * quality (`Journey.collect`), a strike (`Journey.strike`) and a right echo (`Journey.echo`). That
- * keeps journeys deterministic and checkpoints replayable. This module is pure: the meter, the
- * judgement windows and the call patterns are shared by the battle, the bots and the tests.
+ * quality (`Journey.collect`), a strike (`Journey.strike`), a virada cued (`Journey.viradaCue`) and
+ * how it went (`Journey.virada`). That keeps journeys deterministic and checkpoints replayable. This
+ * module is pure: the meter, the judgement windows and the virada patterns are shared by the battle,
+ * the bots and the tests.
  */
 import type { TowerKind, WorldId } from './defs';
 
 export type TapQuality = 'perfect' | 'good' | 'miss';
 /** what a tap was aimed at: each kind can claim each grid point once (two fingers on one beat are fine) */
-export type TapTarget = 'baton' | 'coin' | 'creature' | 'musician' | 'echo';
+export type TapTarget = 'baton' | 'coin' | 'creature' | 'musician' | 'virada';
 
 export const RHYTHM = {
   /** seconds from the beat (as heard) for a perfect / a good tap */
@@ -39,7 +40,7 @@ export const RHYTHM = {
   fadePerBeat: 1.5,
   /** the groove layers of the music (and the baton's segments): power thresholds for 1…4 */
   thresholds: [20, 45, 70, 90] as readonly number[],
-  /** from this groove on, eighth notes count as well as the beats (baton) */
+  /** from this groove on, eighth notes count as well as the beats (baton and creatures) */
   eighthsFrom: 3,
   /** every tower's damage × (1 + powerDamage × power/100) */
   powerDamage: 0.6,
@@ -106,21 +107,6 @@ export const SOLO = {
   choirBars: 2,
 };
 
-export const ECHO = {
-  /** golden notes for a right echo: base + perMovement × breather index */
-  coins: 30,
-  perMovement: 10,
-  /** the chord blast at the next movement: damage = flat + share × max hp (guardians: bossFlat + bossShare) */
-  flat: 60,
-  share: 0.2,
-  bossFlat: 160,
-  bossShare: 0.03,
-  /** it waits for this many creatures near the colossus (or fires anyway after `wait` bars) */
-  crowd: 3,
-  radius: 32,
-  wait: 8,
-};
-
 /** distance from a heard time to the nearest grid point (quarters, or eighths at high groove) */
 export function nearestGrid(heard: number, spb: number, groove: number): { at: number; index: number; delta: number; grid: number } {
   const grid = groove >= RHYTHM.eighthsFrom ? spb / 2 : spb;
@@ -170,9 +156,9 @@ export class Power {
     return this.judged ? (this.perfects + this.goods) / this.judged : 1;
   }
 
-  /** judges a tap heard at `heard` (song seconds) aimed at `target`; quarters (baton: eighths from groove 3) */
+  /** judges a tap heard at `heard` (song seconds) aimed at `target`; quarters (baton and creatures: eighths from groove 3) */
   tap(heard: number, spb: number, target: TapTarget = 'baton'): { q: TapQuality; at: number; delta: number } {
-    const g = nearestGrid(heard, spb, target === 'baton' ? this.level : 0);
+    const g = nearestGrid(heard, spb, target === 'baton' || target === 'creature' ? this.level : 0);
     let q = quality(g.delta);
     const key = `${g.grid.toFixed(5)}:${g.index}`;
     if (q !== 'miss' && this.claimed.get(target) === key) q = 'miss';
@@ -219,35 +205,110 @@ export class Power {
 }
 
 /**
- * The Maestro's calls: four notes in one bar, positions in eighth notes (0…7). Each land has its own
- * set; the later lands syncopate.
+ * The viradas (v7, docs/DESIGN-v7.md): drum fills the player taps on golden marks in the world.
+ * A virada fills one bar (the last of a phrase); its strokes sit on 8ths and 16ths and end before the
+ * next downbeat. It comes on a streak (a combo or a groove, at a phrase end, not too often) and in
+ * every breather. Full viradas in a row raise its level (one more mark, a bigger reward).
  */
-export const CALLS: Record<WorldId, number[][]> = {
-  meadow: [[0, 2, 4, 6], [0, 2, 4, 5], [0, 1, 2, 4], [0, 2, 3, 4]],
-  desert: [[0, 1, 2, 4], [0, 2, 3, 4], [0, 2, 4, 5], [0, 1, 4, 6], [0, 3, 4, 6]],
-  ice: [[0, 3, 4, 6], [0, 2, 5, 6], [1, 2, 4, 6], [0, 3, 4, 5]],
-  forge: [[0, 3, 5, 6], [1, 3, 4, 6], [0, 3, 6, 7], [0, 1, 3, 6]],
-  citadel: [[1, 3, 4, 6], [0, 3, 5, 7], [1, 2, 5, 7], [0, 3, 6, 7], [1, 3, 5, 6]],
+export const VIRADA = {
+  /** a streak: this combo, or this groove (cued two bars ahead) */
+  combo: 8,
+  groove: 2,
+  /** phrases are this many bars; a streak's virada plays in the last bar of one */
+  phrase: 4,
+  /** journey bars from one virada to a streak's next (at least) */
+  gapBars: 8,
+  /** the bars of a breather (from its first bar) with a virada: rest − 5 and rest − 1 */
+  breather: [5, 1] as readonly number[],
+  /** bars ahead a virada is cued (the music must know at least one bar ahead) */
+  cueBars: 2,
+  /** beats before the first stroke the marks appear (and each ring takes to close) */
+  lead: 1.25,
+  maxLevel: 2,
+  /** marks of a level-0 virada per land (the legends and the bosses: hardest patterns), + level, at most 6 */
+  marks: { meadow: 4, desert: 5, ice: 5, forge: 5, citadel: 5 } as Record<WorldId, number>,
+  maxMarks: 6,
+  /** all marks hit: the power jumps (perfect: more) */
+  power: 15,
+  powerPerfect: 20,
+  /** golden notes for a full virada (by land) × (1 + perLevel × level); all perfect × perfect; half the marks or more: × half */
+  coins: { meadow: 6, desert: 7, ice: 8, forge: 9, citadel: 10 } as Record<WorldId, number>,
+  coinsPerLevel: 0.5,
+  /** a breather's viradas sing for the movement ahead: + breather + perMovement × its index (the Maestro's old echo) */
+  breatherCoins: 24,
+  breatherPerMovement: 10,
+  coinsPerfect: 1.3,
+  coinsHalf: 0.8,
+  /** the virada boost: the whole band × mul for `boostBars` bars (+ perLevel × level, + perfect) */
+  boost: 1.2,
+  boostPerLevel: 0.03,
+  boostPerfect: 0.05,
+  boostBars: 4,
+  /** the FORTÍSSIMO meter fills this much (perfect: more) */
+  ff: 0.06,
+  ffPerfect: 0.1,
 };
 
-/** the call of breather k (1…) of a journey: same journey, same calls */
-export function callPattern(world: WorldId, seed: number, k: number, attempt: number): number[] {
-  const list = CALLS[world];
-  // the very first call of the game is the plainest one
-  if (world === 'meadow' && k === 1 && attempt === 0) return list[0];
-  const i = Math.abs((seed * 7 + k * 3 + attempt * 5) | 0) % list.length;
+/**
+ * The fills, as 16th steps (0…15) of the virada's bar, by number of marks. The meadow is plain
+ * (quarters and 8ths); later lands add 16ths and syncopation; the hardest set is for legends and bosses.
+ */
+const FILLS: Record<'plain' | 'rich' | 'hard', Record<number, number[][]>> = {
+  plain: {
+    4: [[0, 4, 8, 12], [4, 8, 10, 12], [0, 4, 8, 10], [0, 2, 4, 8], [4, 6, 8, 12]],
+    5: [[0, 4, 8, 10, 12], [4, 6, 8, 10, 12], [0, 4, 6, 8, 12], [0, 2, 4, 8, 12], [2, 4, 8, 10, 12]],
+    6: [[0, 4, 6, 8, 10, 12], [4, 6, 8, 10, 12, 14], [0, 2, 4, 8, 10, 12], [0, 4, 8, 10, 12, 14]],
+  },
+  rich: {
+    5: [[0, 4, 8, 10, 11], [4, 6, 8, 11, 12], [0, 3, 6, 8, 12], [2, 4, 8, 10, 12], [4, 8, 10, 12, 13], [0, 4, 6, 7, 8]],
+    6: [[0, 4, 6, 8, 10, 11], [4, 6, 7, 8, 10, 12], [0, 3, 6, 8, 10, 12], [2, 4, 6, 8, 11, 12], [4, 8, 9, 10, 12, 14]],
+  },
+  hard: {
+    5: [[0, 3, 6, 8, 11], [2, 4, 7, 8, 10], [0, 3, 4, 7, 10], [1, 4, 6, 9, 12]],
+    6: [[0, 3, 6, 8, 10, 11], [2, 4, 7, 8, 10, 13], [0, 3, 4, 7, 10, 12], [1, 4, 6, 9, 12, 14], [0, 2, 3, 6, 8, 11]],
+  },
+};
+
+/** how many marks a virada has in a land, at a chain level (the hardest ones: never fewer than 5) */
+export function viradaMarks(world: WorldId, level: number, hard = false): number {
+  const base = Math.max(VIRADA.marks[world], hard ? 5 : 0);
+  return Math.min(VIRADA.maxMarks, base + Math.max(0, Math.min(VIRADA.maxLevel, level | 0)));
+}
+
+/**
+ * The fill of virada k (1…) of a journey at a chain level, as 16th steps of its bar: same journey,
+ * same viradas. `hard`: a legend or a boss is in the fight (the hardest patterns).
+ */
+export function viradaPattern(world: WorldId, seed: number, k: number, level: number, hard = false): number[] {
+  const n = viradaMarks(world, level, hard);
+  // the very first virada of the game is the plainest one: four quarters
+  if (world === 'meadow' && k === 1 && level === 0 && !hard) return [0, 4, 8, 12];
+  const set = hard ? FILLS.hard : world === 'meadow' ? FILLS.plain : FILLS.rich;
+  const list = set[n] ?? set[Math.max(...Object.keys(set).map(Number))];
+  const i = Math.abs((seed * 7 + k * 13 + level * 5) | 0) % list.length;
   return list[i];
 }
 
 /**
- * When the calls of a breather of `rest` bars happen: the bars (relative to the breather's first bar)
- * in which the Maestro plays; the echo is the bar after each.
+ * What a virada brings: coins, the boost (×, bars), the FORTÍSSIMO fill and the power jump. `into`:
+ * the movement a breather's virada leads into (0: a streak's).
  */
-export function callBars(rest: number): number[] {
-  const first = rest >= 8 ? 2 : 1;
-  const out = [first];
-  if (first + 4 < rest) out.push(first + 3);
-  return out;
+export function viradaReward(world: WorldId, level: number, hits: number, n: number, perfects: number, into = 0) {
+  const full = n > 0 && hits >= n;
+  const perfect = full && perfects >= n;
+  const half = !full && n > 0 && hits * 2 >= n;
+  const lv = Math.max(0, Math.min(VIRADA.maxLevel, level | 0));
+  const base = VIRADA.coins[world] * (1 + VIRADA.coinsPerLevel * lv) + (into > 0 ? VIRADA.breatherCoins + VIRADA.breatherPerMovement * into : 0);
+  const coins = full ? Math.round(base * (perfect ? VIRADA.coinsPerfect : 1)) : half ? Math.round(base * VIRADA.coinsHalf) : 0;
+  return {
+    full,
+    perfect,
+    coins,
+    boost: full ? VIRADA.boost + VIRADA.boostPerLevel * lv + (perfect ? VIRADA.boostPerfect : 0) : 1,
+    boostBars: full ? VIRADA.boostBars : 0,
+    ff: full ? (perfect ? VIRADA.ffPerfect : VIRADA.ff) : 0,
+    power: full ? (perfect ? VIRADA.powerPerfect : VIRADA.power) : 0,
+  };
 }
 
 /** what a solo does, per instrument (for the HUD/view and the docs) */

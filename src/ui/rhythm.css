@@ -1,4 +1,4 @@
-/* ───────── v3: the baton, the groove and the Maestro's call ───────── */
+/* ───────── v3: the baton and the groove ───────── */
 
 #baton-wrap {
   --flash: 0; --gc: rgba(255, 247, 230, .35); --size: 96px;
@@ -76,29 +76,6 @@
 #groove-glow.kick { animation: kick .35s ease-out; }
 @keyframes kick { 0% { background: radial-gradient(circle at 50% 55%, transparent 40%, rgba(255, 233, 168, calc(var(--kick) * .35))); } 100% { background: transparent; } }
 
-/* the Maestro's call: a little bar of eight eighths above the baton */
-#call {
-  position: absolute; left: 0; bottom: 166px; /* above the power meter (150px tall), never over it */ width: 168px; height: 34px; border-radius: 17px;
-  background: var(--panel); box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .35), 0 6px 16px rgba(0, 0, 0, .35);
-  opacity: 0; transform: translateY(8px) scale(.9); transition: opacity .3s, transform .3s; pointer-events: none;
-}
-#call.on { opacity: 1; transform: none; }
-#call .track, #call .notes { position: absolute; left: 10px; right: 10px; top: 0; bottom: 0; }
-#call .track b { position: absolute; top: 15px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: rgba(255, 247, 230, .35); }
-#call .track b.off { opacity: .45; }
-#call .notes i {
-  position: absolute; top: 7px; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%;
-  background: rgba(255, 247, 230, .12); box-shadow: inset 0 0 0 2px rgba(255, 211, 107, .6); transition: background .08s, transform .12s;
-}
-#call .notes i.s1 { background: radial-gradient(circle at 35% 30%, #fff6d6, #ffd36b 60%, #c88a1a); box-shadow: 0 0 14px #ffd36b; transform: scale(1.25); }
-#call .notes i.s2 { box-shadow: inset 0 0 0 2px #9fe8ff, 0 0 10px rgba(159, 232, 255, .6); }
-#call .notes i.s3 { background: radial-gradient(circle at 35% 30%, #f2fff4, #7dff9a 60%, #2ea84e); box-shadow: 0 0 14px #7dff9a; transform: scale(1.15); }
-#call .notes i.s4 { background: #5a4a6a; box-shadow: inset 0 0 0 2px #ff5a6a; }
-#call .head { position: absolute; top: 3px; bottom: 3px; width: 3px; margin-left: 8px; border-radius: 2px; background: rgba(255, 247, 230, .8); box-shadow: 0 0 8px #fff; }
-#call.echo { box-shadow: inset 0 0 0 2px #9fe8ff, 0 0 18px rgba(159, 232, 255, .45), 0 6px 16px rgba(0, 0, 0, .35); }
-#call.win { animation: callwin .9s ease-out; }
-#call.lose { animation: hitmiss .45s ease; }
-@keyframes callwin { 0% { transform: scale(1.2); box-shadow: 0 0 40px 10px #7dff9a; } 100% { transform: scale(1); } }
 
 /* the glove can tap in time (the battle drives its press) */
 #hand.sync { animation: none; transition: none; }
@@ -106,9 +83,6 @@
 @media (max-width: 720px), (max-height: 520px) {
   #baton-wrap { --size: 78px; }
   #baton .glyph { inset: 16px; }
-  #call { width: 148px; height: 30px; bottom: 130px; }
-  #call .notes i { top: 6px; width: 18px; height: 18px; margin-left: -9px; }
-  #call .track b { top: 13px; }
 }
 
 /* ───────── v4: the power meter, the verdict of every tap, the rhythm of the journey ───────── */
@@ -266,4 +240,49 @@
 /* phones held upright: the start button sits above the baton and the power meter, never over them */
 @media (orientation: portrait) and (max-width: 640px) {
   #go { bottom: calc(176px + var(--safe-b)); }
+}
+
+/* ───────── v7: the virada — golden marks in the world, rings closing on each stroke ───────── */
+#virada { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+#virada .vset { position: absolute; inset: 0; opacity: 0; transition: opacity .25s; --vc: #ffd36b; --vc2: #fff2c2; --vglow: rgba(255, 211, 107, .85); }
+#virada .vset.on { opacity: 1; }
+#virada .vset.boss { --vc: #ff5a8a; --vc2: #ffd0e0; --vglow: rgba(255, 70, 120, .85); }
+#virada .trail { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+#virada .trail polyline { fill: none; stroke: var(--vc2); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: .1 13; opacity: .95; filter: drop-shadow(0 0 4px var(--vglow)) drop-shadow(0 1px 1px rgba(0, 0, 0, .5)); }
+#virada .vm { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+#virada .vm .core {
+  position: absolute; width: 50px; height: 50px; margin: -25px; border-radius: 50%; display: block;
+  background: radial-gradient(circle at 36% 30%, #fffbe8, var(--vc) 46%, color-mix(in srgb, var(--vc) 55%, #5a3200) 100%);
+  box-shadow: 0 0 0 3px rgba(255, 251, 232, .9), 0 0 18px 4px var(--vglow), 0 4px 10px rgba(0, 0, 0, .45);
+  transition: transform .12s, filter .2s, opacity .3s;
+}
+#virada .vm .core::after { content: ''; position: absolute; inset: 15px; border-radius: 50%; background: rgba(255, 255, 255, .85); box-shadow: 0 0 8px #fff; }
+#virada .vm .ring {
+  position: absolute; width: 50px; height: 50px; margin: -28px; border-radius: 50%; display: block; opacity: 0;
+  border: 3px solid var(--vc2); box-shadow: 0 0 12px var(--vglow), inset 0 0 8px var(--vglow);
+}
+#virada .vm.next .core { animation: vpulse .5s ease-in-out infinite alternate; }
+#virada .vm.now .ring { border-color: #fff; border-width: 4px; }
+#virada .vm.wait .core { filter: saturate(.3) brightness(.7); }
+#virada .vm.lit .core { animation: vlit .45s ease-out; }
+@keyframes vpulse { 0% { transform: scale(1); } 100% { transform: scale(1.14); filter: brightness(1.25); } }
+@keyframes vlit { 0% { transform: scale(1.5); filter: brightness(2) saturate(1.6); } 100% { transform: scale(1); } }
+#virada .vm.hit .core { animation: vhit .45s ease-out forwards; }
+#virada .vm.hit .ring { opacity: 0 !important; }
+#virada .vm.hit.perfect .core { animation-duration: .6s; }
+@keyframes vhit { 0% { transform: scale(1.55); filter: brightness(2.2); } 100% { transform: scale(2.2); opacity: 0; } }
+#virada .vm.miss .core { filter: grayscale(1) brightness(.55); opacity: .45; animation: vmiss .35s ease; }
+#virada .vm.miss .ring { opacity: 0 !important; }
+@keyframes vmiss { 0%, 100% { transform: none; } 30% { transform: translateX(-6px); } 65% { transform: translateX(5px); } }
+#virada .vsparks { position: absolute; left: 0; top: 0; }
+#virada .vsparks i {
+  position: absolute; width: 12px; height: 12px; margin: -6px; border-radius: 50%;
+  background: radial-gradient(#fff, var(--vc) 60%, transparent 72%); box-shadow: 0 0 10px var(--vc);
+  animation: spark .55s ease-out forwards;
+}
+#virada .vset.full .trail polyline { animation: vfull .6s ease-out forwards; }
+@keyframes vfull { 0% { stroke-width: 8; opacity: 1; stroke: #fff; } 100% { stroke-width: 3; opacity: 0; } }
+@media (max-width: 720px), (max-height: 520px) {
+  #virada .vm .core, #virada .vm .ring { width: 46px; height: 46px; margin: -23px; }
+  #virada .vm .ring { margin: -26px; }
 }
