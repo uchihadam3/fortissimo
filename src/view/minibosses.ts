@@ -683,26 +683,32 @@ function siren(b: Bins, t: Tpl, body: THREE.Group, J: Joint) {
 }
 
 function stag(b: Bins, t: Tpl, body: THREE.Group, J: Joint) {
-  const ink = new THREE.Color('#252c58'), pale = new THREE.Color('#e8f2ff');
+  const ink = new THREE.Color('#2c3470'), pale = new THREE.Color('#e8f2ff'), silver = new THREE.Color('#c8d8f0');
   const coat: Painter = (p, n) => {
-    _c.copy(ink).lerp(pale, smooth(-0.1, -0.7, n.y) * 0.8 + smooth(0.3, 0.9, n.z) * smooth(0.95, 1.3, p.y) * 0.6);
-    if (hash(Math.round(p.x * 18), Math.round(p.y * 18), Math.round(p.z * 18)) > 0.9 && n.y > 0) _c.lerp(pale, 0.6);
+    _c.copy(ink).lerp(pale, smooth(-0.1, -0.7, n.y) * 0.85 + smooth(0.3, 0.9, n.z) * smooth(0.95, 1.3, p.y) * 0.6);
+    // silver dapples along the back, like light on a mirror lake
+    const d = Math.abs(Math.sin(p.x * 31 + p.z * 7) * Math.sin(p.z * 23 - p.x * 5));
+    if (n.y > 0.25 && d > 0.82) _c.lerp(silver, 0.7);
     return _c;
   };
-  b.add('b', 'g', paint(at(ell(0.27, 0.3, 0.62, 22, 14), 0, 1.06, 0), coat));
-  b.add('b', 'g', paint(alongY(capsule(0.13, 0.36, 3, 10), V(0, 1.36, 0.5), V(0, 1, 0.55)), coat));
-  shag(b, 'b', [[0.12, 1.1], [0.14, 1.45]], 1.16, 1.4, 3, 5, 0.16, (p) => _c.set('#f2f6ff'), { cz: 0.52, arc: [-1.2, 1.2] });
-  // legs, long and fine, silver hooves
-  [[0.14, 0.45], [-0.14, 0.45], [0.14, -0.45], [-0.14, -0.45]].forEach(([x, z], i) => {
-    const P = `leg${i}`;
-    b.add(P, 'g', paint(at(capsule(0.065, 0.36, 3, 8), x, 0.72, z - 0.02), coat), paint(at(capsule(0.035, 0.42, 3, 6), x, 0.3, z), '#1a1f3e'));
-    b.add(P, 'x', paint(at(cyl(0.05, 0.055, 0.07, 8), x, 0.04, z), '#cfd8ec'));
+  b.add('b', 'm', paint(at(ell(0.25, 0.27, 0.6, 24, 14), 0, 1.06, 0), coat));
+  b.add('b', 'm', paint(at(ell(0.25, 0.29, 0.26, 18, 12), 0, 1.08, 0.36), coat));
+  b.add('b', 'm', paint(at(ell(0.25, 0.27, 0.26, 18, 12), 0, 1.07, -0.38), coat));
+  b.add('b', 'm', paint(taperTube(new THREE.CatmullRomCurve3([V(0, 1.12, 0.42), V(0, 1.35, 0.52), V(0, 1.58, 0.64)]), 12, 0.16, 0.1, 12), coat));
+  shag(b, 'b', [[0.13, 1.1], [0.15, 1.45]], 1.18, 1.42, 3, 6, 0.15, (p) => _c.set('#f2f6ff'), { cz: 0.5, arc: [-1.3, 1.3] });
+  // legs, long and fine: a strong thigh, a thin shank, silver hooves
+  [[0.15, 0.4], [-0.15, 0.4], [0.15, -0.42], [-0.15, -0.42]].forEach(([x, z], i) => {
+    const P = `leg${i}`, back = i >= 2;
+    const c = new THREE.CatmullRomCurve3([V(x, 1.02, z), V(x, 0.78, z + (back ? -0.08 : 0.02)), V(x, 0.52, z + (back ? 0.02 : 0))]);
+    b.add(P, 'm', paint(taperTube(c, 10, back ? 0.11 : 0.085, 0.045, 8), coat));
+    b.add(P, 'g', paint(at(capsule(0.035, 0.4, 3, 6), x, 0.3, z), '#1a1f3e'));
+    b.add(P, 'x', paint(at(cyl(0.05, 0.058, 0.08, 8), x, 0.04, z + 0.01), '#cfd8ec'));
   });
   // the head and its mirror antlers hung with chimes
-  b.add('head', 'g', paint(at(ell(0.14, 0.15, 0.2, 16, 12), 0, 1.66, 0.7), coat));
-  b.add('head', 'g', paint(at(ell(0.09, 0.085, 0.15, 14, 10), 0, 1.6, 0.86), (p, n) => _c.copy(ink).lerp(pale, 0.35)));
-  b.add('head', 'g', paint(at(sph(0.03, 8, 6), 0, 1.62, 1.0), '#0c0e1e'));
-  for (const sd of [-1, 1]) b.add('head', 'g', paint(at(ell(0.06, 0.025, 0.13).rotateY(sd * 0.9).rotateZ(sd * 0.4), sd * 0.17, 1.74, 0.62), coat));
+  b.add('head', 'm', paint(at(ell(0.14, 0.15, 0.19, 16, 12), 0, 1.68, 0.7), coat));
+  b.add('head', 'm', paint(at(ell(0.085, 0.085, 0.18, 14, 10).rotateX(0.25), 0, 1.6, 0.86), (p, n) => _c.copy(ink).lerp(pale, 0.3 + smooth(0, -0.8, n.y) * 0.5)));
+  b.add('head', 'g', paint(at(scl(sph(0.04, 10, 8), 1.2, 0.8, 1), 0, 1.58, 1.02), '#0c0e1e'));
+  for (const sd of [-1, 1]) b.add('head', 'm', paint(at(ell(0.08, 0.03, 0.15).rotateY(sd * 0.9).rotateZ(sd * 0.45), sd * 0.19, 1.76, 0.62), (p, n) => (n.z > 0.3 ? _c.set('#f2c8d8') : _c.copy(ink))));
   eyes2(b, 'head', 'g', 0.09, 1.7, 0.79, 0.045, { glow: 0.4, small: 0.52, white: '#f2faff', yaw: 0.55 });
   stitchX(b, 'head', 'g', 0, 1.55, 0.95, 0.032, { pitch: -0.4 });
   b.add('head', 'f', paint(new THREE.OctahedronGeometry(0.045, 0).scale(1, 1.4, 0.4).translate(0, 1.78, 0.82), '#dff6ff', 1.6));
@@ -732,9 +738,9 @@ function stag(b: Bins, t: Tpl, body: THREE.Group, J: Joint) {
     const a = (i / 6) * Math.PI * 2;
     b.add('ph1', 'f', paint(new THREE.OctahedronGeometry(0.035, 0).translate(Math.cos(a) * 0.22, 2.3 + Math.sin(a) * 0.21, 0.5 - Math.sin(a) * 0.06), '#ffffff', 2));
   }
-  b.add('b', 'm', paint(at(ell(0.07, 0.09, 0.05), 0, 1.16, -0.62), '#f6f8ff'));
+  b.add('b', 'm', paint(at(ell(0.08, 0.11, 0.06), 0, 1.16, -0.64), '#f6f8ff'));
   J('b', body);
-  for (let i = 0; i < 4; i++) J(`leg${i}`, body, V(i % 2 ? -0.14 : 0.14, 0.9, i < 2 ? 0.45 : -0.45));
+  for (let i = 0; i < 4; i++) J(`leg${i}`, body, V(i % 2 ? -0.15 : 0.15, 1.0, i < 2 ? 0.4 : -0.42));
   const head = J('head', body, V(0, 1.45, 0.55));
   const ant = J('antlers', head, V(0, 1.78, 0.66), V(0, 1.45, 0.55));
   J('chimes', ant, V(0, 2.3, 0.5), V(0, 1.78, 0.66), false);
@@ -817,11 +823,14 @@ function magmaCrab(b: Bins, t: Tpl, body: THREE.Group, J: Joint) {
   const rock = (g: Geo, k = 1) => glowBy(paint(facet(g), (p) => (crack(p) < 0.07 * k ? _c.copy(lava) : _c.copy(basalt).multiplyScalar(0.85 + 0.35 * smooth(0.3, 1.1, p.y))), 1.5), (p) => (crack(p) < 0.07 * k ? 1 : 0));
   b.add('b', 'g', rock(new THREE.SphereGeometry(1, 26, 14).scale(0.82, 0.38, 0.62).translate(0, 0.66, 0)));
   // its shell is the stolen steel drum: a dish of hammered copper with glowing notes
-  b.add('b', 'x', paint(lathe([[0, 0.93], [0.25, 0.94], [0.42, 0.97], [0.5, 1.02], [0.54, 1.05], [0.56, 1.02], [0.56, 0.9]], 30), (p) => _c.set('#c8823a').lerp(new THREE.Color('#ffd08a'), smooth(0.93, 1.05, p.y) * 0.4)));
+  b.add('b', 'x', paint(lathe([[0, 0.93], [0.25, 0.94], [0.42, 0.97], [0.5, 1.02], [0.54, 1.05], [0.56, 1.02], [0.56, 0.9]], 30), (p) => _c.set('#e0b070').lerp(new THREE.Color('#fff0c8'), smooth(0.93, 1.05, p.y) * 0.5)));
   b.add('b', 'x', paint(at(torus(0.55, 0.03, 5, 30).rotateX(Math.PI / 2), 0, 1.05, 0), GOLD));
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * Math.PI * 2, r = i ? 0.33 : 0;
-    b.add('notes', 'f', paint(at(scl(sph(0.08 + (i ? 0 : 0.03), 12, 6), 1, 0.15, 0.8).rotateY(-a), Math.cos(a) * r, 0.95 + r * 0.06, Math.sin(a) * r), '#ffb060', 0.7));
+  // the notes of the pan: hammered petals ringed in dark steel, glowing on the beat
+  for (let i = 0; i < 9; i++) {
+    const a = ((i - 1) / 8) * Math.PI * 2, r = i ? 0.36 : 0, s = i ? 0.1 : 0.14;
+    const y = 0.945 + (r / 0.42) ** 2 * 0.04;
+    b.add('b', 'x', paint(torus(s, 0.012, 4, 18).rotateX(Math.PI / 2).scale(1, 1, i ? 0.75 : 1).rotateY(-a).translate(Math.cos(a) * r, y + 0.005, Math.sin(a) * r), '#5a3a22'));
+    b.add('notes', 'f', paint(scl(sph(s * 0.92, 14, 6), 1, 0.12, i ? 0.72 : 1).rotateY(-a).translate(Math.cos(a) * r, y, Math.sin(a) * r), '#ffb060', 0.8));
   }
   // armour slabs that fall away in phase 1
   for (let i = 0; i < 7; i++) {
@@ -1134,11 +1143,12 @@ function twin(b: Bins, t: Tpl, body: THREE.Group, J: Joint, variant: number) {
   // the sword arm: a great tuning-fork blade that hums; the shield arm
   const sR = V(0.38, 1.08, 0.05);
   b.add('armR', 'x', paint(alongY(capsule(0.065, 0.36, 3, 8), V(0.42, 0.86, 0.1), V(0.1, 1, -0.2)), steelP), paint(at(sph(0.075, 10, 8), 0.44, 0.64, 0.2), trim));
-  const blade = (x: number) => paint(box(0.04, 1.05, 0.02).translate(x, 1.18, 0.24), (p) => _c.set(moon ? '#dfe8ff' : '#fff6dc').multiplyScalar(0.8 + 0.3 * smooth(0.7, 1.7, p.y)));
-  b.add('armR', 'x', paint(at(cyl(0.022, 0.022, 0.3, 6), 0.44, 0.62, 0.24), '#3a2a24'));
-  b.add('armR', 'x', paint(at(box(0.34, 0.05, 0.06), 0.44, 0.78, 0.24), trim), paint(at(sph(0.04, 8, 6), 0.44, 0.47, 0.24), trim));
-  b.add('armR', 'x', blade(0.44 - 0.05), blade(0.44 + 0.05), paint(at(box(0.14, 0.06, 0.03), 0.44, 0.66 + 0.18, 0.24), trim));
-  b.add('armR', 'f', paint(at(box(0.012, 0.95, 0.008), 0.44, 1.2, 0.24), glow, 1.8));
+  // (held point-down along the arm: raised, it points to the sky; swung, it cleaves the ground ahead)
+  const blade = (x: number) => paint(box(0.045, 0.75, 0.022).translate(x, 0.065, 0.24), (p) => _c.set(moon ? '#dfe8ff' : '#fff6dc').multiplyScalar(0.8 + 0.3 * smooth(0.44, -0.3, p.y)));
+  b.add('armR', 'x', paint(at(cyl(0.024, 0.024, 0.3, 6), 0.44, 0.64, 0.24), '#3a2a24'), paint(at(sph(0.045, 8, 6), 0.44, 0.8, 0.24), trim));
+  b.add('armR', 'x', paint(at(box(0.36, 0.05, 0.06), 0.44, 0.5, 0.24), trim), paint(at(box(0.15, 0.07, 0.035), 0.44, 0.45, 0.24), trim));
+  b.add('armR', 'x', blade(0.44 - 0.052), blade(0.44 + 0.052));
+  b.add('armR', 'f', paint(at(box(0.014, 0.66, 0.008), 0.44, 0.08, 0.24), glow, 1.8));
   const sL = V(-0.38, 1.08, 0.05);
   b.add('armL', 'x', paint(alongY(capsule(0.065, 0.32, 3, 8), V(-0.42, 0.88, 0.08), V(-0.1, 1, -0.1)), steelP));
   const sh = new THREE.Shape();
@@ -1184,7 +1194,7 @@ export function animateMini(kind: EnemyKind, n: Record<string, THREE.Object3D>, 
   const fast = Math.min(2, speed * 0.35 + 0.4);
   const hit = A.strike, w = A.wind, up = Math.max(A.roar, A.summon);
   const glow = (base: number) => {
-    if (mats) mats.flashK.value = base * (1 + A.phase * 0.5) + w * (0.6 + 0.5 * A.pulse) + A.flourish * 0.6;
+    if (mats) mats.flashK.value = base * (1 + A.phase * 0.5) + w * (0.6 + 0.5 * A.pulse) + A.flourish * 0.3;
   };
   switch (kind) {
     case 'toad': {
@@ -1410,7 +1420,7 @@ export function animateMini(kind: EnemyKind, n: Record<string, THREE.Object3D>, 
       const ph = beat * Math.PI;
       if (n.legL) n.legL.rotation.x = Math.sin(ph) * 0.4;
       if (n.legR) n.legR.rotation.x = -Math.sin(ph) * 0.4;
-      let sx = -0.55 + Math.sin(ph) * 0.04;
+      let sx = -0.6 + Math.sin(ph) * 0.04;
       sx = lerp(sx, -2.8, w);
       sx = lerp(sx, -0.75, hit);
       sx = lerp(sx, -3.0, up);

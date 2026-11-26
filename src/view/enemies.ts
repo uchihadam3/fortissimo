@@ -1410,9 +1410,9 @@ export class EnemyView {
       const red = A.wind * (0.04 + 0.28 * A.pulse) + A.strike * 0.22;
       const pf = this.parryFlash;
       const fl = A.flourish * A.flourish;
-      u.uFlash.value.r += red + pf * 0.5 + fl * 0.32 + A.summon * 0.12;
-      u.uFlash.value.g += red * 0.1 + pf * 0.36 + fl * 0.26 + A.summon * 0.05;
-      u.uFlash.value.b += red * 0.08 + pf * 0.1 + fl * 0.16 + A.summon * 0.22;
+      u.uFlash.value.r += red + pf * 0.34 + fl * 0.18 + A.summon * 0.12;
+      u.uFlash.value.g += red * 0.1 + pf * 0.24 + fl * 0.15 + A.summon * 0.05;
+      u.uFlash.value.b += red * 0.08 + pf * 0.06 + fl * 0.09 + A.summon * 0.22;
       u.uRim.value.copy(this.baseRim).lerp(_red, Math.min(0.85, A.wind * 0.75 + A.strike * 0.5));
       if (!this.isMini && this.mats) this.mats.flashK.value = this.mats.flashK.value * (1 + this.phase * 0.35) + A.wind * (0.5 + 0.6 * A.pulse) + A.flourish * 0.6;
       // the gargoyle: stone ↔ alive, the colour front sweeping up its body
