@@ -90,3 +90,21 @@ Everything stays procedural, wordless, deterministic in the sim and fast on phon
   **nothing in the mix changes**. Fill strokes sit at the level of the song's drums, never louder.
 - Sim: `viradaPattern`, the `virada` action (recorded, replayable in checkpoints), the boost and
   its stats (`stats.viradas`, `stats.viradaFull`). Determinism and checkpoints stay exact.
+
+## 4. v7.1 (after the player tried it)
+
+The player found the first viradas too fast and too much "on the screen". Now:
+- **Slow and clear:** one stroke every two beats (tan … tan …), 4 to 6 strokes, the last on beat 3
+  of a phrase's last bar, then the crash on the downbeat. A virada spans 2 or 3 bars. The beat
+  between two strokes is free for the baton. Difficulty grows with where the pads are (farther
+  apart in later lands), never with speed.
+- **One at a time, really in the world:** each mark is a golden drum pad lying on the ground
+  (a three.js object with a note on its skin, a short light column and a flat ring on the ground
+  closing onto it). It rises two beats before its stroke, where the screen is free and near the
+  pad before it. Struck, it pulses down and sinks; missed, it greys and sinks. Boss calls float
+  in the air near the boss, in red.
+- **Sound:** during a virada the song's kick, snare and drums step out and its hats or shakers
+  keep a soft pulse. A perfect stroke answers itself a 16th later (ta-dum). Outside a virada
+  nothing changes.
+- **Bosses:** a virada can come during a duel when no blow already on its way would land in it;
+  the bosses hold their next tells until it is over.

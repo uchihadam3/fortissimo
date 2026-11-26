@@ -1567,7 +1567,7 @@ export interface ViradaRender {
 
 /**
  * A virada over a battle song (full band and 10 towers firing, intensity `intensity`): the cue a bar
- * ahead, `n` marks across the last bar of a 6-bar phrase (8ths then 16ths), struck per `play`
+ * ahead, `n` marks a stroke every two beats ending on beat 3 of bar 5, struck per `play`
  * (perfect / good / partial: every other one missed / none: all missed), then viradaEnd on the
  * downbeat. Measured as stems: the song's drum kit with and without the virada (the duck), the rest
  * of the song (unchanged), the player's strokes (level vs the song's drums, the crash, the grid).
@@ -1583,20 +1583,11 @@ export async function renderVirada(song: SongId = 'meadow', o: { play?: ViradaPl
   const vBar = 5;
   const bars = 8;
   const seconds = t0 + bars * barDur + 1.5;
-  // the fill: 8ths, then 16ths into the downbeat (all on the grid, inside the last bar)
-  const PAT: Record<number, number[]> = {
-    2: [3, 3.5],
-    3: [2, 3, 3.5],
-    4: [2, 2.5, 3, 3.5],
-    5: [1, 2, 2.5, 3, 3.5],
-    6: [1, 2, 2.5, 3, 3.5, 3.75],
-    7: [1, 1.5, 2, 2.5, 3, 3.5, 3.75],
-    8: [1, 1.5, 2, 2.5, 3, 3.25, 3.5, 3.75],
-  };
-  const beats = PAT[n];
-  const start = t0 + vBar * barDur;
-  const end = start + barDur;
-  const marks = beats.map((b) => start + b * spb);
+  // the fill: a stroke every two beats, the last on beat 3 of the virada's last bar (bar vBar)
+  const end = t0 + (vBar + 1) * barDur;
+  const marks = Array.from({ length: n }, (_, i) => end - (n - i) * 2 * spb);
+  const beats = marks;
+  const start = marks[0];
   const quality = (i: number): TapQuality => (play === 'none' ? 'miss' : play === 'partial' ? (i % 2 === 1 ? 'miss' : 'perfect') : play);
   const hits = beats.filter((_, i) => quality(i) !== 'miss').length;
   const army = defaultArmy(10).map((x) => ({ ...x, level: 1 }));

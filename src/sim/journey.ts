@@ -20,7 +20,7 @@ import {
 import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng, hashString } from '../core/rng';
-import { RHYTHM, SOLO, CRESCENDO, COIN_VALUE, STRIKE, VIRADA, grooveOf, powerMul, viradaPattern, viradaReward, type TapQuality } from './rhythm';
+import { RHYTHM, SOLO, CRESCENDO, COIN_VALUE, STRIKE, VIRADA, grooveOf, powerMul, viradaMarks, viradaPattern, viradaReward, viradaSpan, type TapQuality } from './rhythm';
 import { BOSSES, DUEL, bossClass, shieldOf, type BossSpec } from './bosses';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
@@ -373,9 +373,9 @@ export type SimAction =
   | { sub: number; a: 'virada'; hits: number; n: number; perfects: number };
 
 /**
- * v7: a virada (a drum fill tapped on golden marks in the world). It plays on journey bar `bar`; its
- * strokes are the 16th steps `steps` of that bar (sim/song seconds `times`), from `start` (the bar's
- * downbeat) to `end` (the next downbeat).
+ * v7: a virada (a drum fill tapped on golden marks in the world). It ends in journey bar `bar`; its
+ * strokes are the 16th steps `steps` from the first bar of its span (sim/song seconds `times`), one
+ * every two beats, from `start` (the first stroke) to `end` (the downbeat after `bar`).
  */
 export interface Virada {
   /** 1… in the journey */
@@ -398,7 +398,7 @@ export interface Virada {
 const SPLIT_CLEAR = 3.5;
 
 /** bumped when the simulation changes what recorded actions mean (older checkpoints start over) */
-const SIM_REV = 7;
+const SIM_REV = 8;
 
 /** Where a fallen journey can start again: the beginning of a movement's breather. */
 export interface Checkpoint {
@@ -937,29 +937,33 @@ export class Journey {
   /**
    * Should a virada play on journey bar `vb` (asked two bars ahead, at the bar line)? In every
    * breather; otherwise on a streak (`streak`: the player's combo or groove is high), at a phrase end,
-   * not too soon after the last one, when no creature would bite before it is over — and in a duel
-   * only in a bar the bosses rest anyway (a virada never moves their blows). The first virada of a journey that teaches it waits for the first breather.
+   * not too soon after the last one, when nothing on its way would reach the shell while its pads rise —
+   * and in a duel only when no blow already on its way lands in it (the bosses then hold their next
+   * tells until it is over). The first virada of a journey that teaches it waits for the first breather.
    */
   viradaDue(vb: number, streak: boolean): boolean {
     const jb = this.journeyBar;
     if (jb === null || this.outcome !== 'playing' || !this.walking || vb !== jb + VIRADA.cueBars) return false;
+    const span = this.viradaSpanNow();
     const last = this.viradas[this.viradas.length - 1];
-    if (last && last.bar >= vb - 2) return false;
-    // a duel: only in a bar the bosses rest anyway (no blow lands in it, no tell on it or just before)
-    const start = (this.startBar! + vb) * this.barDur;
-    for (const b of this.blows) if (!b.resolved && b.t > start - this.spb * 0.5 && b.t < start + this.barDur + this.spb * 0.5) return false;
-    for (const e of this.enemies) if (e.alive && e.def.boss && BOSSES[e.kind] && e.nextAttackBar <= this.startBar! + vb) return false;
+    if (last && last.bar >= vb - span) return false;
+    // a duel: no blow already on its way lands in it (the bosses hold their next tells until it is over)
+    const start = (this.startBar! + vb - span + 1) * this.barDur;
+    const end = (this.startBar! + vb + 1) * this.barDur;
+    for (const b of this.blows) if (!b.resolved && b.t > start - this.spb * 0.5 && b.t < end + this.spb * 0.5) return false;
     if (this.breatherVirada(vb)) return true;
     if (!streak || this.inBreatherBar(vb) || (vb + 1) % VIRADA.phrase !== 0) return false;
     if (this.def.tutorial?.includes('virada') && !this.viradas.some((v) => v.breather)) return false;
     if (last && vb - last.bar < VIRADA.gapBars) return false;
-    // a streak's virada waits for a moment the hands are free: nothing about to bite before it is over
+    // a streak's virada waits for a moment the hands are free: nothing on its way that would reach
+    // the shell while the pads are rising (what comes before can be struck before)
     const T = this.turtle;
-    const clear = (VIRADA.cueBars + 1) * this.barDur;
+    const from = start - this.spb - this.time, to = end - this.time;
     for (const e of this.enemies) {
       if (!e.alive || e.structure || e.def.boss || e.burrowed) continue;
       const gap = Math.hypot(e.x - T.x, e.z - T.z) - SHELL_REACH - e.def.radius * 0.5;
-      if (gap < e.speed * clear) return false;
+      const arrive = gap / Math.max(1e-6, e.speed);
+      if (arrive >= from && arrive <= to) return false;
     }
     return true;
   }
@@ -972,16 +976,34 @@ export class Journey {
     return false;
   }
 
-  /** a virada cued for journey bar `bar` (recorded): the bosses hold their blows around it */
+  /** is a legend or a boss in the fight (its viradas get more marks) */
+  private viradaHard(): boolean {
+    return this.enemies.some((e) => e.alive && e.def.boss && !!BOSSES[e.kind]);
+  }
+
+  /** how many bars the next virada would span */
+  private viradaSpanNow(): number {
+    return viradaSpan(viradaMarks(this.def.world, this.viradaLevel, this.viradaHard()));
+  }
+
+  /**
+   * A virada cued to end in journey bar `bar` (recorded): its strokes come one every two beats over
+   * the bars before, the last on beat 3 of `bar`. The bosses hold their blows around it.
+   */
   viradaCue(bar: number): Virada | null {
     const jb = this.journeyBar;
-    if (jb === null || this.outcome !== 'playing' || bar < jb + 1 || bar > jb + 4) return null;
-    if (this.viradas.some((v) => v.bar >= bar - 2)) return null;
-    const hard = this.enemies.some((e) => e.alive && e.def.boss && !!BOSSES[e.kind]);
+    if (jb === null || this.outcome !== 'playing') return null;
+    const hard = this.viradaHard();
+    const steps = viradaPattern(this.def.world, this.def.seed ?? 7, this.viradas.length + 1, this.viradaLevel, hard);
+    const span = viradaSpan(steps.length);
+    // its first bar must still be at least a bar ahead (the music, and the first mark's ring)
+    if (bar - span + 1 < jb + 2 || bar > jb + VIRADA.cueBars) return null;
+    if (this.viradas.some((v) => v.bar >= bar - span)) return null;
     const k = this.viradas.length + 1;
-    const steps = viradaPattern(this.def.world, this.def.seed ?? 7, k, this.viradaLevel, hard);
-    const start = (this.startBar! + bar) * this.barDur;
-    const v: Virada = { k, bar, level: this.viradaLevel, steps, times: steps.map((s) => start + s * this.stepDur), start, end: start + this.barDur, breather: this.inBreatherBar(bar), into: this.inBreatherBar(bar) ? this.movementAt(bar) : 0, hard, done: false };
+    const first = (this.startBar! + bar - span + 1) * this.barDur;
+    const end = (this.startBar! + bar + 1) * this.barDur;
+    const times = steps.map((s) => first + s * this.stepDur);
+    const v: Virada = { k, bar, level: this.viradaLevel, steps, times, start: times[0], end, breather: this.inBreatherBar(bar), into: this.inBreatherBar(bar) ? this.movementAt(bar) : 0, hard, done: false };
     this.viradas.push(v);
     this.log.push({ sub: this.sub, a: 'viradaCue', bar });
     this.emit({ t: this.time, type: 'viradaCue', virada: v });
@@ -2149,7 +2171,7 @@ export class Journey {
     }
     if (!who) return;
     // a virada is cued: no tell in its bar, no blows landing in it (the boss waits a bar or two)
-    if (this.startBar !== null && this.viradas.some((v) => !v.done && (bar - this.startBar! === v.bar || bar - this.startBar! === v.bar - 1))) return;
+    if (this.startBar !== null && this.viradas.some((v) => !v.done && bar - this.startBar! <= v.bar && bar - this.startBar! >= v.bar - viradaSpan(v.steps.length))) return;
     const spec = BOSSES[who.kind]!;
     if (who.burrowed) {
       // the dune worm surfaces to strike

@@ -325,7 +325,7 @@ class BotRhythm {
       this.blowsSeen = j.stats.blowsTaken;
       this.sync();
     }
-    // the viradas: cued two bars ahead on a streak (or in a breather); every mark tapped on its stroke
+    // the viradas: cued ahead on a streak (or in a breather); every mark tapped on its stroke
     const jb = j.journeyBar;
     if (jb !== null && jb !== this.cueBar) {
       this.cueBar = jb;
@@ -352,10 +352,10 @@ class BotRhythm {
       } else this.sync();
     }
   }
-  /** the hands are on a virada's marks (no other tap then) */
+  /** the hands are on a virada's mark on this beat (the beats between two strokes are free) */
   private onMarks(t: number): boolean {
     const v = this.j.viradaPending();
-    return !!v && t >= v.times[0] - this.j.spb * 0.5 && t < v.end;
+    return !!v && v.times.some((x) => Math.abs(t - x) < this.j.spb * 0.5);
   }
   /** one tap on this beat: what a player would tap now */
   private tap() {

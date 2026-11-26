@@ -206,24 +206,27 @@ export class Power {
 
 /**
  * The viradas (v7, docs/DESIGN-v7.md): drum fills the player taps on golden marks in the world.
- * A virada fills one bar (the last of a phrase); its strokes sit on 8ths and 16ths and end before the
- * next downbeat. It comes on a streak (a combo or a groove, at a phrase end, not too often) and in
- * every breather. Full viradas in a row raise its level (one more mark, a bigger reward).
+ * A virada is slow and clear: one mark at a time, one stroke every two beats (tan … tan … tan),
+ * so the beat between two strokes is free for the baton. Its last stroke falls on beat 3 of a
+ * phrase's last bar and the song comes back with a crash on the next downbeat. It comes on a streak
+ * (a combo or a groove, ending at a phrase end, not too often) and in every breather. Full viradas in a row raise its level (one more mark, a bigger reward).
  */
 export const VIRADA = {
-  /** a streak: this combo, or this groove (cued two bars ahead) */
+  /** a streak: this combo, or this groove */
   combo: 8,
   groove: 2,
-  /** phrases are this many bars; a streak's virada plays in the last bar of one */
+  /** phrases are this many bars; a streak's virada ends in the last bar of one */
   phrase: 4,
   /** journey bars from one virada to a streak's next (at least) */
   gapBars: 8,
-  /** the bars of a breather (from its first bar) with a virada: rest − 5 and rest − 1 */
+  /** the bars of a breather a virada ends in: (its movement's bar) − 5 and − 1 */
   breather: [5, 1] as readonly number[],
-  /** bars ahead a virada is cued (the music must know at least one bar ahead) */
-  cueBars: 2,
-  /** beats before the first stroke the marks appear (and each ring takes to close) */
-  lead: 1.25,
+  /** bars ahead (of its last bar) a virada is cued: its first stroke is still ≥ 1 bar away */
+  cueBars: 4,
+  /** 16th steps between two strokes: two beats (a half note) */
+  spacing: 8,
+  /** beats before its stroke a mark appears (its ring takes this long to close): one spacing */
+  lead: 2,
   maxLevel: 2,
   /** marks of a level-0 virada per land (the legends and the bosses: hardest patterns), + level, at most 6 */
   marks: { meadow: 4, desert: 5, ice: 5, forge: 5, citadel: 5 } as Record<WorldId, number>,
@@ -249,44 +252,27 @@ export const VIRADA = {
   ffPerfect: 0.1,
 };
 
-/**
- * The fills, as 16th steps (0…15) of the virada's bar, by number of marks. The meadow is plain
- * (quarters and 8ths); later lands add 16ths and syncopation; the hardest set is for legends and bosses.
- */
-const FILLS: Record<'plain' | 'rich' | 'hard', Record<number, number[][]>> = {
-  plain: {
-    4: [[0, 4, 8, 12], [4, 8, 10, 12], [0, 4, 8, 10], [0, 2, 4, 8], [4, 6, 8, 12]],
-    5: [[0, 4, 8, 10, 12], [4, 6, 8, 10, 12], [0, 4, 6, 8, 12], [0, 2, 4, 8, 12], [2, 4, 8, 10, 12]],
-    6: [[0, 4, 6, 8, 10, 12], [4, 6, 8, 10, 12, 14], [0, 2, 4, 8, 10, 12], [0, 4, 8, 10, 12, 14]],
-  },
-  rich: {
-    5: [[0, 4, 8, 10, 11], [4, 6, 8, 11, 12], [0, 3, 6, 8, 12], [2, 4, 8, 10, 12], [4, 8, 10, 12, 13], [0, 4, 6, 7, 8]],
-    6: [[0, 4, 6, 8, 10, 11], [4, 6, 7, 8, 10, 12], [0, 3, 6, 8, 10, 12], [2, 4, 6, 8, 11, 12], [4, 8, 9, 10, 12, 14]],
-  },
-  hard: {
-    5: [[0, 3, 6, 8, 11], [2, 4, 7, 8, 10], [0, 3, 4, 7, 10], [1, 4, 6, 9, 12]],
-    6: [[0, 3, 6, 8, 10, 11], [2, 4, 7, 8, 10, 13], [0, 3, 4, 7, 10, 12], [1, 4, 6, 9, 12, 14], [0, 2, 3, 6, 8, 11]],
-  },
-};
-
 /** how many marks a virada has in a land, at a chain level (the hardest ones: never fewer than 5) */
 export function viradaMarks(world: WorldId, level: number, hard = false): number {
   const base = Math.max(VIRADA.marks[world], hard ? 5 : 0);
   return Math.min(VIRADA.maxMarks, base + Math.max(0, Math.min(VIRADA.maxLevel, level | 0)));
 }
 
+/** how many bars a virada of n marks spans (its strokes end on beat 3 of the last one) */
+export function viradaSpan(n: number): number {
+  return Math.max(1, Math.ceil((n * VIRADA.spacing) / 16));
+}
+
 /**
- * The fill of virada k (1…) of a journey at a chain level, as 16th steps of its bar: same journey,
- * same viradas. `hard`: a legend or a boss is in the fight (the hardest patterns).
+ * The strokes of virada k (1…) of a journey at a chain level, as 16th steps from the first bar of
+ * its span: one every two beats, the last on beat 3 of the last bar. Same journey, same viradas.
+ * `hard` (a legend or a boss in the fight) only adds marks; the player's challenge grows with where
+ * the marks are, never with how fast they come.
  */
-export function viradaPattern(world: WorldId, seed: number, k: number, level: number, hard = false): number[] {
+export function viradaPattern(world: WorldId, _seed: number, _k: number, level: number, hard = false): number[] {
   const n = viradaMarks(world, level, hard);
-  // the very first virada of the game is the plainest one: four quarters
-  if (world === 'meadow' && k === 1 && level === 0 && !hard) return [0, 4, 8, 12];
-  const set = hard ? FILLS.hard : world === 'meadow' ? FILLS.plain : FILLS.rich;
-  const list = set[n] ?? set[Math.max(...Object.keys(set).map(Number))];
-  const i = Math.abs((seed * 7 + k * 13 + level * 5) | 0) % list.length;
-  return list[i];
+  const span = viradaSpan(n) * 16;
+  return Array.from({ length: n }, (_, i) => span - (n - i) * VIRADA.spacing);
 }
 
 /**

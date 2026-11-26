@@ -10,7 +10,7 @@ import { CAMPAIGN, LEVEL_BY_ID, endlessDef } from '../src/data/campaign';
 import { Journey, SUB, SUBS_PER_BAR, type Blow, type Enemy, type JourneyDef, type SimEvent, type Tower } from '../src/sim/journey';
 import { BOSSES, DUEL, MID_BOSSES, parryQuality, shieldOf } from '../src/sim/bosses';
 import { BAND, ENEMIES, SONGS, TOWERS, TOWER_KINDS, WORLDS, type EnemyKind, type TowerKind } from '../src/sim/defs';
-import { Power, RHYTHM, VIRADA, grooveOf, nearestGrid, powerMul, quality, viradaMarks, viradaPattern, viradaReward } from '../src/sim/rhythm';
+import { Power, RHYTHM, VIRADA, grooveOf, nearestGrid, powerMul, quality, viradaMarks, viradaPattern, viradaReward, viradaSpan } from '../src/sim/rhythm';
 import { SLOTS, SLOT_NEIGHBOURS } from '../src/sim/shell';
 import { playBot, playSpam } from '../src/sim/bots';
 import { checkpointOf, newSave, rememberCheckpoint, saveFromCode, saveToCode, validate } from '../src/core/save';
@@ -499,21 +499,21 @@ section('rhythm');
   // creatures, like the baton, count the eighths from groove 3
   const g6 = new Power(80);
   check('creatures on the eighths at a high groove', g6.tap(spb * 5.5, spb, 'creature').q === 'perfect' && new Power(10).tap(spb * 5.5, spb, 'creature').q === 'miss');
-  // the viradas: 16th steps inside one bar, 4–6 marks, the same journey gives the same fills
+  // the viradas: slow and clear, one stroke every two beats, 4–6 marks, the last on beat 3 of the last bar
   for (const w of WORLDS) {
     for (let lv = 0; lv <= 2; lv++) {
       for (const hard of [false, true]) {
         for (let k = 1; k <= 12; k++) {
           const p = viradaPattern(w, 7, k, lv, hard);
-          const ok = p.length === viradaMarks(w, lv, hard) && p.length >= 4 && p.length <= 6 && p.every((x, i) => Number.isInteger(x) && x >= 0 && x <= 15 && (i === 0 || x > p[i - 1]));
+          const span = viradaSpan(p.length) * 16;
+          const ok = p.length === viradaMarks(w, lv, hard) && p.length >= 4 && p.length <= 6 && p.every((x, i) => Number.isInteger(x) && x >= 0 && x < span && (i === 0 || x - p[i - 1] === VIRADA.spacing)) && p[p.length - 1] === span - 8;
           if (!ok) check(`virada ${w} lv${lv} ${hard ? 'hard' : ''} k${k}`, false, p.join());
         }
       }
     }
   }
-  check('the first virada is plain quarters', viradaPattern('meadow', 1, 1, 0).join() === '0,4,8,12');
-  check('the meadow fills are plain (no 16ths)', [1, 2, 3, 4, 5].every((k) => viradaPattern('meadow', 3, k, 1).every((x) => x % 2 === 0)));
-  check('later lands add 16ths', [1, 2, 3, 4, 5, 6].some((k) => viradaPattern('forge', 3, k, 0).some((x) => x % 2 === 1)));
+  check('a stroke every two beats', VIRADA.spacing === 8 && viradaPattern('meadow', 1, 1, 0).join() === '0,8,16,24' && viradaSpan(4) === 2 && viradaSpan(6) === 3);
+  check('each mark rises one stroke ahead (only one at a time)', VIRADA.lead * 4 === VIRADA.spacing);
   check('a chain adds a mark', viradaMarks('meadow', 0) === 4 && viradaMarks('meadow', 1) === 5 && viradaMarks('meadow', 2) === 6 && viradaMarks('desert', 2) === 6);
   check('same journey, same viradas', viradaPattern('ice', 11, 3, 1).join() === viradaPattern('ice', 11, 3, 1).join());
   const full = viradaReward('desert', 0, 5, 5, 2), perf = viradaReward('desert', 0, 5, 5, 5), half = viradaReward('desert', 0, 3, 5, 3), few = viradaReward('desert', 0, 2, 5, 2);
@@ -641,7 +641,7 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   }
   check('a streak brings a virada at a phrase end', vb > 0 && (vb + 1) % VIRADA.phrase === 0, `${vb}`);
   const v = j.viradaCue(vb)!;
-  check('a cued virada: one bar, its strokes inside it', !!v && v.times.length >= 4 && v.times.every((t) => t >= v.start - 1e-9 && t < v.end - 1e-9) && Math.abs(v.end - v.start - j.barDur) < 1e-9);
+  check('a cued virada: its strokes two beats apart, the last two beats before its end', !!v && v.times.length >= 4 && v.times.every((t, i) => i === 0 || Math.abs(t - v.times[i - 1] - 2 * j.spb) < 1e-9) && Math.abs(v.end - v.times[v.times.length - 1] - 2 * j.spb) < 1e-9 && v.start === v.times[0] && Math.abs((v.end / j.barDur) - (j.startBar! + vb + 1)) < 1e-9);
   check('cued once', j.viradaCue(vb) === null && !j.viradaDue(vb, true));
   check('the cue is recorded', j.log.some((a) => a.a === 'viradaCue' && a.bar === vb));
   check('not before its bar', !j.virada(v.steps.length, v.steps.length, v.steps.length));
@@ -663,13 +663,19 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   const due: number[] = [];
   for (let jb = vb; jb < m1.bar; jb++) {
     toBar(jb);
+    // a virada over: told (a miss in it)
+    const p = j.viradaPending();
+    if (p && j.time >= p.end) j.virada(1, p.steps.length, 0);
     const at = jb + VIRADA.cueBars;
     if (j.viradaDue(at, false)) {
       due.push(at);
-      const w = j.viradaCue(at)!;
-      run(j, w.end - j.time + 0.01);
-      j.virada(1, w.steps.length, 0);
+      j.viradaCue(at);
     }
+  }
+  const last = j.viradaPending();
+  if (last) {
+    run(j, last.end - j.time + 0.01);
+    j.virada(1, last.steps.length, 0);
   }
   check('two viradas in a breather', due.length === 2 && due[1] === m1.bar - 1 && due[0] === m1.bar - 5, due.join());
   check('a virada with misses resets the chain', j.viradaLevel === 0 && j.stats.viradas === 3);
@@ -682,7 +688,7 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   for (let i = 0; i < 24; i++) {
     run(j, j.barDur, (evs) => evs.forEach((e) => e.type === 'bossAttack' && blows.push(...e.blows.map((b) => b.t))));
     const jb = j.journeyBar!;
-    if (cued === null && j.blows.length === 0 && (jb + VIRADA.cueBars + 1) % VIRADA.phrase === 0 && j.viradaCue(jb + VIRADA.cueBars)) cued = jb + VIRADA.cueBars;
+    if (cued === null && j.blows.every((b) => b.resolved) && j.viradaCue(jb + VIRADA.cueBars)) cued = jb + VIRADA.cueBars;
   }
   const v = j.viradas[0];
   check('a virada cued in a duel', !!v && cued !== null);

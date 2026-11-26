@@ -861,7 +861,10 @@ export class Rhythm {
     // the first stroke announces the fill, the last one lands heaviest
     const acc = k === N - 1 ? 1.04 : k === 0 ? 1 : 0.9;
     const vel = FILL * F.trim * (v?.scale ?? 1) * (perfect ? 1 : 0.8) * (1 + 0.03 * lv) * acc;
-    this.play(F.drum, ch, t, this.fall(v, 'drum', c, F.lo, F.hi, x), F.dv * vel, 0.6, { release: 0.2, lp: perfect ? undefined : 3800 });
+    const dm = this.fall(v, 'drum', c, F.lo, F.hi, x);
+    this.play(F.drum, ch, t, dm, F.dv * vel, 0.6, { release: 0.2, lp: perfect ? undefined : 3800 });
+    // the strokes are two beats apart: a perfect one answers itself a 16th later (ta-dum), softer and lower
+    if (perfect) this.play(F.drum, ch, t + this.grid().barDur / 16, dm - 5, F.dv * vel * 0.45, 0.5, { release: 0.18, lp: 3200 });
     if (F.body && (perfect || lv >= 1 || x >= 0.5)) this.play(F.body, this.ch(pan * 0.4), t, this.fall(v, 'body', c, F.bodyLo, F.bodyHi, x), F.bv * vel * (perfect ? 1 : 0.75), 0.5, { release: 0.15 });
     // a stroke's slight detune comes from its index (no randomness: the fill is the same every time)
     const jit = ((k * 7) % 5) * 0.04 - 0.08;

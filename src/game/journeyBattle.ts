@@ -47,7 +47,7 @@ import { JourneyTutorial } from './journeyTutorial';
 import { ICON } from '../ui/icons';
 import { Power, RHYTHM, CRESCENDO, VIRADA, grooveOf, powerMul, quality, viradaReward, type TapQuality } from '../sim/rhythm';
 import type { Enemy, Blow, Virada } from '../sim/journey';
-import { MarkSet, placeMarks, worldAt } from '../view/virada';
+import { MarkSet, pickPad, placeMarks, worldAt } from '../view/virada';
 import { BOSSES, DUEL, parryQuality, shieldOf } from '../sim/bosses';
 import { LEGEND_HEIGHT, type LegendKind } from '../view/legends';
 import { ENEMY_SCALE } from '../sim/defs';
@@ -1083,42 +1083,40 @@ export class JourneyBattle {
     this.vir = { v, set: null, res: v.steps.map(() => null) };
   }
 
-  /** the colossus (where the marks are anchored) */
-  private colossusAnchor = () => this.view.turtle.group.position;
-
-  /** where a virada's marks go now: spread over the free screen, as world points around the colossus */
-  private layoutVirada(v: Virada) {
-    // clear of the HUD and of a boss's call still showing
-    const pts = placeMarks(v.times.length, [...this.hud.avoidRects(), ...this.callRuns.flatMap((c) => c.set.rects())], { seed: v.k + (this.def.seed ?? 7) });
-    const anchor = this.colossusAnchor().clone();
-    const heart = this.view.turtle.heartWorld(new THREE.Vector3());
-    return worldAt(this.view, pts, heart).map((w, i) => ({ off: w.sub(anchor), x: pts[i].x, y: pts[i].y }));
+  /** how far the next pad of a virada may be from the one before (× the short side of the screen): wider in later lands */
+  private padReach(v: Virada): [number, number] {
+    const w = { meadow: 0, desert: 1, ice: 2, forge: 3, citadel: 4 }[this.def.world] ?? 0;
+    const lo = 0.2 + 0.02 * w + (v.hard ? 0.03 : 0);
+    return [lo, lo + 0.08 + 0.01 * w];
   }
 
+  /** a virada's pads rise one at a time on the ground, each where the screen is free when it rises */
   private placeVirada(r: ViradaRun) {
     const v = r.v;
-    r.set = new MarkSet(this.hud.viradaEl, 'gold', v.times, this.colossusAnchor, this.layoutVirada(v), VIRADA.lead * this.sim.spb, null, v.level);
+    const seed = (this.def.seed ?? 7) * 131 + v.k * 17;
+    r.set = new MarkSet(
+      this.view.scene, 'gold', v.times,
+      (i, prev) => pickPad(this.view, [...this.hud.avoidRects(), ...this.callRuns.flatMap((c) => c.set.rects())], prev, { seed: seed + i * 7, reach: this.padReach(v) }),
+      VIRADA.lead * this.sim.spb, null, v.level, true,
+    );
   }
 
-  /** a boss's call: around the boss on screen, as world points that travel with the colossus (and the camera) */
-  private layoutCall(e: Enemy, n: number) {
+  /** a boss's call: floating around the boss on screen, as world points in the air near it */
+  private layoutCall(e: Enemy, n: number): THREE.Vector3[] {
     const ev = this.view.enemies.get(e.id);
     const bp = ev ? ev.bossPoint(new THREE.Vector3()) : new THREE.Vector3(e.x, 3, e.z);
     const sc = this.view.screen(bp);
-    const around = sc.behind ? undefined : { x: sc.x, y: sc.y };
+    const around = sc.behind ? { x: window.innerWidth / 2, y: window.innerHeight * 0.4 } : { x: sc.x, y: sc.y };
     const pts = placeMarks(n, this.hud.avoidRects(), { seed: e.attacks, around });
-    const anchor = this.colossusAnchor().clone();
-    return worldAt(this.view, pts, bp, 0.96).map((w, i) => ({ off: w.sub(anchor), x: pts[i].x, y: pts[i].y }));
+    return worldAt(this.view, pts, bp, 0.96);
   }
 
-  /** every few frames: a set whose marks the camera pushed off screen or under the HUD is laid out again */
+  /** every few frames: a pad the camera swung off the screen (or under the HUD) rises again somewhere free */
   private relayout(vt: number) {
     if (vt < this.relayoutAt) return;
     this.relayoutAt = vt + 0.3;
     const avoid = this.hud.avoidRects();
-    const r = this.vir;
-    if (r?.set && vt >= r.set.from && r.set.bad(avoid)) r.set.move(this.layoutVirada(r.v).map((p) => p.off));
-    for (const c of this.callRuns) if (vt >= c.set.from && c.set.bad(avoid)) c.set.move(this.layoutCall(c.blows[0].enemy, c.blows.length).map((p) => p.off));
+    this.vir?.set?.replaceLost(vt, avoid);
   }
   private relayoutAt = 0;
 
@@ -1126,7 +1124,8 @@ export class JourneyBattle {
   private startCall(e: Enemy, tells: number[], blows: Blow[]) {
     if (!this.view.enemies.get(e.id) || !blows.length) return;
     const lit = blows.map((_, i) => tells[i] ?? -1);
-    const set = new MarkSet(this.hud.viradaEl, 'boss', blows.map((b) => b.t), this.colossusAnchor, this.layoutCall(e, blows.length), this.sim.barDur, lit, 0);
+    let pts: THREE.Vector3[] | null = null;
+    const set = new MarkSet(this.view.scene, 'boss', blows.map((b) => b.t), (i) => (pts ??= this.layoutCall(e, blows.length))[i] ?? null, this.sim.barDur, lit, 0, false);
     this.callRuns.push({ set, blows });
   }
 
@@ -1165,10 +1164,10 @@ export class JourneyBattle {
     audio.viradaHit(i, n, this.soundAt(v.times[i], q), q, pan);
     if (!set) return;
     if (q === 'miss') {
-      set.miss(i);
+      set.miss(i, this.lastVt);
       return;
     }
-    set.hit(i, q === 'perfect');
+    set.hit(i, q === 'perfect', this.lastVt);
     const w = set.world(i);
     const fx = this.view.fx;
     fx.burst(w, '#ffd36b', q === 'perfect' ? 26 : 16, 3.4, 0.2, 0.6);
@@ -1195,11 +1194,12 @@ export class JourneyBattle {
       } else this.startVirada(pend);
     }
     const project = (w: THREE.Vector3) => this.view.screen(w);
+    const cam = this.view.engine.camera;
     const r = this.vir;
     if (r && !this.ended) {
       const v = r.v;
       if (!r.set && vt >= v.times[0] - VIRADA.lead * s.spb - 0.3) this.placeVirada(r);
-      r.set?.update(vt, project);
+      r.set?.update(vt, project, cam);
       if (!this.paused) {
         for (let i = 0; i < v.times.length; i++) {
           if (r.res[i] !== null || vt <= v.times[i] + RHYTHM.good + 0.06) continue;
@@ -1216,10 +1216,10 @@ export class JourneyBattle {
     for (const c of this.callRuns) {
       c.blows.forEach((b, i) => {
         if (c.set.marks[i].state !== 0) return;
-        if (b.q === 'perfect' || b.q === 'good') c.set.hit(i, b.q === 'perfect');
-        else if (b.resolved || vt > b.t + 0.32 || !b.enemy.alive) c.set.miss(i);
+        if (b.q === 'perfect' || b.q === 'good') c.set.hit(i, b.q === 'perfect', vt);
+        else if (b.resolved || vt > b.t + 0.32 || !b.enemy.alive) c.set.miss(i, vt);
       });
-      c.set.update(vt, project, () => {
+      c.set.update(vt, project, cam, () => {
         const ev = this.view.enemies.get(c.blows[0].enemy.id);
         if (ev) this.view.fx.burst(ev.bossPoint(new THREE.Vector3()), '#ff5a8a', 10, 2.4, 0.18, 0.4);
       });
@@ -1230,7 +1230,7 @@ export class JourneyBattle {
     }
     this.callRuns = this.callRuns.filter((c) => !c.set.over && c.set.until === Infinity);
     if (!this.ended) this.relayout(vt);
-    for (const f of this.fading) f.update(vt, project);
+    for (const f of this.fading) f.update(vt, project, cam);
     this.fading = this.fading.filter((f) => !f.over);
   }
 

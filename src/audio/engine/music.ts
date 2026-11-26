@@ -625,6 +625,8 @@ export type ThemeFactory = (id: TrackId) => Theme | null;
 
 /** the song's drum kit (what steps back in a virada): every unpitched one-shot, the toms, taiko, timpani */
 const KIT: ReadonlySet<BufInst> = new Set<BufInst>([...PERC, 'tom', 'taiko', 'timp', 'tdrum']);
+/** what keeps the time softly through a virada (hats, shakers, ticks) */
+const PULSE: ReadonlySet<BufInst> = new Set<BufInst>(['hat', 'shaker', 'tick', 'tamb']);
 /** a note this close before the window's edge already belongs to it (humanised notes sit a few ms early) */
 const EDGE = 0.03;
 
@@ -798,7 +800,8 @@ export class Director {
 
   /**
    * A virada: from `from` until `to` (context times on the grid) the song's own drum kit steps back
-   * (tacet: the bass and the harmony keep the time); its crash on the downbeat `to` is left out too
+   * (the kick, the snare and the drums tacet, the hats and shakers soft: the bass, the harmony and that
+   * light pulse keep the time); its crash on the downbeat `to` is left out too
    * (the virada's own crash replaces it). Bars are composed just ahead of time, so this applies to
    * every bar not composed yet: call it at least a bar ahead. A new virada replaces the previous one.
    */
@@ -857,7 +860,9 @@ export class Director {
     if (this.stem && (this.stem === 'drums') !== kit) return 0;
     if (!kit) return 1;
     for (const w of this.viradas) {
-      if (t >= w.from - EDGE && t < w.to - EDGE) return 0;
+      // a virada is slow (a stroke every two beats): the light pulse keeps the groove going, softly;
+      // the kick, the snare and the drums step out so the player's strokes are the drums
+      if (t >= w.from - EDGE && t < w.to - EDGE) return PULSE.has(inst) ? 0.5 : 0;
       if ((inst === 'crash' || inst === 'gong') && t >= w.to - EDGE && t < w.to + 0.06) return 0;
     }
     return 1;
