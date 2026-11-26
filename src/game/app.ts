@@ -429,6 +429,7 @@ export class App {
       collected: r.collected,
       time: r.time,
       crown: victory && mode === 'virtuoso',
+      rhythm: r.accuracy !== undefined && (r.judged ?? 0) > 0 ? { accuracy: r.accuracy, bestCombo: r.bestCombo ?? 0, crescendo: r.crescendo ?? 0, movements: r.movements ?? 1 } : undefined,
       next: victory && nextEntry && isLevelOpen(save, nextEntry) ? withStory(() => this.playLevel(nextEntry.id, 'normal')) : undefined,
       retry: () => this.playLevel(id, mode),
       retryFrom: !victory && r.checkpoint ? { movement: r.checkpoint.movement, go: () => this.playLevel(id, mode, r.checkpoint!) } : undefined,

@@ -552,12 +552,13 @@ export class Screens {
     return el;
   }
 
-  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; retryFrom?: { movement: number; go: () => void }; map: () => void; scene?: () => void; sceneNew?: boolean }) {
+  async results(o: { victory: boolean; stars: number; kills: number; collected: number; time: number; crown: boolean; endless?: number; next?: () => void; retry: () => void; retryFrom?: { movement: number; go: () => void }; map: () => void; scene?: () => void; sceneNew?: boolean; rhythm?: { accuracy: number; bestCombo: number; crescendo: number; movements: number } }) {
     const el = this.screen('results dim center', `<div class="res">
       <div class="title ${o.victory ? '' : 'lose'}">${o.endless !== undefined ? `${this.t('endless')} · ${o.endless}` : o.victory ? this.t('victory') : this.t('defeat')}</div>
       ${o.victory || o.endless !== undefined ? `<div class="stars"><i>${ICON.star}</i><i class="mid">${ICON.star}</i><i>${ICON.star}</i></div>` : ''}
       ${o.crown ? `<i class="crown">${ICON.crown}</i>` : ''}
       <div class="row stats"><span><i>${ICON.wave}</i>${o.kills}</span><span><i>${ICON.coin}</i>${o.collected}</span><span>⏱ ${Math.floor(o.time / 60)}:${String(Math.floor(o.time % 60)).padStart(2, '0')}</span></div>
+      ${o.rhythm ? `<div class="row rhythm-res ${o.rhythm.accuracy >= 0.85 ? 'great' : ''}"><span class="acc"><i>${BATON_ICON}</i><b>${Math.round(o.rhythm.accuracy * 100)}%</b></span><span class="combo">×<b>${o.rhythm.bestCombo}</b></span><span class="cresc">${Array.from({ length: Math.max(1, o.rhythm.movements) }, (_, i) => `<i class="${i < o.rhythm!.crescendo ? 'on' : ''}">${ICON.star}</i>`).join('')}</span></div>` : ''}
       <div class="row btns"></div></div>`);
     const row = el.querySelector('.btns')!;
     row.append(this.btn(this.t('toMap'), () => {
@@ -609,6 +610,8 @@ export class Screens {
     if (mode === 'elsewhere') row.append(this.btn(this.t('openSite'), () => window.open(url, '_blank', 'noopener')));
   }
 }
+
+const BATON_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 20L17 7"/><circle cx="4.5" cy="19.5" r="2" fill="currentColor"/><path d="M19 2.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" fill="currentColor" stroke="none"/></svg>`;
 
 const FILM_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M3 15h18M7 5v4M12 5v4M17 5v4M7 15v4M12 15v4M17 15v4"/><path d="M10.5 10.6v2.8l2.6-1.4z" fill="currentColor"/></svg>`;
 
