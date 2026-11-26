@@ -278,6 +278,139 @@ const E: Partial<Record<EnemyKind, string>> & { blot: string } = {
     <path d="M34 14 L31 20 L33 24 L29 30" fill="none" stroke="#1b1426" stroke-width="1.2"/>
     ${xmouth(32, 42, 3, '#1d1424')}
     <path d="M10 10 C20 4 44 4 54 10 M12 7 C22 1 42 1 52 7" fill="none" stroke="#d6ccf6" stroke-width="1.6" stroke-dasharray="9 3 14 4"/>`,
+  // ── v5 mini-bosses: each with the great sound it stole ──
+  toad: `<ellipse cx="32" cy="45" rx="26" ry="15" fill="#4b3a8a" ${INK}/>
+    <circle cx="20" cy="31" r="8.5" fill="#5a48a0" ${INK}/><circle cx="44" cy="31" r="8.5" fill="#5a48a0" ${INK}/>
+    ${eyes(20, 44, 31, 5.2)}<path d="M14 26 H26 M38 26 H50" stroke="#4a3a8c" stroke-width="3.4" stroke-linecap="round"/>
+    <ellipse cx="32" cy="55" rx="10" ry="5.5" fill="#c2b3f6" ${INK}/>
+    <path d="M13 44 Q32 51 51 44" fill="none" stroke="#1b1630" stroke-width="2"/>${xmouth(32, 47.5, 2.4)}${xmouth(21, 46, 1.7)}${xmouth(43, 46, 1.7)}
+    <ellipse cx="32" cy="20" rx="14" ry="4" fill="#3f8a3e" ${INK}/>
+    <path d="M33 18 C34 10 40 6 44 8" fill="none" stroke="#3f7a32" stroke-width="2.2"/>
+    <path d="M44 7 C40 7 39 11 39 14 L37.5 17 H50.5 L49 14 C49 11 48 7 44 7 Z" fill="#f2c84e" stroke="#6a4310" stroke-width="1.6" stroke-linejoin="round"/>`,
+  drumBeetle: `<path d="M6 52 C6 42 18 38 32 38 C46 38 58 42 58 52 C58 58 46 62 32 62 C18 62 6 58 6 52 Z" fill="#2a1f4a" ${INK}/>
+    <circle cx="32" cy="24" r="16" fill="#f1e6cf" stroke="#b07a1e" stroke-width="3.4"/>
+    <circle cx="32" cy="24" r="12" fill="none" stroke="#b48cff" stroke-width="1.6"/>
+    <path d="M25 17 L39 31 M39 17 L25 31" stroke="#b48cff" stroke-width="4.2" stroke-linecap="round"/>
+    <ellipse cx="32" cy="51" rx="12" ry="8.5" fill="#221a33" ${INK}/>${eyes(27, 37, 50, 3.6)}${brows(27, 37, 46, 3)}${xmouth(32, 57, 1.6)}
+    <path d="M26 44 C18 32 12 24 9 13 M38 44 C46 32 52 24 55 13" stroke="#e8c896" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <circle cx="9" cy="11" r="3.8" fill="#d24a6a" ${INK}/><circle cx="55" cy="11" r="3.8" fill="#d24a6a" ${INK}/>`,
+  crow: `<path d="M29 30 C20 16 6 14 2 21 C8 23 5 27 3 31 C9 29 11 33 8 38 C15 34 21 36 27 39 Z M35 30 C44 16 58 14 62 21 C56 23 59 27 61 31 C55 29 53 33 56 38 C49 34 43 36 37 39 Z" fill="#2b2b40" ${INK}/>
+    <ellipse cx="32" cy="40" rx="11" ry="14" fill="#33334a" ${INK}/>
+    <path d="M27 14 L28 5 L31 12 L33 4 L35 12 L38 6 L37 15" fill="#25253a" ${INK}/>
+    <circle cx="32" cy="24" r="10.5" fill="#25253a" ${INK}/>
+    ${eyes(27.5, 36.5, 22, 3.4, '#2a1450', '#ece4ff')}${brows(27.5, 36.5, 18, 3.2)}
+    <path d="M27.5 27 L32 42 L36.5 27 Z" fill="#a8a8c4" ${INK}/>${xmouth(32, 31, 1.8)}
+    <path d="M16 54 H48" stroke="#d6d8e8" stroke-width="3.4" stroke-linecap="round"/><path d="M22 54 h1 M28 54 h1 M34 54 h1" stroke="#14141e" stroke-width="2"/>`,
+  sandworm: `<ellipse cx="24" cy="60" rx="20" ry="3.6" fill="#c89a62"/>
+    <path d="M18 62 C16 52 22 44 28 38 L40 42 C34 48 30 54 32 62 Z" fill="#e0b87a" ${INK}/>
+    <path d="M20 54 H31 M23 47 H35" stroke="#d9a646" stroke-width="3"/>
+    <circle cx="38" cy="24" r="21" fill="#d9a646" ${INK}/>
+    <circle cx="38" cy="24" r="14.5" fill="#1a1024" stroke="#f2c84e" stroke-width="2"/>
+    ${eyes(33, 43, 21, 3.8, '#1b1630', '#fff6d8')}${xmouth(38, 30.5, 2.2)}
+    <path d="M38 3 V7.5 M59 24 H54.5 M17 24 H21.5 M53 9 L50 12 M23 9 L26 12 M53 39 L50 36" stroke="#f2e2c0" stroke-width="2.4" stroke-linecap="round"/>`,
+  croc: `<rect x="10" y="5" width="44" height="5" rx="1.6" fill="#e0a050" ${INK}/><rect x="14" y="12" width="36" height="4.4" rx="1.6" fill="#d89848" ${INK}/>
+    <path d="M10 40 C10 30 20 24 32 24 C44 24 54 30 54 40 L50 58 C46 63 18 63 14 58 Z" fill="#2f6f5e" ${INK}/>
+    <circle cx="21" cy="26" r="7.4" fill="#2f6f5e" ${INK}/><circle cx="43" cy="26" r="7.4" fill="#2f6f5e" ${INK}/>
+    ${eyes(21, 43, 26, 4.4, '#1a1020', '#fff3b0')}<path d="M15 23 H27 M37 23 H49" stroke="#2f6f5e" stroke-width="3" stroke-linecap="round"/>
+    <path d="M16 48 L19 52 L22 48 L25 52 L28 48 L31 52 L34 48 L37 52 L40 48 L43 52 L46 48" fill="none" stroke="#fff8e8" stroke-width="2" stroke-linejoin="round"/>
+    ${xmouth(32, 57, 2.2)}<path d="M54 30 C62 34 62 50 54 54" fill="none" stroke="#bff4ff" stroke-width="2.4" opacity=".6"/>`,
+  sphinx: `<circle cx="32" cy="28" r="26" fill="none" stroke="#f2c84e" stroke-width="1.6" stroke-dasharray="4 5"/>
+    <path d="M14 26 C14 8 50 8 50 26 L56 54 H44 L42 36 H22 L20 54 H8 Z" fill="#2f4a9a" ${INK}/>
+    <path d="M17 20 H47 M15 27 H49 M11 38 H20 M44 38 H53 M9 46 H20 M44 46 H55" stroke="#e9b949" stroke-width="3"/>
+    <ellipse cx="32" cy="33" rx="11" ry="14" fill="#efd29a" ${INK}/>
+    ${eyes(27, 37, 31, 3.4)}<path d="M22.5 28.5 H31 M33 28.5 H41.5" stroke="#2f4a9a" stroke-width="1.8"/>${xmouth(32, 41, 2)}
+    <path d="M29 47 H35 L34 59 H30 Z" fill="#e9b949" ${INK}/>
+    <path d="M29 13 L35 19 M35 13 L29 19" stroke="#b48cff" stroke-width="2.2" stroke-linecap="round"/>`,
+  yeti: `<path d="M8 58 C6 40 12 22 32 20 C52 22 58 40 56 58 L50 54 L46 60 L40 55 L34 61 L28 55 L22 60 L18 54 Z" fill="#eef4fb" ${INK}/>
+    <path d="M17 23 C10 19 8 10 14 5 C14 12 18 16 23 18 Z M47 23 C54 19 56 10 50 5 C50 12 46 16 41 18 Z" fill="#7fd4ff" ${INK}/>
+    <ellipse cx="32" cy="33" rx="12" ry="11" fill="#7fb4e0" ${INK}/>
+    ${eyes(27, 37, 31, 3.6)}${brows(27, 37, 27, 3.4)}${xmouth(32, 39, 2.2)}
+    <ellipse cx="7" cy="44" rx="5" ry="12" fill="#9fe0ff" stroke="#1f6a9a" stroke-width="2.2"/><ellipse cx="57" cy="44" rx="5" ry="12" fill="#9fe0ff" stroke="#1f6a9a" stroke-width="2.2"/>
+    <path d="M7 34 V54 M57 34 V54" stroke="#e8fbff" stroke-width="1.4"/>`,
+  siren: `<path d="M32 36 C25 42 24 50 28 55 C30 58 27 61 21 61 C27 64 35 62 37 56 C40 48 39 41 32 36 Z" fill="#2a6aa8" ${INK}/>
+    <path d="M21 61 L11 55 L15 61 L11 64 Z" fill="#7fe0ff" ${INK}/>
+    <path d="M22 18 C15 28 15 42 19 50 M42 18 C49 28 49 42 45 50 M25 16 C19 28 21 42 23 50 M39 16 C45 28 43 42 41 50" stroke="#6ff0e0" stroke-width="3" fill="none" stroke-linecap="round" opacity=".9"/>
+    <path d="M26 28 C24 34 26 39 32 39 C38 39 40 34 38 28 Z" fill="#bfe4fa" ${INK}/>
+    <circle cx="32" cy="20" r="9" fill="#eaf7ff" ${INK}/>${eyes(28.5, 35.5, 20, 2.6, '#1a3a6a')}${xmouth(32, 25.5, 1.3, '#2a4a7a')}
+    <path d="M24 12 L26 6 L28 11 L32 3 L36 11 L38 6 L40 12" fill="#dff6ff" stroke="#3a6a9a" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M27 31 C24 36 26 44 32 44 C38 44 40 36 37 31 M27.5 33 H36.5 M30 33 V43 M32 33 V44 M34 33 V43" fill="none" stroke="#e8fbff" stroke-width="1.6"/>`,
+  stag: `<path d="M26 28 C22 20 14 16 9 7 M19 20 L12 21 M15 13 L9 15 M38 28 C42 20 50 16 55 7 M45 20 L52 21 M49 13 L55 15" stroke="#cfe8ff" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+    <path d="M9 2 L11 7 L9 12 L7 7 Z M55 2 L57 7 L55 12 L53 7 Z M12 16 L14 21 L12 25 L10 21 Z M52 16 L54 21 L52 25 L50 21 Z" fill="#e8fbff" stroke="#6aa0d0" stroke-width="1.2"/>
+    <path d="M19 21 V30 M45 21 V30" stroke="#9aa6c0" stroke-width="1"/><rect x="17.5" y="30" width="3" height="8" rx="1" fill="#e6ecf8" stroke="#6a7690" stroke-width="1"/><rect x="43.5" y="30" width="3" height="8" rx="1" fill="#e6ecf8" stroke="#6a7690" stroke-width="1"/>
+    <path d="M14 34 C18 30 22 30 24 33 C20 36 16 36 14 34 Z M50 34 C46 30 42 30 40 33 C44 36 48 36 50 34 Z" fill="#252c58" ${INK}/>
+    <path d="M22 30 C22 23 42 23 42 30 L38 52 C36 58 28 58 26 52 Z" fill="#252c58" ${INK}/>
+    ${eyes(27, 37, 35, 3.4, '#1b1630', '#f2faff')}<circle cx="32" cy="54" r="2.6" fill="#0c0e1e"/>${xmouth(32, 47, 1.6)}
+    <path d="M30 26 L32 22 L34 26 L32 30 Z" fill="#dff6ff"/>`,
+  salamander: `${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${17 + i * 5}" y="${6 + i * 3}" width="4.4" height="${24 - i * 3}" rx="1" fill="#b8602a" stroke="#2a1d14" stroke-width="1.4"/><path d="M${19.2 + i * 5} ${5 + i * 3} C${17 + i * 5} ${1 + i * 3} ${21.4 + i * 5} ${0 + i * 3} ${19.2 + i * 5} ${-3 + i * 3}" fill="none" stroke="#ffb040" stroke-width="2.2" stroke-linecap="round"/>`).join('')}
+    <path d="M12 36 L3 29 M11 41 L1 41 M12 46 L3 53 M52 36 L61 29 M53 41 L63 41 M52 46 L61 53" stroke="#ff5a3a" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="32" cy="43" rx="22" ry="14" fill="#1c1216" ${INK}/>
+    <circle cx="18" cy="49" r="2.4" fill="#ff7a2a"/><circle cx="46" cy="50" r="2" fill="#ff7a2a"/><circle cx="40" cy="32" r="1.8" fill="#ff7a2a"/>
+    ${eyes(24, 40, 40, 5, '#1b1630', '#ffe9a0')}${xmouth(32, 51, 2.4, '#ffd9a0')}`,
+  magmaCrab: `<path d="M54 42 C63 33 64 20 56 13 C55 19 51 22 48 20 C46 27 50 31 54 31 Z" fill="#3a2224" stroke="#ff6a1f" stroke-width="2"/>
+    <path d="M10 42 C4 36 4 28 9 24 C10 28 12 30 14 29 C15 33 13 36 10 36 Z" fill="#3a2224" stroke="#ff6a1f" stroke-width="2"/>
+    <path d="M6 45 C6 33 18 29 32 29 C46 29 58 33 58 45 C58 53 46 57 32 57 C18 57 6 53 6 45 Z" fill="#2a2224" ${INK}/>
+    <path d="M14 41 L20 47 L18 53 M46 39 L42 45 L48 51 M28 51 L32 47 L36 51" stroke="#ff6a1f" stroke-width="2" fill="none"/>
+    <ellipse cx="32" cy="31" rx="16" ry="5" fill="#c8823a" ${INK}/><circle cx="25" cy="31" r="2" fill="#ffb060"/><circle cx="32" cy="30" r="2" fill="#ffb060"/><circle cx="39" cy="31" r="2" fill="#ffb060"/>
+    <path d="M26 30 V17 M38 30 V17" stroke="#3a2a2a" stroke-width="2.4"/>${eyes(26, 38, 15, 4)}${xmouth(32, 47, 2, '#ffd9a0')}`,
+  smith: `<path d="M50 4 L54 34" stroke="#6a4a34" stroke-width="3.6" stroke-linecap="round"/>
+    <g transform="rotate(-8 50 9)"><rect x="37" y="2" width="26" height="13" rx="2" fill="#5c6072" ${INK}/><path d="M38 15 H62" stroke="#ffa040" stroke-width="2.4"/></g>
+    <path d="M8 62 C8 40 15 22 32 22 C49 22 56 40 56 62 Z" fill="#4a3024" ${INK}/>
+    <path d="M17 40 C17 27 47 27 47 40 V45 C47 52 17 52 17 45 Z" fill="#5c6072" ${INK}/>
+    <rect x="21" y="35.5" width="22" height="3.4" rx="1.6" fill="#ffa040"/><circle cx="26.5" cy="37.2" r="2.5" fill="#ffd070"/><circle cx="37.5" cy="37.2" r="2.5" fill="#ffd070"/>
+    ${xmouth(32, 46, 2, '#ffd9a0')}<path d="M22 58 H42" stroke="#7a4c32" stroke-width="5"/>`,
+  gargoyle: `<path d="M22 32 C13 17 4 19 2 27 C6 27 6 31 4 35 C10 33 12 37 11 41 C16 37 20 39 24 41 Z M42 32 C51 17 60 19 62 27 C58 27 58 31 60 35 C54 33 52 37 53 41 C48 37 44 39 40 41 Z" fill="#5d5870" ${INK}/>
+    <path d="M22 22 C18 14 20 8 24 5 C23 12 26 16 27 20 Z M42 22 C46 14 44 8 40 5 C41 12 38 16 37 20 Z" fill="#2a2638" ${INK}/>
+    <ellipse cx="32" cy="30" rx="13" ry="12" fill="#6a6480" ${INK}/>
+    ${eyes(27, 37, 28, 3.4, '#3a1a6a', '#efe6ff')}${brows(27, 37, 24, 3.2)}
+    <path d="M28 35 L29 38 L30 35 M34 35 L35 38 L36 35" fill="#e8e2f0" stroke="#1b1630" stroke-width="1"/>${xmouth(32, 37.5, 1.6)}
+    <path d="M22 40 Q32 47 42 40" fill="none" stroke="#8a7a5a" stroke-width="1.8" stroke-dasharray="2 1.6"/>
+    <path d="M32 45 C27 45 26 49 26 53 L24 57 H40 L38 53 C38 49 37 45 32 45 Z" fill="#c8933a" ${INK}/><circle cx="32" cy="58.5" r="2" fill="#6a4a1a"/>
+    <path d="M30 18 L34 22 M36 30 L33 33" stroke="#b48cff" stroke-width="1.4"/>`,
+  organist: `${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => {
+      const k = Math.abs(i - 4), x = 6 + i * 6.4, top = 4 + k * 6;
+      return `<rect x="${x}" y="${top}" width="4.8" height="${48 - top}" rx="1.2" fill="${i % 2 ? '#c8ccd8' : '#e2c46a'}" stroke="#2a1d14" stroke-width="1.2"/><rect x="${x + 0.9}" y="${top + 6}" width="3" height="2" fill="#b48cff"/>`;
+    }).join('')}
+    <path d="M18 62 C18 40 22 22 32 22 C42 22 46 40 46 62 Z" fill="#2a1a44" ${INK}/>
+    <ellipse cx="32" cy="34" rx="8.4" ry="10.4" fill="#f3eff6" ${INK}/>
+    <ellipse cx="28.5" cy="32" rx="2.2" ry="1.4" fill="#120d1c"/><ellipse cx="35.5" cy="32" rx="2.2" ry="1.4" fill="#120d1c"/><circle cx="28.5" cy="32" r=".8" fill="#b48cff"/><circle cx="35.5" cy="32" r=".8" fill="#b48cff"/>
+    ${xmouth(32, 39.5, 1.6, '#2a2033')}
+    <rect x="12" y="50" width="40" height="7" rx="1.4" fill="#f4efe2" ${INK}/><path d="M18 50 V54 M23 50 V54 M33 50 V54 M38 50 V54 M43 50 V54" stroke="#140c16" stroke-width="2.2"/>`,
+  twin: `${[[19, '#d9dbe8', '#e9b949', '#ffd36b'], [45, '#211d30', '#c9d2ee', '#bfe4ff']].map(([x, fill, trim, glow], i) => {
+      const X = Number(x);
+      const emblem = i ? `<path d="M${X + 3} 47 A6 6 0 1 1 ${X + 3} 57 A4.4 4.4 0 1 0 ${X + 3} 47 Z" fill="${glow}"/>` : `<circle cx="${X}" cy="52" r="3.6" fill="${glow}"/><path d="M${X} 45 V47 M${X} 57 V59 M${X - 7} 52 H${X - 5} M${X + 5} 52 H${X + 7}" stroke="${glow}" stroke-width="1.8" stroke-linecap="round"/>`;
+      return `<path d="M${X - 12} 62 V30 C${X - 12} 15 ${X + 12} 15 ${X + 12} 30 V62 Z" fill="${fill}" ${INK}/>
+        <path d="M${X} 16 V9 M${X - 4} 2 V9 H${X + 4} V2" stroke="${trim}" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <ellipse cx="${X}" cy="33" rx="6.6" ry="8.4" fill="#f3eff6" ${INK}/><path d="M${X - 4.2} 31 H${X - 1.4} M${X + 1.4} 31 H${X + 4.2}" stroke="#120d1c" stroke-width="1.8" stroke-linecap="round"/>${xmouth(X, 37.5, 1.4, '#2a2033')}${emblem}`;
+    }).join('')}`,
+  // ── v5 legends: the Silence's oldest stolen songs ──
+  wyrm: `<path d="M10 56 C2 44 14 36 26 42 C38 48 50 40 46 28 C42 18 28 20 30 10" fill="none" stroke="#1b1630" stroke-width="11" stroke-linecap="round"/>
+    <path d="M10 56 C2 44 14 36 26 42 C38 48 50 40 46 28 C42 18 28 20 30 10" fill="none" stroke="#5a7a2a" stroke-width="7" stroke-linecap="round"/>
+    ${[[12, 50], [20, 42], [32, 45], [44, 38], [46, 28], [38, 20]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="#e8ff8a"/><circle cx="${x}" cy="${y}" r="5" fill="#d8ff6a" opacity=".3"/>`).join('')}
+    <ellipse cx="32" cy="12" rx="11" ry="8.5" fill="#3a5a1e" ${INK}/>${eyes(28, 37, 10, 3, '#1b1630', '#f4ffd0')}${xmouth(32, 16.5, 1.5)}
+    <path d="M24 6 L20 1 M40 6 L44 1" stroke="#d8ff6a" stroke-width="2" stroke-linecap="round"/>`,
+  djinn: `<path d="M32 62 C20 60 26 52 34 52 C44 52 46 44 38 42" fill="none" stroke="#ffcf6a" stroke-width="6" stroke-linecap="round" opacity=".75"/>
+    <path d="M14 44 C14 30 22 24 32 24 C42 24 50 30 50 44 C44 48 20 48 14 44 Z" fill="#c8883a" ${INK}/>
+    <path d="M14 34 C6 30 4 22 8 18 M50 34 C58 30 60 22 56 18" fill="none" stroke="#c8883a" stroke-width="5" stroke-linecap="round"/>
+    <path d="M18 18 C18 6 46 6 46 18 C40 20 24 20 18 18 Z" fill="#7a2a8a" ${INK}/><circle cx="32" cy="10" r="3" fill="#ffcf6a" ${INK}/>
+    <ellipse cx="32" cy="27" rx="10" ry="9" fill="#e8a850" ${INK}/>${eyes(28, 36, 26, 2.8, '#7a2a8a', '#fff6d8')}${brows(28, 36, 22.5, 2.6)}${xmouth(32, 31.5, 1.6)}`,
+  aurora: `<path d="M4 50 C14 34 22 54 32 40 C42 26 50 46 60 30" fill="none" stroke="#7affd8" stroke-width="5" stroke-linecap="round" opacity=".8"/>
+    <path d="M2 58 C14 44 24 62 34 50 C44 38 52 54 62 42" fill="none" stroke="#b48cff" stroke-width="4" stroke-linecap="round" opacity=".7"/>
+    <path d="M14 30 C14 16 24 10 34 10 C46 10 54 18 54 26 L60 30 L52 32 C48 38 38 40 30 38 C20 36 14 36 14 30 Z" fill="#2a5a6a" ${INK}/>
+    <path d="M22 12 L16 2 L28 10 M36 9 L38 0 L42 10" fill="#7affd8" ${INK}/>
+    ${eyes(28, 40, 22, 3.4, '#1b1630', '#e8fff8')}${brows(28, 40, 18, 3)}${xmouth(46, 30, 1.6)}`,
+  phoenix: `<path d="M30 34 C18 16 4 18 2 6 C10 12 16 8 20 14 C20 6 26 4 28 10 C30 18 32 26 30 34 Z M34 34 C46 16 60 18 62 6 C54 12 48 8 44 14 C44 6 38 4 36 10 C34 18 32 26 34 34 Z" fill="#ff4a8a" ${INK}/>
+    <path d="M24 26 C20 20 14 20 10 16 M40 26 C44 20 50 20 54 16" fill="none" stroke="#ffb0d0" stroke-width="1.8"/>
+    <path d="M26 46 C20 54 22 60 28 62 C28 56 32 54 32 50 C32 54 36 56 36 62 C42 60 44 54 38 46 Z" fill="#ff7a3a" ${INK}/>
+    <ellipse cx="32" cy="40" rx="9" ry="12" fill="#1a1024" ${INK}/>
+    <circle cx="32" cy="24" r="8" fill="#1a1024" ${INK}/><path d="M29 16 L30 9 L32 15 L34 8 L35 16" fill="#ff4a8a" ${INK}/>
+    ${eyes(29, 35, 23, 2.4, '#ff4a8a', '#ffe0ec')}<path d="M30 27 L32 33 L34 27 Z" fill="#ffcf6a" ${INK}/>${xmouth(32, 29, 1.2)}`,
+  abyssKing: `<path d="M10 62 C10 40 18 28 32 28 C46 28 54 40 54 62 Z" fill="#120e1e" ${INK}/>
+    <path d="M14 22 L18 6 L24 16 L32 2 L40 16 L46 6 L50 22 Z" fill="#2a2040" stroke="#b48cff" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="18" cy="8" r="2" fill="#b48cff"/><circle cx="32" cy="4" r="2.4" fill="#b48cff"/><circle cx="46" cy="8" r="2" fill="#b48cff"/>
+    <ellipse cx="32" cy="34" rx="13" ry="15" fill="#f3eff6" ${INK}/>
+    <path d="M24 31 C26 28 30 29 30 32 C28 34 25 34 24 31 Z M40 31 C38 28 34 29 34 32 C36 34 39 34 40 31 Z" fill="#050308"/>
+    <circle cx="27.5" cy="31.6" r="1.1" fill="#b48cff"/><circle cx="36.5" cy="31.6" r="1.1" fill="#b48cff"/>
+    <path d="M36 21 L33 27 L35 30" fill="none" stroke="#1b1426" stroke-width="1.2"/>${xmouth(32, 42, 2.6, '#1d1424')}`,
 };
 
 /** A little portrait of every creature of the Silence (all with the X-stitched mouth). */
