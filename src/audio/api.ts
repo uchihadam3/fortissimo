@@ -242,6 +242,28 @@ export interface AudioAPI {
   echoNote(i: number, t: number, ok: boolean): void;
   /** The player's echo of the call: all four right (a short fanfare) or not (a gentle sigh). Plays on the next eighth. */
   echoResult(success: boolean): void;
+  // ── rhythm play (v4): everything is on the beat ─────────────
+  /**
+   * The player taps a coin/note pickup. Judged like the baton: on the beat it rings a pitched note
+   * that climbs the chord/scale with `run` (consecutive on-beat collects, 0…), so collecting in
+   * rhythm plays a little melody; perfect adds a sparkle. miss = a dull, muted clink (no melody).
+   * Play at the judged grid time t.
+   */
+  pickupTap(t: number, quality: 'perfect' | 'good' | 'miss', pan: number, run: number): void;
+  /**
+   * The player taps a creature on the beat: the colossus strikes it (a heavy, satisfying hit in the
+   * land's palette: timpani/taiko + land colour; perfect = bigger, with a crack). miss = a thin swish.
+   */
+  strike(t: number, quality: 'perfect' | 'good' | 'miss', pan: number): void;
+  /**
+   * The player's rhythm power 0…1 (the "how well you are playing" meter), updated often (smooth it).
+   * The music grows grander with it CONTINUOUSLY over the whole level, on top of groove/band:
+   * fuller voicings, octave doublings, wider stereo, brighter; near 1 a glorious "everything sings"
+   * state. When it falls (misses), the music audibly thins/dims. Not used in cinematics.
+   */
+  setPower(p: number): void;
+  /** A clear "you broke the run" sound when a miss costs power (a short downward sting). */
+  powerDrop(t: number): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
    * mood's next beat, in its key (the mood holds its tonic under it).

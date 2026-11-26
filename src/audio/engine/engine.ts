@@ -459,6 +459,11 @@ const api: AudioAPI = {
   echoResult: guard('echoResult', (success: boolean) => {
     if (E.live) E.rhythm?.echoResult(!!success);
   }),
+  // v4 contract: no-ops until the audio agent implements them
+  pickupTap: guard('pickupTap', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number, _run: number) => {}),
+  strike: guard('strike', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
+  setPower: guard('setPower', (_p: number) => {}),
+  powerDrop: guard('powerDrop', (_t: number) => {}),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();
