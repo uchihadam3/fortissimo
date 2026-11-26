@@ -25,7 +25,7 @@ function feather(len: number, w: number, burn = 0.35): Geo {
   s.bezierCurveTo(-w * 0.6, len * 0.3, -w * 0.55, len * 0.8, 0, len);
   s.bezierCurveTo(w * 0.45, len * 0.75, w * 0.5, len * 0.3, w * 0.15, 0);
   const g = new THREE.ShapeGeometry(s, 6);
-  g.rotateX(Math.PI / 2); // shape y → −z
+  g.rotateX(-Math.PI / 2); // shape y → −z
   const out = P(g, (p) => _c.copy(INK).lerp(INK2, smooth(0, len, -p.z) * 0.5).lerp(EMBER, smooth(len * (1 - burn), len, -p.z)), 1.4, 0.4);
   glowAlong(out, (p) => smooth(len * (1 - burn * 1.1), len, -p.z));
   return out;
@@ -59,8 +59,8 @@ function bodyGeo(): Geo {
   return merge(parts);
 }
 
-function headGeo(): Geo {
-  const parts: Geo[] = [];
+function headGeo(): { head: Geo; crest: Geo } {
+  const parts: Geo[] = [], crest: Geo[] = [];
   parts.push(P(ell(0.3, 0.3, 0.36, 18, 14).translate(0, 0, 0), inkPaint));
   // the beak: upper and lower, sewn together
   parts.push(P(cone(0.13, 0.7, 8).rotateX(Math.PI / 2).scale(1, 0.85, 1).translate(0, 0.0, 0.58), (p) => _c.set('#1b1214').lerp(new THREE.Color('#5a2a1e'), smooth(0.3, 0.9, p.z))));
@@ -74,14 +74,16 @@ function headGeo(): Geo {
     parts.push(P(new THREE.TorusGeometry(0.085, 0.02, 5, 14).rotateY(sd * 1.1).translate(sd * 0.21, 0.08, 0.2), '#2a1010'));
   }
   // the crest: flame feathers sweeping back
-  for (let k = 0; k < 5; k++) {
-    const len = 1.0 + (k === 2 ? 0.5 : k === 1 || k === 3 ? 0.25 : 0);
-    const f = feather(len, 0.28, 0.7);
-    f.rotateX(-0.55 - k * 0.05).rotateY(Math.PI + (k - 2) * 0.28);
-    f.translate((k - 2) * 0.05, 0.2, -0.05);
-    parts.push(f);
+  for (let k = 0; k < 7; k++) {
+    const len = 1.5 - Math.abs(k - 3) * 0.2;
+    const f = feather(len, 0.34, 0.75);
+    f.rotateX(0.75 + Math.abs(k - 3) * 0.1).rotateZ((k - 3) * 0.24);
+    f.translate((k - 3) * 0.04, 0.22, -0.02);
+    crest.push(f);
   }
-  return merge(parts);
+  // a hooked beak tip
+  parts.push(P(cone(0.05, 0.22, 6).rotateX(Math.PI / 2 + 0.9).translate(0, -0.06, 0.92), '#5a2a1e'));
+  return { head: merge(parts), crest: merge(crest) };
 }
 
 /** fire ribbons: additive curtains, white-yellow at the root → orange → red → smoke */
@@ -141,9 +143,9 @@ function buildWing(sd: number, inkMat: THREE.Material, featherMat: THREE.Materia
   const sec: Geo[] = [];
   for (let k = 0; k < 9; k++) {
     const x = (0.25 + k * 0.22) * sd;
-    const f = feather(1.9 + k * 0.05, 0.62).rotateY(sd * (0.08 * k - 0.1)).rotateX(-0.18).translate(x, 0.02 - k * 0.01, 0.05);
+    const f = feather(1.9 + k * 0.05, 0.62).rotateY(-sd * (0.08 * k - 0.1)).rotateX(-0.18).translate(x, 0.02 - k * 0.01, 0.05);
     sec.push(f);
-    sec.push(feather(1.05, 0.5, 0.2).rotateX(-0.08).rotateY(sd * 0.05 * k).translate(x + sd * 0.1, 0.12, 0.12));
+    sec.push(feather(1.05, 0.5, 0.2).rotateX(-0.08).rotateY(-sd * 0.05 * k).translate(x + sd * 0.1, 0.12, 0.12));
   }
   const sm = new THREE.Mesh(merge(sec), featherMat);
   sm.castShadow = true;
@@ -153,7 +155,7 @@ function buildWing(sd: number, inkMat: THREE.Material, featherMat: THREE.Materia
   for (let k = 0; k < 10; k++) {
     const q = k / 9;
     const len = 2.1 + q * 1.3;
-    const f = feather(len, 0.66).rotateX(-0.12).rotateY(sd * (0.15 + q * 1.15));
+    const f = feather(len, 0.66).rotateX(-0.12).rotateY(-sd * (0.15 + q * 1.15));
     f.translate(sd * (0.15 + q * 1.75), 0.06 + q * 0.06, 0.05 + q * 0.12);
     prim.push(f);
   }
@@ -213,8 +215,10 @@ export function phoenixRig(): Rig {
   const head = new THREE.Group();
   head.position.set(0, 2.1, 1.3);
   body.add(head);
-  const hm = new THREE.Mesh(headGeo(), inkMat);
+  const hg = headGeo();
+  const hm = new THREE.Mesh(hg.head, inkMat);
   hm.castShadow = true;
+  hm.add(new THREE.Mesh(hg.crest, featherMat));
   head.add(hm);
   hm.scale.setScalar(1.5);
   // ── wings
@@ -317,7 +321,7 @@ export function phoenixRig(): Rig {
         sweep += -w * 0.45 + st * 0.75 - rc * 0.25;
         fold += -w * 0.1 + st * -0.1 + sg * 0.5 - sm * 0.2;
         if (burst > 0) lift += burst * 0.6;
-        wg.root.rotation.set(0, wg.sd * -sweep, wg.sd * lift, 'YXZ');
+        wg.root.rotation.set(-0.85 + w * 0.3 - st * 0.2, wg.sd * -sweep, wg.sd * lift, 'YZX');
         wg.hand.rotation.set(0, wg.sd * fold, wg.sd * (0.1 - fold * 0.5 + Math.max(0, fl) * 0.15));
       });
       tail.rotation.set(-0.15 + w * 0.3 + Math.sin(beat * Math.PI) * 0.06, Math.sin(t * 0.9) * 0.1, 0);
