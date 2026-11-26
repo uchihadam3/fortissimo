@@ -2,6 +2,11 @@
 import { ENEMIES, TOWERS, type EnemyKind, type TowerKind } from '../sim/defs';
 import { ICON, TOWER_ICON, enemyIcon } from './icons';
 import './harmony.css';
+import './rhythm.css';
+
+/** the Maestro's baton (the rhythm button) */
+const BATON = `<svg viewBox="0 0 64 64" fill="none"><path d="M17 47 L49 13" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/><path d="M12 52 l7-7" stroke="currentColor" stroke-width="10" stroke-linecap="round"/><path d="M48 4l2.2 5.2 5.3 2.2-5.3 2.2L48 19l-2.2-5.2-5.3-2.2 5.3-2.2z" fill="#ffe9a8"/></svg>`;
+const SEG = 276.5 / 4 - 9;
 
 const h = (html: string) => {
   const t = document.createElement('template');
@@ -63,6 +68,13 @@ export class Hud {
       <div id="journey"><div class="track"><div class="fill"></div></div><div class="marks"></div><i class="me">${ICON.turtle}</i><i class="goal">${ICON.bell}</i></div>
       <div id="arrows"></div>
       <button id="go" aria-label="go"><span class="ico">${ICON.play}</span></button>
+      <div id="groove-glow"></div>
+      <div id="baton-wrap">
+        <div id="call"><div class="track">${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<b style="left:${(i + 0.5) * 12.5}%" class="${i % 2 ? 'off' : ''}"></b>`).join('')}</div><div class="notes"></div><i class="head"></i></div>
+        <div class="approach"></div><div class="approach off"></div>
+        <button id="baton" aria-label="baton"><svg class="groove" viewBox="0 0 100 100">${[0, 1, 2, 3].map((i) => `<circle class="seg" cx="50" cy="50" r="45" stroke-dasharray="${SEG.toFixed(1)} 400" transform="rotate(${-90 + 4.5 + i * 90} 50 50)"/>`).join('')}<circle class="prog" cx="50" cy="50" r="37" stroke-dasharray="232.5" stroke-dashoffset="232.5" transform="rotate(-90 50 50)"/></svg><div class="glyph">${BATON}</div></button>
+        <div class="sparks"></div>
+      </div>
     </div>`);
     parent.appendChild(this.root);
     const $ = (s: string) => this.root.querySelector(s) as HTMLElement;
@@ -79,6 +91,18 @@ export class Hud {
     this.handEl = $('#hand');
     this.countEl = $('#countin');
     this.harmonyEl = $('.stat.harmony');
+    this.batonEl = $('#baton') as HTMLButtonElement;
+    this.batonWrap = $('#baton-wrap');
+    this.approach = [...this.root.querySelectorAll('#baton-wrap .approach')] as HTMLElement[];
+    this.sparks = $('#baton-wrap .sparks');
+    this.callEl = $('#call');
+    this.grooveGlow = $('#groove-glow');
+    // the baton answers on pointerdown (timing matters), with the event's own time stamp
+    this.batonEl.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.onBaton(e.timeStamp);
+    });
     $('.pause').addEventListener('click', (e) => {
       e.stopPropagation();
       this.onPause();
@@ -397,12 +421,143 @@ export class Hud {
     (this.bannerEl as unknown as { _t: number })._t = window.setTimeout(() => this.bannerEl.classList.remove('on'), 1800);
   }
 
-  hand(p: { x: number; y: number } | null) {
+  /** the glove at p; `press` (0…1, 1 = finger down) makes it tap in time instead of its own loop */
+  hand(p: { x: number; y: number } | null, press?: number) {
     this.handEl.classList.toggle('on', !!p);
+    this.handEl.classList.toggle('sync', press !== undefined);
     if (p) {
       this.handEl.style.left = `${p.x}px`;
       this.handEl.style.top = `${p.y}px`;
+      if (press !== undefined) this.handEl.style.transform = `translate(${(1 - press) * 16}px, ${(1 - press) * 24}px) scale(${1 - press * 0.12})`;
+      else this.handEl.style.transform = '';
     }
+  }
+
+  // ───────── the baton (v3: the player conducts) ─────────
+
+  private batonEl!: HTMLButtonElement;
+  private batonWrap!: HTMLElement;
+  private approach: HTMLElement[] = [];
+  private sparks!: HTMLElement;
+  private callEl!: HTMLElement;
+  private grooveGlow!: HTMLElement;
+  private lastGroove = -1;
+  private lastProg = -1;
+  private callKey = '';
+  /** a baton tap (pointerdown or key), with the event's time stamp (performance.now() clock) */
+  onBaton: (timeStamp: number) => void = () => {};
+
+  /** where the baton is on screen (the glove taps there) */
+  batonCenter(): { x: number; y: number } | null {
+    const r = this.batonEl.getBoundingClientRect();
+    return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+  }
+
+  /**
+   * The beat as heard: rings close in on the baton and meet it on every beat (gold on the
+   * downbeat); at high groove a smaller ring marks the eighths too. `beatPos` in beats of the song;
+   * `tension` (0…1) as a wave draws near: the rings burn hotter.
+   */
+  setBeat(beatPos: number, beatsPerBar: number, eighths: boolean, groove: number, tension = 0) {
+    this.batonWrap.classList.toggle('tense', tension > 0.01);
+    const u = beatPos - Math.floor(beatPos);
+    const beatInBar = ((Math.floor(beatPos) % beatsPerBar) + beatsPerBar) % beatsPerBar;
+    const next = (beatInBar + 1) % beatsPerBar;
+    const [a, b] = this.approach;
+    a.style.transform = `scale(${(1 + 0.7 * (1 - u)).toFixed(3)})`;
+    a.style.opacity = (0.15 + 0.85 * u).toFixed(3);
+    a.classList.toggle('down', next === 0);
+    if (eighths) {
+      const v = (u + 0.5) % 1;
+      b.style.display = '';
+      b.style.transform = `scale(${(1 + 0.5 * (1 - v)).toFixed(3)})`;
+      b.style.opacity = (0.5 * v).toFixed(3);
+    } else b.style.display = 'none';
+    // the baton breathes with the beat (brighter with the groove)
+    const flash = Math.exp(-u * 7) * (0.5 + 0.12 * groove + 0.4 * tension);
+    this.batonWrap.style.setProperty('--flash', flash.toFixed(3));
+    this.grooveGlow.style.setProperty('--flash', (Math.exp(-u * 4) * (beatInBar === 0 ? 1 : 0.6)).toFixed(3));
+  }
+
+  /** groove 0…4 (lit segments), progress toward the next level 0…1 */
+  setGroove(level: number, progress: number) {
+    const p = Math.round(progress * 40) / 40;
+    if (level === this.lastGroove && p === this.lastProg) return;
+    const rose = this.lastGroove >= 0 && level > this.lastGroove;
+    const fell = this.lastGroove >= 0 && level < this.lastGroove;
+    this.lastGroove = level;
+    this.lastProg = p;
+    [...this.batonEl.querySelectorAll('.seg')].forEach((c, i) => c.classList.toggle('on', i < level));
+    (this.batonEl.querySelector('.prog') as SVGCircleElement).style.strokeDashoffset = String(232.5 * (1 - (level >= 4 ? 1 : p)));
+    for (let g = 0; g <= 4; g++) this.batonWrap.classList.toggle(`g${g}`, g === level);
+    this.grooveGlow.classList.toggle('on', level >= 4);
+    if (rose) this.retrigger(this.batonWrap, level >= 4 ? 'peak' : 'rise');
+    if (fell) this.retrigger(this.batonWrap, 'fall');
+    if (rose && level >= 4) this.retrigger(this.grooveGlow, 'burst');
+  }
+
+  /** a judged tap: sparks (gold for perfect, white for good), a little shake for a miss */
+  batonHit(q: 'perfect' | 'good' | 'miss', groove: number) {
+    this.retrigger(this.batonWrap, `hit-${q}`);
+    if (q === 'miss') return;
+    const n = q === 'perfect' ? 10 + groove * 2 : 6;
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('i');
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+      const d = (q === 'perfect' ? 62 : 46) + Math.random() * 26 + groove * 6;
+      el.className = q;
+      el.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+      el.style.setProperty('--dy', `${Math.sin(a) * d}px`);
+      this.sparks.appendChild(el);
+      setTimeout(() => el.remove(), 650);
+    }
+    if (q === 'perfect') {
+      const st = document.createElement('b');
+      st.innerHTML = ICON.star;
+      this.sparks.appendChild(st);
+      setTimeout(() => st.remove(), 700);
+    }
+  }
+
+  /**
+   * The Maestro's call over the baton: a little bar of eight eighths with the call's four notes.
+   * states per note: 0 waiting, 1 the Maestro plays it, 2 to echo, 3 echoed right, 4 wrong; head =
+   * where the bar is (0…1, −1 hidden). Null hides it.
+   */
+  setMaestro(c: { pattern: number[]; states: number[]; head: number; echo: boolean } | null) {
+    if (!c) {
+      this.callEl.classList.remove('on');
+      this.callKey = '';
+      return;
+    }
+    this.callEl.classList.add('on');
+    this.callEl.classList.toggle('echo', c.echo);
+    const key = c.pattern.join(',') + '/' + c.states.join('');
+    if (key !== this.callKey) {
+      this.callKey = key;
+      const notes = this.callEl.querySelector('.notes') as HTMLElement;
+      notes.innerHTML = c.pattern.map((p, i) => `<i class="s${c.states[i]}" style="left:${(p + 0.5) * 12.5}%"></i>`).join('');
+    }
+    const head = this.callEl.querySelector('.head') as HTMLElement;
+    head.style.display = c.head < 0 ? 'none' : '';
+    head.style.left = `${(Math.max(0, Math.min(1, c.head)) * 100).toFixed(2)}%`;
+  }
+
+  /** the call was echoed right (or not) */
+  maestroResult(ok: boolean) {
+    this.retrigger(this.callEl, ok ? 'win' : 'lose');
+  }
+
+  /** the whole screen kicks on a perfect tap at high groove, or a solo (a short golden pulse) */
+  kick(strength: number) {
+    this.grooveGlow.style.setProperty('--kick', strength.toFixed(2));
+    this.retrigger(this.grooveGlow, 'kick');
+  }
+
+  private retrigger(el: HTMLElement, cls: string) {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
   }
 
   countIn(beat: number) {

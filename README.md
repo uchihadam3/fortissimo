@@ -47,6 +47,22 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 - **Os inimigos** saem da névoa cinza pela frente, pelos lados, por trás e pelo céu. Setas na borda da
   tela mostram de onde vem a próxima onda e quais criaturas.
 - **Notas douradas** flutuam pela paisagem: toque nelas para coletar antes que fiquem para trás.
+- **A batuta (você rege):** o botão da batuta, no canto de baixo à esquerda, pulsa a cada batida
+  (um anel se fecha sobre ele no tempo). Toque **no tempo** e você toca percussão junto com a banda.
+  Acertos seguidos sobem o **groove** (0 a 4: 4, 12, 24 e 40 acertos): a banda bate mais forte (até
+  +30% no groove 4, quando tudo explode em luz), o ff enche mais rápido e a tartaruga pisa mais firme.
+  Um erro derruba um nível; dois compassos sem tocar e o groove esfria devagar. A partir do groove 3
+  as colcheias também valem.
+- **Solos:** cada músico carrega um solo enquanto toca (mais rápido com groove). Quando ele brilha no
+  casco, toque nele **no tempo**: um compasso de ataque especial (harpa: rajada; tambor: onda de choque
+  que empurra; sino: grande badalada que freia tudo; chocalho: chuva de notas; cristal: tempestade de
+  raios; trompa: sopro que atravessa até redemoinho; coral: a banda inteira mais forte e nada fica
+  invisível; grave: pancadas enormes no chão). No tempo perfeito o solo é mais forte. Fora do tempo,
+  o toque abre o menu do músico, como sempre.
+- **O eco do Maestro:** nos respiros o Maestro toca uma frase de 4 notas (as bolinhas acendem sobre a
+  batuta). No compasso seguinte, repita na batuta. Acertou: notas douradas de bônus, +1 de groove e um
+  **acorde** que atinge todas as criaturas no começo do próximo movimento. As frases ficam mais
+  sincopadas nas terras mais distantes.
 - **FORTÍSSIMO (ff):** a barra enche com os acertos. Ao soltar, a música faz um crescendo e a tartaruga
   dá uma **pisada gigante** no tempo forte.
 - **Estrelas:** 3 se perder no máximo 2 vidas, 2 até a metade, 1 se chegar com qualquer vida.
@@ -71,7 +87,9 @@ Actions*). Depois disso, cada envio para `main` testa, gera e publica o jogo aut
 | Construir / evoluir | clique na placa ou na torre | tocar |
 | Girar a câmera | arrastar | arrastar |
 | Zoom | roda do mouse | pinça |
-| Partir | Espaço ou ▶ | ▶ |
+| Partir | Enter ou ▶ | ▶ |
+| Batuta (no tempo) | Espaço ou J | botão da batuta |
+| Solo | clique no músico que brilha, no tempo | tocar no músico, no tempo |
 | FORTÍSSIMO | F | botão "ff" |
 | Pausa | Esc ou P | botão ‖ |
 | Recentrar câmera | R ou duplo clique | duplo toque |
@@ -121,11 +139,13 @@ build e atualiza a cópia offline em `jogar/FORTISSIMO.html`.
 npm run balance
 ```
 
-Esse comando joga todas as fases com um robô e mostra o resultado de cada uma (vitória, vidas, estrelas).
-Ele é usado para equilibrar a dificuldade.
+Esse comando joga todas as fases com robôs e mostra o resultado de cada uma (vitória, vidas, estrelas):
+o *regente* (constrói bem e mantém o ritmo como um jogador razoável, groove ≈ 2), o *trêmulo* (ritmo
+fraco), o *bom* sem ritmo nenhum, o *novato* e a banda de um instrumento só. Ele é usado para equilibrar
+a dificuldade.
 
 - `src/sim/`: a simulação (pura, determinística): `journey.ts` (a viagem), `defs.ts` (torres e
-  criaturas), `shell.ts` (as placas do casco), `path.ts` (a estrada).
+  criaturas), `rhythm.ts` (groove, julgamento do toque, frases do Maestro), `shell.ts` (as placas do casco), `path.ts` (a estrada).
 - `src/data/campaign.ts`: as 25 jornadas, o mapa e o modo Bis.
 - `src/view/`: o mundo 3D: paisagem, céu pintado, grama, a tartaruga, torres, criaturas, efeitos e a
   cor que volta.

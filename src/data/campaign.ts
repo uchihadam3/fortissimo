@@ -217,6 +217,23 @@ export const TUNE: Record<string, number[]> = {
   cx: [0.86, 2.09, 5.42, 11.21, 6.39],
 };
 
+/**
+ * v3: the player conducts (the baton's groove, solos, the Maestro's echoes) and the band is
+ * stronger for it, so the creatures of every generated movement grow by LIFT on top of TUNE (the
+ * first movement of a journey by half as much). Set with the bots (tools/balance.ts): a decent
+ * conductor (groove ≈ 2, a solo now and then) wins every main journey with 2–3★, a shaky hand on
+ * the baton still gets through them all, and a band with no rhythm at all still wins the main road
+ * with fewer stars; the extra paths ask for the baton.
+ */
+export const LIFT = { main: 1.15, boss: 1.15, extra: 1.45 };
+/** the first land stays welcoming (it teaches the baton), and journeys that were already at the edge: no lift */
+const NO_LIFT = new Set(['m1', 'm2', 'm3', 'm4', 'i1', 'c3']);
+function lift(id: string, k: number): number {
+  if (NO_LIFT.has(id)) return 1;
+  const L = id[1] === 'x' ? LIFT.extra : id[1] === '4' ? LIFT.boss : LIFT.main;
+  return k === 0 ? 1 + (L - 1) * 0.5 : L;
+}
+
 const SPECS = new Map<string, JourneySpec>();
 
 function journey(o: JourneySpec, tune: number[] | undefined = TUNE[o.id]): JourneyDef {
@@ -230,7 +247,7 @@ function journey(o: JourneySpec, tune: number[] | undefined = TUNE[o.id]): Journ
     cur += rest;
     movements.push({ bar: cur, rest, notes: k === 0 ? undefined : m.notes ?? 8 });
     // the difficulty factor grows both the crowds and the creatures' health
-    const f = tune?.[k] ?? 1;
+    const f = (tune?.[k] ?? 1) * lift(o.id, k);
     const fc = Math.pow(f, 0.4), fh = Math.pow(f, 0.6);
     const gen = m.gen ? { ...m.gen, b0: m.gen.b0 * fc, b1: m.gen.b1 * fc, hp: (m.gen.hp ?? 1) * fh } : null;
     const rel: JWave[] = [...(m.waves ?? []), ...(gen ? genMovement(gen, m.bars, cur, o.features, k) : [])];
@@ -253,7 +270,7 @@ function journey(o: JourneySpec, tune: number[] | undefined = TUNE[o.id]): Journ
     id: o.id, world: o.world, song: o.song ?? o.world, name: o.name, bars: cur, slots: o.slots, coins: o.coins, towers: o.towers,
     waves, movements, features: o.features, pickups: o.pickups ?? Math.round(cur / 9), obelisks: o.obelisks,
     // the guardian grows with the difficulty of its movement
-    boss: o.boss ? { kind: o.boss.kind, bar: lastStart + o.boss.at, hp: (o.boss.hp ?? 1) * Math.pow(tune?.[o.moves.length - 1] ?? 1, 0.6) } : undefined,
+    boss: o.boss ? { kind: o.boss.kind, bar: lastStart + o.boss.at, hp: (o.boss.hp ?? 1) * Math.pow((tune?.[o.moves.length - 1] ?? 1) * lift(o.id, o.moves.length - 1), 0.6) } : undefined,
     tutorial: o.tutorial, newTower: o.newTower, ff: o.ff ?? true, seed, landmark: LANDMARK[o.world], curviness: o.curviness,
   };
 }
@@ -287,7 +304,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm1', world: 'meadow', map: [14, 74], kind: 'main', requires: [],
     def: journey({
       id: 'm1', world: 'meadow', name: { pt: 'O Despertar', en: 'The Awakening' }, slots: 2, coins: 150, towers: T1, newTower: 'harp',
-      tutorial: ['basics', 'pickup'], pickups: 9, curviness: 0.6,
+      tutorial: ['basics', 'pickup', 'baton', 'echo'], pickups: 9, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 70 }, { kind: 'lake', from: 40, to: 100, side: 1 }, { kind: 'hills', from: 100, to: 140 }, { kind: 'meadow', from: 140, to: 190 }],
       moves: [
         {
@@ -326,7 +343,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm2', world: 'meadow', map: [26, 64], kind: 'main', requires: ['m1'],
     def: journey({
       id: 'm2', world: 'meadow', name: { pt: 'Tambores no Vale', en: 'Drums in the Vale' }, slots: 2, coins: 210, towers: T2, newTower: 'drum',
-      tutorial: ['upgrade'], pickups: 11,
+      tutorial: ['upgrade', 'solo'], pickups: 11,
       features: [{ kind: 'meadow', from: 0, to: 45 }, { kind: 'forest', from: 45, to: 110, side: -1 }, { kind: 'river', from: 116, to: 124 }, { kind: 'hills', from: 130, to: 175 }, { kind: 'meadow', from: 175, to: 220 }],
       moves: [
         {
