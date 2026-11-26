@@ -139,10 +139,12 @@ export interface AudioAPI {
    * A tower plays its note/hit. The engine chooses the pitch from the song's harmony at time t.
    * `voice` is a small stable integer per tower (its id) so several towers of one kind spread
    * over chord tones / registers instead of doubling. level = 0..2.
-   *   harp: plucked note (arpeggio over the chord)   drum: deep war drum hit
-   *   bell: bell toll on a chord tone (slows)          shaker: shaker/hi-hat tick (economy)
-   *   crystal: bright synth zap arpeggio               horn: brass blast (root/fifth)
-   *   choir: sustained choir chord for one bar          bass: huge sub-bass drop on the root
+   *   harp: plucked note (the lead sings the tune)    drum: bright battle snare-tom on the chord root
+   *   bell: bell toll with a celesta strike (slows)    shaker: shaker + tambourine (economy)
+   *   crystal: bright synth zap arpeggio               horn: brass blast (the lead horn sings the tune)
+   *   choir: sung choir chord ('ah') for one bar        bass: sub drop + a bright slap bass (heard on phones)
+   * Every kind is balanced to sit within ~3 dB of the harp over the backing, also on a phone speaker
+   * (tools/audio-balance.mjs); the backing steps back a little under a busy band.
    */
   towerShot(kind: TowerKind, level: number, t: number, pan: number, voice: number): void;
   /** The projectile lands (drum boom, harp tick, bass thud, crystal crackle; horn/bell may ignore). */
@@ -209,16 +211,36 @@ export interface AudioAPI {
   /** A new plate of the shell lights up: a bright little chime at t. */
   plateUnlock(t: number, pan: number): void;
   // ── rhythm play (v3): the player conducts ─────────────
-  /** The player taps the baton: a percussive hit in the land's palette at t (judged against the beat). */
+  /**
+   * The player taps the baton: a tight percussive hit in the land's palette at t (the land's drum
+   * tuned to the chord root, a click and a pitched voice climbing the chord with a run of taps).
+   * perfect = brighter, with a sparkle and a jingle · good = normal · miss = a soft muted thud.
+   * Play it at the beat time the tap was judged against (on the grid), not the raw tap time.
+   */
   beatTap(t: number, quality: 'perfect' | 'good' | 'miss', pan: number): void;
-  /** Groove 0…4 from the player's run of on-beat taps: the arrangement gains energy layers; 4 = everything. */
+  /**
+   * Groove 0…4 from the player's run of on-beat taps; changes at the next bar line. Battle songs add
+   * energy layers: 1 claps on the backbeat and running shakers · 2 the choir's "Hey!" · 3 brass hits
+   * · 4 everything, drum fills, tambourine, crashes and the tune in the horns. Reaching 4 plays a
+   * riser into that bar line and a drop on it. Reset it (0) when the run breaks or a song starts.
+   */
   setGroove(level: number): void;
-  /** A musician's solo (tapped on the beat): one bar of virtuosic flourish for that instrument, from t. */
+  /**
+   * A musician's solo: one bar of virtuoso flourish for that instrument from t (snapped to the 16th
+   * grid; call it for a downbeat): harp glissando and cascade, drum fill into a crash, bell
+   * carillon, shaker samba break, crystal cascade, horn fanfare, choir swell, bass slap riff. The
+   * backing steps back for the bar. level 0–2 = the tower's level (more notes, louder).
+   */
   solo(kind: TowerKind, level: number, t: number, pan: number, voice: number): void;
-  /** The Maestro's call in a breather: note i (0–3) of a 4-note pattern at t; echoNote is the player's answer. */
+  /**
+   * The Maestro's call in a breather: note i (0–3) of a 4-note pattern at t — four distinct pitches
+   * (the tonic triad and its octave in the key of the moment), so i always means the same note.
+   * callNote(0, …) starts a new pattern. echoNote is the player's answer on note i (ok = false: a
+   * little off and muted).
+   */
   callNote(i: number, t: number): void;
   echoNote(i: number, t: number, ok: boolean): void;
-  /** The player's echo of the call: all four right (success) or not. */
+  /** The player's echo of the call: all four right (a short fanfare) or not (a gentle sigh). Plays on the next eighth. */
   echoResult(success: boolean): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
