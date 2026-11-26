@@ -789,6 +789,8 @@ export class JourneyView {
       case 'boss': {
         const v = this.enemies.get(ev.enemy.id);
         if (!v) break;
+        // v5: the duel bosses act it out (burrow / emerge / summon)
+        if (ev.action === 'burrow' || ev.action === 'emerge' || ev.action === 'summon') v.bossAct(ev.action);
         if (ev.action === 'burrow') {
           v.burrowed = true;
           this.fx.dust(v.pos, this.look.land.dirt, 60);
