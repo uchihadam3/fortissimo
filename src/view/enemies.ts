@@ -25,186 +25,18 @@ import { ENEMIES } from '../sim/defs';
 import { at, box, capsule, clamp01, cone, cyl, damp, scl, sph, torus } from './kit';
 import { Bins, CharMats, MusicianView, assembleBird, bird, ell, glowBy, grp, merge, paint, place, smooth, type BirdDef, type MK, type Painter } from './musicians';
 import { SilenceView } from './silence';
+import { LegendView } from './legends';
+import { MINI_KINDS, animateMini, buildMini } from './minibosses';
 
-type Geo = THREE.BufferGeometry;
-type Col = THREE.ColorRepresentation;
+import { V, _c, drips, eyes2, facet, fan, grad, lathe, fixWinding, noBossCh, profR, stitchX, taperTube, type BossAct, type BossCh, type Geo, type Tpl } from './creatureKit';
 
-const _c = new THREE.Color();
-const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-
-/** vertical gradient */
-const grad = (a: Col, b: Col, y0: number, y1: number): Painter => {
-  const A = new THREE.Color(a), B = new THREE.Color(b);
-  return (p) => _c.copy(A).lerp(B, smooth(y0, y1, p.y));
-};
-
-/** a lathe body from [radius, height] pairs */
-function lathe(pts: number[][], seg = 26): Geo {
-  return new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
-}
-
-/** radius of a lathe profile at height y */
-function profR(pts: number[][], y: number): number {
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [r0, y0] = pts[i], [r1, y1] = pts[i + 1];
-    if ((y >= y0 && y <= y1) || (y <= y0 && y >= y1)) return r0 + ((r1 - r0) * (y - y0)) / (y1 - y0 || 1);
-  }
-  return pts[0][0];
-}
-
-/** faceted (flat-shaded) version of a geometry */
-function facet(g: Geo): Geo {
-  const n = g.index ? g.toNonIndexed() : g;
-  n.deleteAttribute('normal');
-  n.computeVertexNormals();
-  return n;
-}
-
-/** two creature eyes facing +z centred at (±s, y, z) */
-function eyes2(
-  b: Bins, part: string, mk: MK, s: number, y: number, z: number, e: number,
-  o: { pupil?: Col; white?: Col; brow?: number; browCol?: Col; glow?: number; yaw?: number; small?: number; lid?: Col; lidK?: number } = {},
-) {
-  for (const sd of [-1, 1]) {
-    const parts: Geo[] = [
-      paint(scl(sph(e, 14, 10), 1, 1.1, 0.55), o.white ?? '#f6f2ea', o.glow ?? 0.12),
-      paint(at(scl(sph(e * (o.small ?? 0.56), 12, 8), 1, 1.1, 0.4), 0, -e * 0.06, e * 0.38), o.pupil ?? '#120d1c', o.pupil && o.glow ? o.glow : 0),
-      paint(at(scl(sph(e * 0.18, 8, 6), 1, 1, 0.5), e * 0.2, e * 0.24, e * 0.56), '#ffffff', 1),
-    ];
-    if (o.lid) {
-      // a heavy upper lid: grumpy, sleepy or wise
-      const lid = new THREE.SphereGeometry(e * 1.1, 14, 8, 0, Math.PI * 2, 0, Math.PI * (o.lidK ?? 0.42));
-      lid.rotateX(0.55);
-      lid.scale(1, 1.1, 0.6);
-      parts.push(paint(lid, o.lid));
-    }
-    if (o.brow) {
-      const br = capsule(e * 0.16, e * 1.25, 3, 6);
-      br.rotateZ(Math.PI / 2 + sd * o.brow);
-      br.translate(sd * -e * 0.05, e * 1.2, e * 0.28);
-      parts.push(paint(br, o.browCol ?? '#0d0915'));
-    }
-    const g = merge(parts);
-    if (o.yaw) g.rotateY(sd * o.yaw);
-    g.translate(sd * s, y, z);
-    b.add(part, mk, g);
-  }
-}
-
-/** the mark of the Silence: a mouth sewn shut with an X */
-function stitchX(b: Bins, part: string, mk: MK, x: number, y: number, z: number, s: number, o: { pitch?: number; yaw?: number; col?: Col; hole?: Col; n?: THREE.Vector3 } = {}) {
-  const parts: Geo[] = [];
-  for (const k of [-1, 1]) {
-    const g = capsule(s * 0.17, s * 1.25, 3, 6);
-    g.rotateZ(k * 0.78);
-    parts.push(paint(g, o.col ?? '#f1e6cf', 0.35));
-  }
-  for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) parts.push(paint(at(sph(s * 0.1, 6, 4), dx * s * 0.6, dy * s * 0.6, -s * 0.04), o.hole ?? '#2a1d30'));
-  const g = merge(parts);
-  if (o.n) place(g, V(x, y, z), o.n);
-  else {
-    if (o.pitch) g.rotateX(o.pitch);
-    if (o.yaw) g.rotateY(o.yaw);
-    g.translate(x, y, z);
-  }
-  b.add(part, mk, g);
-}
-
-/**
- * A flat fan in the xz plane from the root (0,0) out to an outline (wings, membranes), with rings
- * of inner vertices so it can be painted from the root (t = 0) to the edge (t = 1).
- */
-function fan(outline0: [number, number][], color: (t: number, x: number, z: number) => THREE.Color, glow: (t: number) => number = () => 0, rings0 = 4): Geo {
-  // resample the outline densely so painted details (eyespots, glowing edges) have vertices to live on
-  const outline: [number, number][] = [];
-  const ext = Math.max(...outline0.map(([x, z]) => Math.hypot(x, z)));
-  const step = Math.max(0.03, ext / 40);
-  for (let i = 0; i < outline0.length - 1; i++) {
-    const [x0, z0] = outline0[i], [x1, z1] = outline0[i + 1];
-    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / step));
-    for (let k = 0; k < steps; k++) outline.push([x0 + ((x1 - x0) * k) / steps, z0 + ((z1 - z0) * k) / steps]);
-  }
-  outline.push(outline0[outline0.length - 1]);
-  const rings = Math.max(rings0, Math.min(18, Math.ceil(ext / 0.045)));
-  const pos: number[] = [0, 0, 0], col: number[] = [], gl: number[] = [], idx: number[] = [];
-  const c0 = color(0, 0, 0);
-  col.push(c0.r, c0.g, c0.b);
-  gl.push(glow(0));
-  const n = outline.length;
-  for (let r = 1; r <= rings; r++) {
-    const t = r / rings;
-    for (let i = 0; i < n; i++) {
-      const x = outline[i][0] * t, z = outline[i][1] * t;
-      pos.push(x, 0, z);
-      const c = color(t, x, z);
-      col.push(c.r, c.g, c.b);
-      gl.push(glow(t));
-    }
-  }
-  const v = (r: number, i: number) => (r === 0 ? 0 : 1 + (r - 1) * n + i);
-  for (let i = 0; i < n - 1; i++) idx.push(0, v(1, i), v(1, i + 1));
-  for (let r = 1; r < rings; r++) for (let i = 0; i < n - 1; i++) idx.push(v(r, i), v(r + 1, i), v(r, i + 1), v(r, i + 1), v(r + 1, i), v(r + 1, i + 1));
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const nor = new Float32Array(pos.length);
-  for (let i = 1; i < nor.length; i += 3) nor[i] = 1;
-  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute('glow', new THREE.Float32BufferAttribute(gl, 1));
-  g.setIndex(idx);
-  return g;
-}
-
-/** a tube along a curve whose radius goes from r0 to r1 */
-function taperTube(curve: THREE.Curve<THREE.Vector3>, segs: number, r0: number, r1: number, radial = 8): Geo {
-  const g = new THREE.TubeGeometry(curve, segs, 1, radial, false);
-  const p = g.attributes.position;
-  const c = new THREE.Vector3(), v = new THREE.Vector3();
-  for (let i = 0; i <= segs; i++) {
-    curve.getPointAt(i / segs, c);
-    const r = r0 + (r1 - r0) * Math.pow(i / segs, 0.85);
-    for (let j = 0; j <= radial; j++) {
-      const k = i * (radial + 1) + j;
-      v.fromBufferAttribute(p, k).sub(c).multiplyScalar(r).add(c);
-      p.setXYZ(k, v.x, v.y, v.z);
-    }
-  }
-  g.deleteAttribute('uv');
-  g.computeVertexNormals();
-  return g;
-}
-
-/** a few ink drips running down a surface */
-function drips(b: Bins, part: string, mk: MK, list: [number, number, number, number][], col: Col) {
-  for (const [x, y, z, l] of list) {
-    b.add(part, mk, paint(at(capsule(l * 0.12, l, 3, 6), x, y - l / 2, z), col));
-    b.add(part, mk, paint(at(sph(l * 0.2, 8, 6), x, y - l, z), col));
-  }
-}
-
-// ───────────────────────────── templates ─────────────────────────────
-
-type Style = 'hop' | 'run' | 'fly' | 'float' | 'spin' | 'march' | 'crawl' | 'static';
-
-interface Tpl {
-  root: THREE.Group;
-  height: number;
-  style: Style;
-  hop: number;
-  hops: number;
-  rim: Col;
-  rimK: number;
-  glass: number;
-  flap: number;
-  hover: number;
-}
-
-function buildTemplate(kind: EnemyKind): Tpl {
+function buildTemplate(kind: EnemyKind, variant = 0): Tpl {
   const root = grp('root');
   const body = grp('body');
   root.add(body);
   const b = new Bins();
   const t: Tpl = { root, height: 0.7, style: 'hop', hop: 0.16, hops: 1, rim: '#c4b2ff', rimK: 0.55, glass: 0.6, flap: 22, hover: 0 };
+  if (buildMini(kind, b, t, body, variant)) return t;
   const node = (name: string, parent: THREE.Object3D, x = 0, y = 0, z = 0, shadow = true, pivot = false) => {
     const g = b.into(name, grp(name, x, y, z), pivot ? V(x, y, z) : undefined, shadow);
     parent.add(g);
@@ -963,6 +795,19 @@ function buildTemplate(kind: EnemyKind): Tpl {
         b.add(`tent${k}`, 'g', paint(taperTube(new THREE.CatmullRomCurve3(pts), 40, 0.17, 0.025, 8), grad('#0e0a1e', '#4a3b88', 0, 1.8)));
         node(`tent${k}`, body);
       }
+      // phase 1: a crown of green shards bursts from its crest · phase 2: its veins burn violet
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        b.add('ph1', 'f', paint(new THREE.OctahedronGeometry(0.1, 0).scale(0.7, 2.2, 0.6).rotateZ(Math.cos(a) * 0.5).rotateX(Math.sin(a) * 0.5).translate(Math.cos(a) * 0.32, 2.05, Math.sin(a) * 0.3), '#a8ff7a', 1.9));
+      }
+      for (let i = 0; i < 9; i++) {
+        const a = i * 0.7 + 0.3, y = 0.4 + (i % 4) * 0.35;
+        const r = profR(prof, y) + 0.005;
+        const c = new THREE.CatmullRomCurve3([V(Math.cos(a) * r, y, Math.sin(a) * r), V(Math.cos(a + 0.12) * (profR(prof, y + 0.15) + 0.005), y + 0.15, Math.sin(a + 0.12) * (profR(prof, y + 0.15) + 0.005)), V(Math.cos(a + 0.05) * (profR(prof, y + 0.3) + 0.005), y + 0.3, Math.sin(a + 0.05) * (profR(prof, y + 0.3) + 0.005))]);
+        b.add('ph2', 'f', paint(new THREE.TubeGeometry(c, 8, 0.018, 4, false), '#c8a0ff', 1.8));
+      }
+      node('ph1', body, 0, 0, 0, false);
+      node('ph2', body, 0, 0, 0, false);
       root.scale.setScalar(1.12);
       t.height = 2.35;
       t.hop = 0.09;
@@ -1001,9 +846,15 @@ function buildTemplate(kind: EnemyKind): Tpl {
         b.add(sd < 0 ? 'legsL' : 'legsR', 'g', paint(taperTube(leg, 16, 0.11, 0.05, 7), '#1a1218'));
         b.add(sd < 0 ? 'legsL' : 'legsR', 'g', paint(at(cone(0.04, 0.12, 5).rotateZ(sd * 1.0), sd * 0.86, 0.46, z + 0.07), '#1a1218'));
       }
+      // phase 1: the crack in its shell splits wide with orange light · phase 2: the horn burns
+      for (let i = 0; i < 6; i++) b.add('ph1', 'f', paint(new THREE.OctahedronGeometry(0.12, 0).scale(0.7, 2.0, 0.6).rotateZ((i - 2.5) * 0.35).translate((i - 2.5) * 0.12, 1.18, -0.6 + (i % 2) * 0.12), '#ffc86a', 2.0));
+      b.add('ph1', 'f', paint(at(box(0.09, 0.06, 1.7), 0, 1.07, -0.15), '#ffd890', 1.8));
+      b.add('ph2', 'f', paint(taperTube(horn, 24, 0.2, 0.035, 9), '#ff9a3a', 1.5));
       node('b', body);
       node('legsL', body);
       node('legsR', body);
+      node('ph1', body, 0, 0, 0, false);
+      node('ph2', body, 0, 0, 0, false);
       t.height = 1.7;
       t.style = 'run';
       t.hop = 0.03;
@@ -1059,9 +910,18 @@ function buildTemplate(kind: EnemyKind): Tpl {
         if (sd < 0) w.scale(-1, 1, 1);
         b.add(sd < 0 ? 'wingL' : 'wingR', 'd', w);
       }
+      // phase 1: the ice crown grows and lights · phase 2: frost halos ring its wings
+      for (let i = 0; i < 9; i++) {
+        const h = 0.42 - Math.abs(i - 4) * 0.07;
+        b.add('ph1', 'f', paint(cone(0.04, h, 5).translate(0, h / 2, 0).rotateZ((i - 4) * -0.24).translate((i - 4) * 0.045, 0.3, 0.27), '#bff0ff', 1.6));
+      }
+      b.add('ph2', 'f', paint(torus(0.5, 0.025, 5, 36).rotateX(Math.PI / 2).translate(0, 0.1, -0.1), '#8fe2ff', 1.8));
+      b.add('ph2', 'f', paint(torus(0.7, 0.018, 5, 40).rotateX(Math.PI / 2).translate(0, 0.1, -0.1), '#d8f6ff', 1.4));
       node('b', body);
       node('wingL', body, -0.24, 0.06, 0);
       node('wingR', body, 0.24, 0.06, 0);
+      node('ph1', body, 0, 0, 0, false);
+      node('ph2', body, 0, 0, 0, false);
       root.scale.setScalar(1.2);
       t.height = 1.2;
       t.style = 'fly';
@@ -1090,6 +950,15 @@ function buildTemplate(kind: EnemyKind): Tpl {
         b.add(part, 'g', rock(new THREE.IcosahedronGeometry(0.26, 0).translate(0, 0, 0)), rock(new THREE.IcosahedronGeometry(0.2, 1).scale(1, 1.6, 1).translate(0, -0.45, 0)), rock(new THREE.IcosahedronGeometry(0.3, 1).translate(0, -0.92, 0.06)));
         node(part, body, sd * 0.95, 2.0, 0);
       }
+      // phase 1: a crown of lava on its head · phase 2: the furnace of its chest blazes open
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        b.add('ph1', 'f', paint(cone(0.06, 0.28, 5).translate(Math.cos(a) * 0.2, 2.68, Math.sin(a) * 0.2 + 0.08), '#ff8a3a', 2.0));
+      }
+      b.add('ph2', 'f', paint(at(new THREE.OctahedronGeometry(0.3, 0).scale(1, 1.5, 0.6), 0, 1.62, 0.64), '#ffd070', 2.2));
+      b.add('ph2', 'f', paint(at(torus(0.36, 0.04, 6, 24), 0, 1.62, 0.6), '#ff6a1f', 2));
+      node('ph1', body, 0, 0, 0, false);
+      node('ph2', body, 0, 0, 0, false);
       t.height = 2.65;
       t.style = 'march';
       t.rim = '#ffb080';
@@ -1128,18 +997,25 @@ function golemPlates(): THREE.Group {
   return g;
 }
 
-const templates = new Map<EnemyKind, Tpl>();
+const templates = new Map<string, Tpl>();
 /**
  * Material sets of creatures that left the stage, ready for the next one of the same kind: no
  * shader program is ever released (and recompiled) in the middle of a battle.
  */
-const matPool = new Map<EnemyKind, CharMats[]>();
-function template(kind: EnemyKind): Tpl {
-  let t = templates.get(kind);
+const matPool = new Map<string, CharMats[]>();
+/** the twins come as a pair: variant 0 the sun twin, 1 the moon twin (mirrored) */
+const tplKey = (kind: EnemyKind, variant: number) => (kind === 'twin' ? `${kind}:${variant % 2}` : kind);
+function template(kind: EnemyKind, variant = 0): Tpl {
+  const key = tplKey(kind, variant);
+  let t = templates.get(key);
   if (!t) {
-    t = buildTemplate(kind);
+    t = buildTemplate(kind, variant);
     if (kind === 'bossGolem') t.root.getObjectByName('body')!.add(golemPlates());
-    templates.set(kind, t);
+    t.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) fixWinding(m.geometry);
+    });
+    templates.set(key, t);
   }
   return t;
 }
@@ -1153,10 +1029,10 @@ export const CREATURE_INK: Record<EnemyKind, string> = {
   echo: '#9fe6d4', obelisk: '#4a3d6a', wolf: '#3a4876', shell: '#7fc4ec', phantom: '#d9dfff', muffler: '#c9c4dc', ember: '#ff7a2a',
   slug: '#ff6a1f', shield: '#5c6072', mender: '#7dff9a', mimic: '#2a2346', knight: '#3d2470', conductor: '#6a4ab8',
   bossBlot: '#43357c', bossScarab: '#ffb347', bossMoth: '#8fe2ff', bossGolem: '#ff6a3a', silence: '#1d1a2b',
-  // v5 (placeholders; the art agent refines)
-  toad: '#4b3a8a', drumBeetle: '#6a4a2a', crow: '#3a3a52', sandworm: '#c8935a', croc: '#4f8a6a', sphinx: '#d9b070',
-  yeti: '#b8d8f0', siren: '#7fd4ff', stag: '#cfe8ff', salamander: '#ff8a3a', magmaCrab: '#ff5a2a', smith: '#5a4a5a',
-  gargoyle: '#6a6478', organist: '#4a2a6a', twin: '#2e2450', wyrm: '#d8ff6a', djinn: '#ffcf6a', aurora: '#7affd8',
+  // v5 mini-bosses (the colour each one's great stolen sound bursts back into) and legends
+  toad: '#6a58b8', drumBeetle: '#c8483a', crow: '#4a4a6e', sandworm: '#e0b050', croc: '#3f8a72', sphinx: '#3a5ab0',
+  yeti: '#bfe0f8', siren: '#48d0e0', stag: '#d8ecff', salamander: '#ff7a2a', magmaCrab: '#ff6a1f', smith: '#ffa040',
+  gargoyle: '#8a80a8', organist: '#7a4ab8', twin: '#e9d08a', wyrm: '#d8ff6a', djinn: '#ffcf6a', aurora: '#7affd8',
   phoenix: '#ff4a8a', abyssKing: '#120e1e',
 };
 
@@ -1168,6 +1044,39 @@ interface Sample {
   z: number;
 }
 
+const LEGEND_KINDS: EnemyKind[] = ['wyrm', 'djinn', 'aurora', 'phoenix', 'abyssKing'];
+type LegendKind = 'wyrm' | 'djinn' | 'aurora' | 'phoenix' | 'abyssKing';
+
+/** one running boss act: when it started (view time, beat) and its argument */
+interface ActRun {
+  t0: number;
+  b0: number;
+  k: number;
+  pending: boolean;
+  done?: boolean;
+}
+
+/** default argument of each act (tell: beats of wind-up · parried: quality 1 perfect … 0.5 good · stagger: beats) */
+const ACT_K: Record<BossAct, number> = { enter: 1, tell: 2, blow: 1, parried: 1, stagger: 4, phase: 1, summon: 1, burrow: 1, emerge: 1 };
+const _red = new THREE.Color('#ff3a2a').multiplyScalar(1.1);
+
+// shared bits of the duel's little effects (dizzy stars)
+let starGeo: THREE.BufferGeometry | null = null;
+let starMat: THREE.MeshBasicMaterial | null = null;
+function dizzyStar(): THREE.Mesh {
+  if (!starGeo) {
+    const s = new THREE.Shape();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + Math.PI / 2, r = i % 2 ? 0.045 : 0.11;
+      if (i) s.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      else s.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    starGeo = new THREE.ExtrudeGeometry(s, { depth: 0.025, bevelEnabled: false }).translate(0, 0, -0.0125);
+    starMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd36b').multiplyScalar(1.6), toneMapped: false });
+  }
+  return new THREE.Mesh(starGeo, starMat!);
+}
+
 export class EnemyView {
   readonly group: THREE.Group;
   private tpl: Tpl | null = null;
@@ -1176,12 +1085,21 @@ export class EnemyView {
   // `burrow` ability) like it does for the Scarab, and call `setMimicKind(kind)` once the sim says
   // which instrument a Mimic copies. The Silence boss exposes its SilenceView as `silenceView`
   // (poses / reach / dissolve for its phases).
+  // INTEGRATION (v5 bosses): `bossAct(act, k)` on every sim boss event (enter on spawn, tell on
+  // each tell's first beat with k = beats to the landing, blow on the landing beat, parried with
+  // k = 1 perfect / 0.5 good, stagger, phase with k = the new phase, summon, burrow / emerge);
+  // `setPhase(n)` for a persistent look (also done by bossAct('phase', n)); the gargoyle's
+  // `setStone(on)` while it is immune; `bossPoint(out)` is where its blow comes from (sparks, tell
+  // marks); the twins are told apart by `variant` (id parity: 0 the sun twin, 1 the moon twin).
   private n: Record<string, THREE.Object3D> = {};
   private body!: THREE.Object3D;
   private height: number;
   private silence: SilenceView | null = null;
+  private legend: LegendView | null = null;
   private mimic: MusicianView | null = null;
   readonly flying: boolean;
+  /** the twins: 0 the sun twin, 1 the moon twin (mirrored) */
+  readonly variant: number;
   private hist: Sample[] = [];
   private flash = 0;
   private slowT = 0;
@@ -1191,6 +1109,26 @@ export class EnemyView {
   private shieldFill: THREE.Mesh;
   private aura: THREE.Mesh | null = null;
   private bubble: THREE.Mesh | null = null;
+  // the duel
+  private readonly isBoss: boolean;
+  private readonly isMini: boolean;
+  /** wraps the model: the acts lean, lunge and spin it as a whole */
+  private actG = new THREE.Group();
+  private acts: Partial<Record<BossAct, ActRun>> = {};
+  private A: BossCh = noBossCh();
+  private spin = 0;
+  private windHold = 0;
+  private phase = 0;
+  private phaseParts: { o: THREE.Object3D; from: number; until: number }[] = [];
+  private baseRim = new THREE.Color();
+  private parryFlash = 0;
+  private stoneOn = false;
+  private stoneK = 0;
+  private stars: THREE.Group | null = null;
+  private sparks: THREE.Points | null = null;
+  private sparkV: Float32Array | null = null;
+  private sparkT = -1;
+  private ring: THREE.Mesh | null = null;
   hp = 1;
   shield = 0;
   /** view time at which it died / leaked (null: alive) */
@@ -1210,23 +1148,38 @@ export class EnemyView {
     this.group = new THREE.Group();
     this.flying = ENEMIES[kind].flying;
     this.radius = ENEMIES[kind].radius;
+    this.variant = kind === 'twin' ? Math.abs(id) % 2 : 0;
+    this.isBoss = !!ENEMIES[kind].boss;
+    this.isMini = MINI_KINDS.includes(kind);
+    this.group.add(this.actG);
     if (kind === 'silence') {
       this.silence = new SilenceView();
       this.body = this.silence.group;
-      this.group.add(this.body);
+      this.actG.add(this.body);
       this.height = 3.3;
+    } else if (LEGEND_KINDS.includes(kind)) {
+      this.legend = new LegendView(kind as LegendKind);
+      this.body = this.legend.group;
+      this.actG.add(this.body);
+      const bb = new THREE.Box3().setFromObject(this.body);
+      this.height = Math.max(2, Number.isFinite(bb.max.y) ? bb.max.y : 3);
     } else {
-      const tpl = template(kind);
+      const tpl = template(kind, this.variant);
       this.tpl = tpl;
       const root = tpl.root.clone(true);
-      this.mats = matPool.get(kind)?.pop() ?? new CharMats(tpl.rim, tpl.rimK, tpl.glass);
+      this.mats = matPool.get(tplKey(kind, this.variant))?.pop() ?? new CharMats(tpl.rim, tpl.rimK, tpl.glass);
       this.mats.apply(root);
+      this.baseRim.copy(this.mats.u.uRim.value);
       root.traverse((o) => {
-        if (o.name) this.n[o.name] = o;
+        if (!o.name) return;
+        this.n[o.name] = o;
+        const m = /^(ph|pre)(\d)/.exec(o.name);
+        if (m) this.phaseParts.push(m[1] === 'ph' ? { o, from: Number(m[2]), until: 99 } : { o, from: 0, until: Number(m[2]) });
       });
       this.body = this.n.body;
-      this.group.add(root);
+      this.actG.add(root);
       this.height = tpl.height;
+      this.setPhase(0);
     }
     // ground rings of the creatures that mute towers or lead the others
     const def = ENEMIES[kind];
@@ -1293,8 +1246,260 @@ export class EnemyView {
   get silenceView(): SilenceView | null {
     return this.silence;
   }
+  /** a legend's own view (wyrm, djinn, aurora, phoenix, abyssKing) */
+  get legendView(): LegendView | null {
+    return this.legend;
+  }
   /** the battle Silence looms and reaches by itself; cinematics set this false and pose it themselves */
   autoPose = true;
+
+  // ───────────── the duel ─────────────
+
+  /**
+   * Play a boss gesture (any kind; mini-bosses, guardians, the Silence and the legends have their own):
+   *   enter    the arrival: rears, roars, spreads its wings
+   *   tell     the wind-up, held for k beats (default 2): rears back, its edges glow red, pulsing on
+   *            every beat, its weapon raised — the blow lands on the k-th beat
+   *   blow     the strike toward the colossus
+   *   parried  thrown back (k: 1 perfect … 0.5 good), sparks fly from its weapon
+   *   stagger  dizzy for k beats (default 4), stars circling its head
+   *   phase    a transformation flourish (a spin and a flash) into phase k (default: the next one)
+   *   summon   calls its minions: rises, a violet ring spreads on the ground
+   *   burrow / emerge   dives into the ground (stays under) / bursts out of it
+   * Timing starts at the next update (view time / beat position of that frame).
+   */
+  bossAct(act: BossAct, k?: number): void {
+    const run: ActRun = { t0: 0, b0: 0, k: k ?? (act === 'phase' ? this.phase + 1 : ACT_K[act]), pending: true };
+    const drop = (...l: BossAct[]) => {
+      for (const a of l) delete this.acts[a];
+    };
+    if (act === 'blow') {
+      // the wind-up flows into the blow instead of snapping back
+      this.windHold = this.A.wind;
+      drop('tell');
+    }
+    if (act === 'parried' || act === 'stagger' || act === 'phase') drop('tell', 'blow');
+    if (act === 'burrow') {
+      drop('emerge', 'tell');
+      this.burrowed = true;
+    }
+    if (act === 'emerge') {
+      drop('burrow');
+      this.burrowed = false;
+    }
+    this.acts[act] = run;
+    if (act === 'parried') this.parryFlash = 1;
+    this.legend?.act(act, k);
+  }
+
+  /** the persistent look of phase n (0 = as it arrives): glowing cracks, lit crowns, armour falling… */
+  setPhase(n: number): void {
+    this.phase = Math.max(0, Math.floor(n));
+    this.A.phase = this.phase;
+    for (const p of this.phaseParts) p.o.visible = this.phase >= p.from && this.phase < p.until;
+    if (this.silence) this.silence.eyeGlow = 1 + this.phase * 0.45;
+    this.legend?.setPhase(this.phase);
+  }
+
+  /** the gargoyle turns to stone (immune) and back to life, the colour front sweeping over it */
+  setStone(on: boolean): void {
+    this.stoneOn = on;
+  }
+
+  /** world position its blow comes from (for sparks, tell marks, the parry burst) */
+  bossPoint(out: THREE.Vector3): THREE.Vector3 {
+    const f = this.tpl?.front ?? (this.silence ? 1.2 : 0.8);
+    out.set(0, this.height * 0.55, f);
+    this.actG.updateWorldMatrix(true, false);
+    return this.actG.localToWorld(out);
+  }
+
+  /** the boss channels from the running acts */
+  private runActs(vt: number, beat: number) {
+    const A = this.A;
+    A.wind = A.strike = A.recoil = A.dizzy = A.roar = A.flourish = A.summon = A.erupt = 0;
+    A.dive = 0;
+    const bp = beat - Math.floor(beat);
+    A.pulse = Math.exp(-bp * 6);
+    this.spin = 0;
+    for (const key of Object.keys(this.acts) as BossAct[]) {
+      const r = this.acts[key]!;
+      if (r.pending) {
+        r.pending = false;
+        r.t0 = vt;
+        r.b0 = beat;
+      }
+      const e = vt - r.t0, eb = beat - r.b0;
+      let end = false;
+      switch (key) {
+        case 'tell': {
+          const K = Math.max(0.5, r.k);
+          A.wind = smooth(0, Math.min(1, K * 0.5 + 0.15), eb) * (1 - smooth(K, K + 0.75, eb));
+          end = eb > K + 0.75;
+          break;
+        }
+        case 'blow':
+          A.strike = smooth(0, 0.08, e) * (1 - smooth(0.24, 0.7, e));
+          A.wind = Math.max(A.wind, this.windHold * (1 - smooth(0.06, 0.3, e)));
+          end = e > 0.7;
+          break;
+        case 'parried':
+          A.recoil = (e < 0.07 ? e / 0.07 : Math.exp(-(e - 0.07) * 3)) * (0.55 + 0.45 * clamp01(r.k));
+          end = e > 1.5;
+          break;
+        case 'stagger': {
+          const K = Math.max(1, r.k);
+          A.dizzy = smooth(0, 0.3, eb) * (1 - smooth(K - 0.8, K, eb));
+          end = eb > K;
+          break;
+        }
+        case 'enter':
+          A.roar = smooth(0, 0.45, e) * (1 - smooth(1.5, 2.2, e));
+          end = e > 2.2;
+          break;
+        case 'phase': {
+          const x = clamp01(e / 1.6);
+          A.flourish = Math.sin(Math.PI * x);
+          this.spin = (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2) * Math.PI * 2;
+          if (e >= 0.55 && !r.done) {
+            r.done = true;
+            this.setPhase(r.k);
+          }
+          end = e > 1.6;
+          break;
+        }
+        case 'summon':
+          A.summon = smooth(0, 0.35, e) * (1 - smooth(0.9, 1.5, e));
+          end = e > 1.5;
+          break;
+        case 'burrow':
+          A.dive = smooth(0, 0.7, e);
+          break;
+        case 'emerge':
+          A.erupt = smooth(0, 0.15, e) * (1 - smooth(0.5, 1.2, e));
+          end = e > 1.2;
+          break;
+      }
+      if (end) delete this.acts[key];
+    }
+    A.dive = Math.max(A.dive, this.sink);
+    A.sink = this.sink;
+  }
+
+  /** the whole body leans, lunges, rears and spins with the acts; the red edges of a tell */
+  private poseActs(t: number, vt: number, dt: number) {
+    const A = this.A, tpl = this.tpl;
+    this.parryFlash = Math.max(0, this.parryFlash - dt * 2.5);
+    if (tpl) {
+      const H = this.height, K = tpl.actK ?? 1;
+      const fly = tpl.style === 'fly' || tpl.style === 'float';
+      const rx = K * (-0.26 * A.wind + 0.34 * A.strike - 0.4 * A.recoil - 0.22 * A.roar - 0.14 * A.summon) + A.dizzy * Math.cos(t * 4.6) * 0.12;
+      const rz = A.dizzy * Math.sin(t * 4.6) * 0.16 + A.wind * Math.sin(t * 38) * 0.012 * (1 + A.pulse);
+      const pz = K * H * (-0.1 * A.wind + 0.5 * A.strike - 0.28 * A.recoil) * (fly ? 1.6 : 1);
+      const py = H * (0.05 * A.roar + 0.1 * A.summon + 0.25 * A.erupt) - (fly ? 0.45 * H * A.strike - 0.15 * H * A.wind : 0);
+      this.actG.position.set(0, py, pz);
+      this.actG.rotation.set(rx, this.spin, rz);
+      this.actG.scale.setScalar(1 + 0.07 * A.roar + 0.1 * A.flourish + 0.04 * A.wind * A.pulse);
+    } else {
+      this.actG.position.set(0, 0, 0);
+      this.actG.rotation.set(0, this.legend ? 0 : this.spin * 0.25, 0);
+    }
+    // the material: a red rim and pulse while it winds up, gold when parried, a flash on the phase
+    const u = this.mats?.u;
+    if (u) {
+      const red = A.wind * (0.04 + 0.28 * A.pulse) + A.strike * 0.22;
+      const pf = this.parryFlash;
+      const fl = A.flourish * A.flourish;
+      u.uFlash.value.r += red + pf * 0.34 + fl * 0.18 + A.summon * 0.12;
+      u.uFlash.value.g += red * 0.1 + pf * 0.24 + fl * 0.15 + A.summon * 0.05;
+      u.uFlash.value.b += red * 0.08 + pf * 0.06 + fl * 0.09 + A.summon * 0.22;
+      u.uRim.value.copy(this.baseRim).lerp(_red, Math.min(0.85, A.wind * 0.75 + A.strike * 0.5));
+      if (!this.isMini && this.mats) this.mats.flashK.value = this.mats.flashK.value * (1 + this.phase * 0.35) + A.wind * (0.5 + 0.6 * A.pulse) + A.flourish * 0.6;
+      // the gargoyle: stone ↔ alive, the colour front sweeping up its body
+      this.stoneK = damp(this.stoneK, this.stoneOn ? 1 : 0, 5, dt);
+      A.stone = this.stoneK;
+      if (this.stoneK > 0.002) {
+        const bot = this.pos.y - 0.6 * this.scale, span = (this.height + 1.0) * this.scale;
+        u.uStone.value = this.stoneK > 0.995 ? 1 : this.stoneK;
+        u.uStoneBand.value = 0.06 * this.scale;
+        u.uStoneLine.value = this.stoneK > 0.995 ? 1e4 : bot + this.stoneK * span;
+      } else u.uStone.value = 0;
+    }
+    if (this.silence) {
+      const sv = this.silence;
+      sv.eyeGlow = 1 + this.phase * 0.45 + A.wind * (0.6 + 0.8 * A.pulse);
+      sv.flash = Math.max(sv.flash, this.parryFlash * 0.8, A.flourish * 0.7);
+    }
+    // stars circling the head of a dizzy boss
+    if (A.dizzy > 0.01 || this.stars?.visible) {
+      if (!this.stars) {
+        this.stars = new THREE.Group();
+        for (let i = 0; i < 4; i++) this.stars.add(dizzyStar());
+        this.group.add(this.stars);
+      }
+      const st = this.stars;
+      st.visible = A.dizzy > 0.01;
+      st.position.y = this.height + 0.12;
+      const r = 0.25 + this.height * 0.12;
+      st.children.forEach((c, i) => {
+        const a = vt * 4 + (i / st.children.length) * Math.PI * 2;
+        c.position.set(Math.cos(a) * r, Math.sin(a * 2) * 0.05, Math.sin(a) * r);
+        c.rotation.y = -a;
+        c.scale.setScalar((0.6 + 0.5 * A.dizzy) * (0.7 + this.height * 0.15));
+      });
+    }
+    // a violet ring spreading on the ground while it summons
+    if (A.summon > 0.01 || this.ring?.visible) {
+      if (!this.ring) {
+        this.ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#b48cff').multiplyScalar(1.4), transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+        this.ring.position.y = 0.04;
+        this.group.add(this.ring);
+      }
+      this.ring.visible = A.summon > 0.01;
+      const run = this.acts.summon;
+      const x = run ? clamp01((vt - run.t0) / 1.5) : 1;
+      this.ring.scale.setScalar(0.3 + x * (1 + this.radius * 0.6));
+      (this.ring.material as THREE.MeshBasicMaterial).opacity = A.summon * 0.8;
+    }
+    // sparks off its weapon when parried
+    const pr = this.acts.parried;
+    if (pr && !pr.pending && this.sparkT !== pr.t0) this.spark(pr.k, pr.t0);
+    if (this.sparks && this.sparkV) {
+      const a = vt - this.sparkT;
+      const g = this.sparks.geometry.attributes.position as THREE.BufferAttribute;
+      const v = this.sparkV, f = this.tpl?.front ?? 1;
+      this.sparks.visible = a >= 0 && a < 0.9;
+      if (this.sparks.visible) {
+        for (let i = 0; i < g.count; i++) g.setXYZ(i, v[i * 3] * a, this.height * 0.55 + v[i * 3 + 1] * a - 2.2 * a * a, f + v[i * 3 + 2] * a);
+        g.needsUpdate = true;
+        (this.sparks.material as THREE.PointsMaterial).opacity = 1 - a / 0.9;
+      }
+    }
+  }
+
+  private spark(k: number, t0: number) {
+    this.sparkT = t0;
+    const N = 28;
+    if (!this.sparks) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+      this.sparks = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.09, transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
+      this.sparks.frustumCulled = false;
+      this.sparkV = new Float32Array(N * 3);
+      this.group.add(this.sparks);
+    }
+    const m = this.sparks.material as THREE.PointsMaterial;
+    m.color.set(k >= 0.9 ? '#ffd36b' : '#fff4dc').multiplyScalar(2);
+    m.size = (k >= 0.9 ? 0.11 : 0.08) * this.scale;
+    const v = this.sparkV!;
+    // they fly from its weapon toward the colossus and out to the sides
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2 + Math.random() * 0.3, s = (1.2 + Math.random() * 1.6) * (0.6 + 0.4 * k);
+      v[i * 3] = Math.cos(a) * s;
+      v[i * 3 + 1] = Math.abs(Math.sin(a)) * s * 0.8 + 0.6;
+      v[i * 3 + 2] = (0.8 + Math.random() * 1.4) * (0.6 + 0.4 * k);
+    }
+  }
 
   push(t: number, x: number, z: number) {
     const last = this.hist[this.hist.length - 1];
@@ -1325,6 +1530,7 @@ export class EnemyView {
 
   hit() {
     this.flash = 1;
+    this.legend?.hit();
   }
 
   slowed() {
@@ -1365,30 +1571,44 @@ export class EnemyView {
     const tpl = this.tpl;
     const n = this.n;
     const t = vt + this.seed;
+    if (this.isBoss) this.runActs(vt, beatPos);
+    const A = this.A;
     if (this.silence) {
       y += (0.12 + Math.sin(vt * 1.4) * 0.08) * sc;
       const sv = this.silence;
-      // it looms, and now and then reaches for what is ahead of it
-      if (this.autoPose) {
+      const ahead = (h: number) => new THREE.Vector3(Math.sin(this.dir) * 8, h, Math.cos(this.dir) * 8).add(this.group.position);
+      const acting = A.recoil > 0.04 || A.strike > 0.04 || A.wind > 0.04 || A.dizzy > 0.04 || A.flourish > 0.04 || A.summon > 0.04 || A.roar > 0.04 || !!this.acts.burrow || !!this.acts.emerge;
+      if (acting) {
+        // the duel takes over its poses
+        const pose = A.recoil > 0.04 ? 'recoil' : A.strike > 0.04 ? 'grasp' : A.wind > 0.04 ? 'reach' : A.dizzy > 0.04 ? 'kneel' : A.flourish > 0.04 ? (A.flourish > 0.6 ? 'recoil' : 'loom') : A.summon > 0.04 ? 'reach' : 'loom';
+        sv.pose = pose;
+        if (pose === 'grasp') sv.reach(ahead(-1.5));
+        else if (pose === 'reach') sv.reach(ahead(A.summon > 0.04 ? 6 : 3));
+        else sv.reach(null);
+        if (this.acts.enter) sv.emerge = Math.max(0.05, smooth(0, 1.6, vt - this.acts.enter.t0));
+        if (this.acts.burrow) sv.emerge = 1 - A.dive * 0.85;
+        if (this.acts.emerge) sv.emerge = Math.max(sv.emerge, smooth(0, 0.9, vt - this.acts.emerge.t0));
+      } else if (this.autoPose) {
+        // it looms, and now and then reaches for what is ahead of it
         const cyc = (vt * 0.12 + this.seed) % 1;
         sv.pose = cyc > 0.72 ? 'reach' : 'loom';
-        if (sv.pose === 'reach') {
-          const ahead = new THREE.Vector3(Math.sin(this.dir) * 8, -1.5, Math.cos(this.dir) * 8).add(this.group.position);
-          sv.reach(ahead);
-        } else sv.reach(null);
+        if (sv.pose === 'reach') sv.reach(ahead(-1.5));
+        else sv.reach(null);
       }
       sv.flash = this.flash;
       sv.update(dt, vt);
+    } else if (this.legend) {
+      this.legend.update(dt, vt, beatPos);
     } else if (tpl) {
       switch (tpl.style) {
         case 'fly': {
-          y += (1.2 + Math.sin(vt * 2.2 + this.seed) * 0.12 + (kind === 'bossMoth' ? 0.5 : 0)) * sc;
+          y += (1.2 + Math.sin(vt * 2.2 + this.seed) * 0.12 + (kind === 'bossMoth' ? 0.5 : 0) + (this.isMini ? 0.35 : 0)) * sc;
           const flap = Math.sin(t * tpl.flap);
           const a = kind === 'bossMoth' ? 0.42 + flap * 0.4 : 0.1 + flap * 0.65;
           if (n.wingL) n.wingL.rotation.z = a;
           if (n.wingR) n.wingR.rotation.z = -a;
-          this.body.position.y = -flap * 0.03;
-          this.body.rotation.x = Math.sin(t * 1.7) * 0.08;
+          this.body.position.y = -flap * 0.03 * (1 - A.stone);
+          this.body.rotation.x = Math.sin(t * 1.7) * 0.08 * (1 - A.stone);
           if (kind === 'ember') {
             this.body.position.x = Math.sin(t * 13) * 0.03;
             this.body.rotation.z = Math.sin(t * 9) * 0.15;
@@ -1417,15 +1637,16 @@ export class EnemyView {
           break;
         }
         default: {
-          // hop on the beat; runners take several quick hops per beat
+          // hop on the beat; runners take several quick hops per beat (a boss winding up stays put)
           const ph = (bp * tpl.hops) % 1;
-          const hop = Math.sin(ph * Math.PI);
+          const hop = Math.sin(ph * Math.PI) * (1 - A.wind) * (1 - A.dizzy);
           y += hop * tpl.hop * sc * slow;
           const land = Math.exp(-ph * 8);
-          sq = 1 + hop * 0.12 - land * 0.18 * (tpl.style === 'run' ? 0.5 : 1);
+          sq = 1 + hop * 0.12 - land * 0.18 * (tpl.style === 'run' ? 0.5 : 1) * (1 - A.wind) - A.wind * 0.08;
         }
       }
-      this.animate(t, beatPos, bp, dt);
+      if (this.isMini) animateMini(kind, n, this.body, A, t, beatPos, bp, this.speed, this.mats);
+      else this.animate(t, beatPos, bp, dt);
     }
     if (this.burrowed) this.sink = Math.min(1, this.sink + dt * 2);
     else this.sink = Math.max(0, this.sink - dt * 2);
@@ -1433,7 +1654,7 @@ export class EnemyView {
     toWorld(s.x, s.z, y, this.pos);
     this.group.position.copy(this.pos);
     this.group.rotation.y = this.dir;
-    if (!this.silence) this.body.scale.set(appear * (2 - sq), appear * sq, appear * (2 - sq));
+    if (this.tpl) this.body.scale.set(appear * (2 - sq), appear * sq, appear * (2 - sq));
     else this.body.scale.setScalar(appear);
     // hit flash & slow tint
     this.flash = Math.max(0, this.flash - dt * 7);
@@ -1443,6 +1664,7 @@ export class EnemyView {
       u.uFlash.value.setRGB(this.flash * 0.68, this.flash * 0.62, this.flash * 0.5);
       u.uSlow.value = this.slowT * 0.85;
     }
+    if (this.isBoss) this.poseActs(t, vt, dt);
     if (this.mimic) {
       this.mimic.mats.u.uFlash.value.setRGB(this.flash * 0.68, this.flash * 0.62, this.flash * 0.5);
       this.mimic.mats.u.uSlow.value = this.slowT * 0.85;
@@ -1483,6 +1705,7 @@ export class EnemyView {
   /** what each creature does with its parts */
   private animate(t: number, beat: number, bp: number, _dt: number) {
     const n = this.n;
+    const A = this.A;
     const fast = Math.min(2, this.speed * 0.35 + 0.4);
     switch (this.kind) {
       case 'blot':
@@ -1619,8 +1842,10 @@ export class EnemyView {
         for (let k = 0; k < 4; k++) {
           const tn = n[`tent${k}`];
           if (tn) {
+            // the tentacles rise for the wind-up and lash forward on the blow
             tn.rotation.y = Math.sin(t * 0.8 + k) * 0.12;
-            tn.scale.y = 1 + Math.sin(t * 1.6 + k * 1.3) * 0.06;
+            tn.rotation.x = -A.wind * 0.25 + A.strike * 0.35 - A.roar * 0.2;
+            tn.scale.y = 1 + Math.sin(t * 1.6 + k * 1.3) * 0.06 + A.wind * 0.35 + A.roar * 0.3 - A.strike * 0.1;
           }
         }
         if (this.mats) this.mats.flashK.value = 0.9 + Math.sin(t * 2.4) * 0.3;
@@ -1632,13 +1857,27 @@ export class EnemyView {
         if (this.mats) this.mats.flashK.value = 0.9 + Math.sin(t * 3) * 0.3;
         break;
       }
-      case 'bossMoth':
+      case 'bossMoth': {
+        // wings held high for the wind-up, swept back for the dive, spread flat to arrive
+        const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
+        for (const [w, sd] of [[n.wingL, 1], [n.wingR, -1]] as [THREE.Object3D | undefined, number][]) {
+          if (!w) continue;
+          let a = w.rotation.z * sd;
+          a = lerp(a, 1.05 + Math.sin(t * 18) * 0.03, A.wind);
+          a = lerp(a, -0.45, A.strike);
+          a = lerp(a, 0.05, Math.max(A.roar, A.summon));
+          w.rotation.z = a * sd;
+        }
         if (this.mats) this.mats.flashK.value = 0.9 + Math.sin(t * 2) * 0.3;
         break;
+      }
       case 'bossGolem': {
         const ph = beat * Math.PI * 0.5;
-        if (n.armL) n.armL.rotation.x = Math.sin(ph) * 0.35;
-        if (n.armR) n.armR.rotation.x = -Math.sin(ph) * 0.35;
+        // both fists raised overhead for the wind-up, brought down on the blow
+        const L = (a: number, b: number, k: number) => a + (b - a) * k;
+        const arm = (rest: number) => L(L(L(rest, -2.7, A.wind), -1.1, A.strike), -1.4, Math.max(A.roar, A.summon));
+        if (n.armL) n.armL.rotation.x = arm(Math.sin(ph) * 0.35);
+        if (n.armR) n.armR.rotation.x = arm(-Math.sin(ph) * 0.35);
         if (n.legL) n.legL.rotation.x = Math.sin(ph) * 0.3;
         if (n.legR) n.legR.rotation.x = -Math.sin(ph) * 0.3;
         this.body.rotation.z = Math.sin(ph) * 0.05;
@@ -1664,14 +1903,26 @@ export class EnemyView {
       u.uFlash.value.setScalar(0);
       u.uSlow.value = 0;
       if (this.kind === 'phantom') this.mats.get('h').opacity = this.mats.glassOpacity;
-      let pool = matPool.get(this.kind);
-      if (!pool) matPool.set(this.kind, (pool = []));
+      u.uStone.value = 0;
+      u.uRim.value.copy(this.baseRim);
+      const key = tplKey(this.kind, this.variant);
+      let pool = matPool.get(key);
+      if (!pool) matPool.set(key, (pool = []));
       if (pool.length < 48) pool.push(this.mats);
       else this.mats.dispose();
       this.mats = null;
     }
     this.mimic?.dispose();
     this.silence?.dispose();
+    this.legend?.dispose();
+    if (this.ring) {
+      this.ring.geometry.dispose();
+      (this.ring.material as THREE.Material).dispose();
+    }
+    if (this.sparks) {
+      this.sparks.geometry.dispose();
+      (this.sparks.material as THREE.Material).dispose();
+    }
     if (this.aura) (this.aura.material as THREE.Material).dispose();
     if (this.bubble) (this.bubble.material as THREE.Material).dispose();
     this.hpBar.traverse((o) => {
