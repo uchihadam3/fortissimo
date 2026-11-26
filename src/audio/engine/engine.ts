@@ -464,6 +464,12 @@ const api: AudioAPI = {
   strike: guard('strike', (_t: number, _q: 'perfect' | 'good' | 'miss', _pan: number) => {}),
   setPower: guard('setPower', (_p: number) => {}),
   powerDrop: guard('powerDrop', (_t: number) => {}),
+  // v5 contract (bosses): no-ops until the audio agent implements them
+  bossTheme: guard('bossTheme', (_k: EnemyKind | null, _t: number) => {}),
+  bossPhase: guard('bossPhase', (_n: number, _t: number) => {}),
+  bossTell: guard('bossTell', (_t: number, _pan: number, _last: boolean) => {}),
+  parry: guard('parry', (_t: number, _q: 'perfect' | 'good', _pan: number) => {}),
+  bossBlow: guard('bossBlow', (_t: number, _pan: number, _s: number) => {}),
 
   studioSting: guard('studioSting', () => {
     if (E.core) E.sfx?.studioSting();

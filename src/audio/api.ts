@@ -264,6 +264,26 @@ export interface AudioAPI {
   setPower(p: number): void;
   /** A clear "you broke the run" sound when a miss costs power (a short downward sting). */
   powerDrop(t: number): void;
+  // ── bosses (v5): every boss fight is a duel on the beat ─────────────
+  /**
+   * A boss fight starts: the battle music turns into that boss's fight music from the next bar
+   * line ≥ t (null: back to the level's song). Mini-bosses (end of every main level): a fierce
+   * variant of the land's theme with the creature's own motif and its own rhythm signature.
+   * Guardians (bossBlot, bossScarab, bossMoth, bossGolem, silence): a full theme each, per land.
+   * Legends (wyrm, djinn, aurora, phoenix, abyssKing): unique, epic, unforgettable themes.
+   */
+  bossTheme(kind: EnemyKind | null, t: number): void;
+  /** The boss enters phase n (1, 2, 3…): the music escalates (key lift, tempo feel, new layers). */
+  bossPhase(phase: number, t: number): void;
+  /**
+   * The boss winds up an attack on the beat: one count-in hit at t (called for each warning beat;
+   * `last` = the beat the blow lands — the player must tap it to parry).
+   */
+  bossTell(t: number, pan: number, last: boolean): void;
+  /** The player parried the blow on the beat (perfect: the blow is reflected — a triumphant clang). */
+  parry(t: number, quality: 'perfect' | 'good', pan: number): void;
+  /** The blow landed (not parried): a heavy impact on the colossus. */
+  bossBlow(t: number, pan: number, strength: number): void;
   /**
    * Cinematics: a rescued musician plays its signature motif (≈2 bars) on top of any mood, from the
    * mood's next beat, in its key (the mood holds its tonic under it).
