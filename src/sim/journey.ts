@@ -21,10 +21,11 @@ import { JourneyPath } from './path';
 import { SLOTS, SHELL_REACH, slotsAdjacent } from './shell';
 import { Rng, hashString } from '../core/rng';
 import { RHYTHM, SOLO, ECHO, CRESCENDO, COIN_VALUE, STRIKE, grooveOf, powerMul, type TapQuality } from './rhythm';
+import { BOSSES, DUEL, bossClass, shieldOf, type BossSpec } from './bosses';
 
 export type Mode = 'normal' | 'virtuoso' | 'endless';
 export type FeatureKind = 'canyon' | 'river' | 'lake' | 'forest' | 'hills' | 'ruins' | 'meadow';
-export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo' | 'coin' | 'strike';
+export type TutorialId = 'basics' | 'upgrade' | 'ff' | 'pickup' | 'sides' | 'baton' | 'solo' | 'echo' | 'coin' | 'strike' | 'parry';
 export type LandmarkKind = 'bell' | 'chimes' | 'organ' | 'harp' | 'spire';
 
 /** sub-steps per 16th note (fixed integration grid) */
@@ -150,6 +151,10 @@ export interface Enemy {
   bellStep: number;
   /** v4: struck by the colossus (a tap on the beat): not again until */
   struckUntil: number;
+  /** v5 duel: phase (0…), the bar of its next attack, attacks made, entered the fight */
+  duelPhase: number;
+  nextAttackBar: number;
+  attacks: number;
   /** guardians: angle around the colossus they stalk at, and whether they charge */
   orbit: number;
   charging: boolean;
@@ -205,6 +210,21 @@ export interface Shot {
   duet?: DuetId;
   /** a note of a solo (the solo's own music plays it: no separate tower note) */
   solo?: boolean;
+}
+
+/** v5: a boss's blow, landing on the beat grid at `t` (parry it by tapping that beat) */
+export interface Blow {
+  id: number;
+  enemy: Enemy;
+  /** sim time it lands */
+  t: number;
+  /** lives it takes (before the shield) */
+  strength: number;
+  /** done: parried (q) or landed */
+  resolved: boolean;
+  q?: TapQuality;
+  /** an echo of the blow before (the yeti's roar) */
+  echo?: boolean;
 }
 
 export interface Pickup {
@@ -282,7 +302,16 @@ export type SimEvent =
   /** the colossus strikes a creature tapped on the beat */
   | { t: number; type: 'strike'; enemy: Enemy; perfect: boolean; amount: number }
   /** a movement was played with a high power: a crescendo star (stars = how many now) */
-  | { t: number; type: 'crescendo'; movement: number; stars: number; average: number };
+  | { t: number; type: 'crescendo'; movement: number; stars: number; average: number }
+  // ── v5: the duel ──
+  /** a boss winds up (t: the tell bar's downbeat): its tell beats and the blows that will land */
+  | { t: number; type: 'bossAttack'; enemy: Enemy; tells: number[]; blows: Blow[]; call: boolean }
+  /** a blow was parried (perfect: reflected back, `amount` of damage) */
+  | { t: number; type: 'parry'; blow: Blow; q: TapQuality; amount: number }
+  /** a blow landed: `lives` taken (after the shield soaked up `absorbed` of it), a musician stunned */
+  | { t: number; type: 'bossBlow'; blow: Blow; lives: number; absorbed: number; stunned: number[] }
+  /** a boss enters a new phase of its duel */
+  | { t: number; type: 'bossPhase'; enemy: Enemy; phase: number };
 
 export interface SimStats {
   kills: number;
@@ -315,6 +344,11 @@ export interface SimStats {
   strikes: number;
   /** golden notes taken on the beat */
   onBeatNotes: number;
+  /** v5: blows parried (perfectly), and blows that landed */
+  parries: number;
+  reflects: number;
+  blowsTaken: number;
+  bossesBeaten: number;
 }
 
 /** A player input, with the sub-step it happened at. */
@@ -330,6 +364,7 @@ export type SimAction =
   | { sub: number; a: 'solo'; slot: number; perfect: boolean; q?: TapQuality }
   | { sub: number; a: 'power'; p: number; judged: number; hits: number }
   | { sub: number; a: 'strike'; id: number; perfect: boolean }
+  | { sub: number; a: 'parry'; blow: number; q: TapQuality }
   | { sub: number; a: 'echo' };
 
 /** Where a fallen journey can start again: the beginning of a movement's breather. */
@@ -384,7 +419,7 @@ export class Journey {
   shots: Shot[] = [];
   pickups: Pickup[] = [];
   events: SimEvent[] = [];
-  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0, powerSum: 0, judged: 0, hits: 0, strikes: 0, onBeatNotes: 0 };
+  stats: SimStats = { kills: 0, leaks: 0, earned: 0, spent: 0, collected: 0, pickups: 0, damageByKind: {}, ffUses: 0, heals: 0, duets: 0, harmonyPeak: 0, solos: 0, perfectSolos: 0, echoes: 0, chords: 0, groovePeak: 0, grooveSum: 0, walkBars: 0, powerSum: 0, judged: 0, hits: 0, strikes: 0, onBeatNotes: 0, parries: 0, reflects: 0, blowsTaken: 0, bossesBeaten: 0 };
   /** the colossus */
   turtle = { s: 0, x: 0, z: 0, dx: 0, dz: -1 };
   walking = false;
@@ -436,6 +471,8 @@ export class Journey {
   }
   /** crescendo stars earned (movements played with a high power) */
   crescendo = 0;
+  /** v5: the bosses' blows still to land (or to be parried) */
+  blows: Blow[] = [];
   private mvPower = 0;
   private mvBars = 0;
   /** a choir's solo lifts the whole band until then */
@@ -739,6 +776,8 @@ export class Journey {
         return this.setPower(a.p, a.judged, a.hits);
       case 'strike':
         return this.strike(a.id, a.perfect) > 0;
+      case 'parry':
+        return this.parry(a.blow, a.q);
       case 'solo': {
         const t = this.towerAt(a.slot);
         return !!t && this.solo(t, a.q ?? (a.perfect ? 'perfect' : 'good')) !== null;
@@ -785,6 +824,37 @@ export class Journey {
     const hp = e.hp + e.shield;
     this.damage(e, amount, 'bass', null, this.time);
     return Math.max(1e-6, hp - Math.max(0, e.hp) - Math.max(0, e.shield));
+  }
+
+  /**
+   * A boss's blow parried on its beat (judged by the controller): perfect reflects it (damage and a
+   * stagger), good blocks it; a miss is not a parry (the blow lands when its time is up).
+   */
+  parry(id: number, q: TapQuality): boolean {
+    const b = this.blows.find((x) => x.id === id);
+    if (!b || b.resolved || q === 'miss' || this.outcome !== 'playing') return false;
+    if (this.time < b.t - this.spb) return false;
+    b.resolved = true;
+    b.q = q;
+    this.stats.parries++;
+    let amount = 0;
+    const e = b.enemy;
+    if (q === 'perfect' && e.alive) {
+      this.stats.reflects++;
+      amount = e.maxHp * DUEL.reflect[bossClass(e.def)] * (1 + this.power / 100);
+      e.stunUntil = Math.max(e.stunUntil, this.time + this.spb * 2);
+    }
+    this.log.push({ sub: this.sub, a: 'parry', blow: id, q });
+    this.emit({ t: this.time, type: 'parry', blow: b, q, amount });
+    if (amount > 0) this.damage(e, amount, 'bass', null, this.time);
+    return true;
+  }
+
+  /** the next blow still to be parried (soonest first) */
+  nextBlow(): Blow | null {
+    let best: Blow | null = null;
+    for (const b of this.blows) if (!b.resolved && (!best || b.t < best.t)) best = b;
+    return best;
   }
 
   /** can this creature be struck now? */
@@ -1227,6 +1297,12 @@ export class Journey {
       const r = this.respawns.shift()!;
       const e = this.addEnemy(r.kind, r.x, r.z, r.hp, r.wave, t, r.elite, true);
       this.emit({ t, type: 'echo', enemy: e });
+      // the black phoenix is reborn in its last, fiercest phase
+      const spec = BOSSES[e.kind];
+      if (spec && e.def.boss) {
+        e.duelPhase = spec.phases.length - 1;
+        this.emit({ t, type: 'bossPhase', enemy: e, phase: e.duelPhase });
+      }
     }
     // towers follow the shell
     const tmp = { x: 0, z: 0 };
@@ -1247,6 +1323,7 @@ export class Journey {
     if (this.bandDirty) this.updateBand(t);
     for (const tw of this.towers) this.towerStep(tw, k, t);
     for (const tw of this.towers) if (tw.soloFrom >= 0) this.soloStep(tw, k, t);
+    if (this.blows.length) this.resolveBlows(t);
     if (this.ffDropT !== null && t >= this.ffDropT - 1e-9) this.ffDrop(t);
     if (!this.ffWasReady && this.ff >= 1 && this.ffDropT === null) {
       this.ffWasReady = true;
@@ -1295,6 +1372,13 @@ export class Journey {
         const a = Math.atan2(T.dz, T.dx);
         const e = this.addEnemy(this.def.boss.kind, T.x + Math.cos(a) * 34, T.z + Math.sin(a) * 34, this.def.boss.hp ?? 1, -2, t);
         e.orbit = 0;
+        // the twin knights come two at once, one on each side; the second strikes a bar later
+        if (BOSSES[this.def.boss.kind]?.ability === 'twin') {
+          e.orbit = -0.5;
+          const e2 = this.addEnemy(this.def.boss.kind, T.x + Math.cos(a + 0.5) * 34, T.z + Math.sin(a + 0.5) * 34, this.def.boss.hp ?? 1, -2, t);
+          e2.orbit = 0.5;
+          e2.nextAttackBar += 2;
+        }
       }
       // hymn: the colossus heals a little every few bars
       if (this.walking && jb > 0 && jb % BAND.hymnEvery === 0 && this.lives < this.maxLives && this.stats.heals < BAND.hymnCap && this.band.duets.some((d) => d.id === 'hymn')) {
@@ -1350,6 +1434,7 @@ export class Journey {
       }
     }
     for (const e of this.enemies) if (e.alive && e.def.boss) this.bossBar(e, t);
+    if (this.started) this.duelBar(bar, t);
   }
 
   /** a breather begins: calm before movement k, and one more plate of the shell lights up */
@@ -1391,7 +1476,7 @@ export class Journey {
       armor: def.armor, x, z, speed: def.speed * (this.mode === 'virtuoso' ? VIRTUOSO.speed : 1), flying: def.flying, slow: 1, slowUntil: 0, stunUntil: 0,
       revealedUntil: 0, alive: true, leaked: false, spawnT: t, burrowed: false, invulnUntil: 0, phase: 0, hitT: -1, wave,
       structure: kind === 'obelisk', kx: 0, kz: 0, lives: def.lives + (elite ? 1 : 0), bounty: Math.round(def.bounty * (elite ? 3 : echoed ? 0.5 : 1)),
-      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1, struckUntil: 0,
+      elite, echoed, mimicKind: null, orbit: 0, charging: false, bellStep: -1, struckUntil: 0, duelPhase: 0, nextAttackBar: Math.floor(t / this.barDur + 1e-9) + DUEL.entrance, attacks: 0,
     };
     if (def.boss) {
       const T = this.turtle;
@@ -1879,6 +1964,11 @@ export class Journey {
     if (!e.structure) this.stats.kills++;
     if (tw) tw.kills++;
     this.emit({ t, type: 'death', enemy: e, bounty });
+    if (e.def.boss) {
+      this.stats.bossesBeaten++;
+      for (const b of this.blows) if (b.enemy === e) b.resolved = true;
+      this.blows = this.blows.filter((b) => !b.resolved);
+    }
     if (e.def.split) {
       for (let i = 0; i < e.def.split.count; i++) {
         const a = (i / e.def.split.count) * Math.PI * 2;
@@ -1936,10 +2026,106 @@ export class Journey {
     }
   }
 
+  // ───────────────────────────── the duel (v5) ─────────────────────────────
+
+  /**
+   * At every bar line: the boss whose turn it is winds up (its tell bar is this bar) and its blows
+   * land on the beat grid of the next bar. One boss attacks at a time (twins take turns).
+   */
+  private duelBar(bar: number, t: number) {
+    if (this.blows.some((b) => !b.resolved)) return;
+    let who: Enemy | null = null;
+    for (const e of this.enemies) {
+      if (!e.alive || !e.def.boss || !BOSSES[e.kind] || e.nextAttackBar > bar) continue;
+      if (!who || e.nextAttackBar < who.nextAttackBar || (e.nextAttackBar === who.nextAttackBar && e.id < who.id)) who = e;
+    }
+    // the stone gargoyle: stone on even bars (immune), alive on odd ones
+    for (const e of this.enemies) {
+      if (!e.alive || BOSSES[e.kind]?.ability !== 'stone') continue;
+      if (bar % 2 === 0 && e !== who) e.invulnUntil = Math.max(e.invulnUntil, t + this.barDur - 1e-6);
+    }
+    if (!who) return;
+    const spec = BOSSES[who.kind]!;
+    if (who.burrowed) {
+      // the dune worm surfaces to strike
+      who.burrowed = false;
+      this.emit({ t, type: 'boss', enemy: who, action: 'emerge' });
+    }
+    this.attack(who, spec, bar, t);
+  }
+
+  private attack(e: Enemy, spec: BossSpec, bar: number, t: number) {
+    const set = spec.phases[Math.min(e.duelPhase, spec.phases.length - 1)];
+    const offsets = set[e.attacks % set.length];
+    e.attacks++;
+    const eighth = this.spb / 2;
+    const land0 = (bar + 1) * this.barDur;
+    const blows: Blow[] = [];
+    const strength = spec.blow;
+    for (const o of offsets) {
+      blows.push({ id: this.nextId++, enemy: e, t: land0 + o * eighth, strength, resolved: false });
+      // the yeti's roar echoes: every blow comes back one beat later
+      if (spec.ability === 'echo' && o + 2 <= 7) blows.push({ id: this.nextId++, enemy: e, t: land0 + (o + 2) * eighth, strength, resolved: false, echo: true });
+    }
+    blows.sort((a, b) => a.t - b.t);
+    // the tells: a count-in on the beats of this bar, or (a call) its rhythm played a bar ahead
+    const tells = spec.tell === 'call' ? offsets.map((o) => t + o * eighth) : [0, 1, 2, 3].map((k) => t + k * this.spb);
+    this.blows.push(...blows);
+    e.nextAttackBar = bar + 2 + spec.rest;
+    if (spec.ability === 'mirage' && e.attacks % 3 === 0) {
+      this.summon(e, 'echo', 2, t, 1, 3);
+      this.emit({ t, type: 'boss', enemy: e, action: 'summon' });
+    }
+    this.emit({ t, type: 'bossAttack', enemy: e, tells, blows: blows.slice(), call: spec.tell === 'call' });
+  }
+
+  /** blows not parried in time land on the colossus (the shield of sound soaks up part of them) */
+  private resolveBlows(t: number) {
+    const grace = DUEL.resolveBeats * this.spb;
+    for (const b of this.blows) {
+      if (b.resolved || b.t + grace > t + 1e-9) continue;
+      b.resolved = true;
+      if (!b.enemy.alive) continue;
+      const absorbed = shieldOf(this.power);
+      const lives = Math.max(0, Math.round(b.strength * (1 - absorbed)));
+      this.stats.blowsTaken++;
+      // the musician nearest the boss is knocked silent for a while (two of them for the sphinx)
+      const n = BOSSES[b.enemy.kind]?.ability === 'mute' ? 2 : 1;
+      const near = this.towers
+        .filter((tw) => tw.frozenUntil <= t)
+        .sort((a, c) => this.dist2(a, b.enemy) - this.dist2(c, b.enemy))
+        .slice(0, n);
+      for (const tw of near) tw.frozenUntil = t + DUEL.stunBars * this.barDur;
+      if (lives > 0) {
+        this.lives = Math.max(0, this.lives - lives);
+        this.stats.leaks += lives;
+      }
+      this.emit({ t, type: 'bossBlow', blow: b, lives, absorbed, stunned: near.map((x) => x.id) });
+      if (near.length) this.updateMutes(t);
+      if (this.lives <= 0 && this.outcome === 'playing') {
+        this.outcome = 'defeat';
+        this.emit({ t, type: 'defeat' });
+        break;
+      }
+    }
+    this.blows = this.blows.filter((b) => !b.resolved);
+  }
+
   private bossBar(e: Enemy, t: number) {
+    // the dune worm hides underground between its attacks
+    if (BOSSES[e.kind]?.ability === 'burrow') {
+      const bar = Math.round(t / this.barDur);
+      const attacking = this.blows.some((b) => b.enemy === e && !b.resolved) || e.nextAttackBar <= bar + 1;
+      if (!attacking && !e.burrowed && bar > Math.floor(e.spawnT / this.barDur) + DUEL.entrance) {
+        e.burrowed = true;
+        this.emit({ t, type: 'boss', enemy: e, action: 'burrow' });
+      }
+    }
     const age = Math.round((t - e.spawnT) / this.barDur);
     // stalking ends when the colossus stops at the end of the road (or the guardian tires of waiting)
-    if (!e.charging && (this.halted || age >= 48)) {
+    // (a mini-boss or a legend stays in its duel at the bell; a guardian charges when the colossus stops)
+    const duelist = !!(e.def.mini || e.def.legend);
+    if (!e.charging && ((this.halted && !duelist) || age >= 48)) {
       e.charging = true;
       this.emit({ t, type: 'boss', enemy: e, action: 'charge' });
     }
@@ -1993,6 +2179,18 @@ export class Journey {
 
   private bossDamaged(e: Enemy, t: number) {
     const f = e.hp / e.maxHp;
+    // the duel's phases (every boss)
+    const spec = BOSSES[e.kind];
+    if (spec && e.hp > 0) {
+      let ph = 0;
+      for (const a of spec.at) if (f <= a) ph++;
+      ph = Math.min(ph, spec.phases.length - 1);
+      if (ph > e.duelPhase) {
+        e.duelPhase = ph;
+        this.emit({ t, type: 'bossPhase', enemy: e, phase: ph });
+        if (spec.ability === 'mirage') this.summon(e, 'echo', 2 + ph, t, 1.2, 3);
+      }
+    }
     if (e.kind === 'bossGolem') {
       const plates = f > 0.75 ? 0 : f > 0.5 ? 1 : f > 0.25 ? 2 : 3;
       if (plates > e.phase) {
@@ -2102,7 +2300,7 @@ export class Journey {
     const r = (v: number) => Math.round(v * 1e6) / 1e6;
     const en = this.enemies.filter((e) => e.alive).map((e) => `${e.id}:${e.kind}:${r(e.x)},${r(e.z)}:${r(e.hp)}`).join('|');
     const tw = this.towers.map((t) => `${t.id}:${t.kind}${t.level}@${t.slot}:${t.muted ? 'm' : ''}:${r(t.damage)}:${r(t.solo)}${t.soloFrom >= 0 ? 's' : ''}`).join('|');
-    return `pw${this.power} cr${this.crescendo} st${this.stats.strikes} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
+    return `bl${this.blows.length} pa${this.stats.parries} bt${this.stats.blowsTaken} pw${this.power} cr${this.crescendo} st${this.stats.strikes} e${this.stats.echoes} so${this.stats.solos} t${this.sub} s${r(this.turtle.s)} c${this.coins} l${this.lives} ff${r(this.ff)} o${this.outcome} k${this.stats.kills} p${this.slotsOpen} h${this.band.harmony} d${this.band.duets.length} n${this.nextId} [${tw}] [${en}]`;
   }
 
   private dist2(a: { x: number; z: number }, b: { x: number; z: number }) {

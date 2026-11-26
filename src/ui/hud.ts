@@ -71,12 +71,14 @@ export class Hud {
       <div id="groove-glow"></div>
       <div id="baton-wrap">
         <div id="call"><div class="track">${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `<b style="left:${(i + 0.5) * 12.5}%" class="${i % 2 ? 'off' : ''}"></b>`).join('')}</div><div class="notes"></div><i class="head"></i></div>
-        <div class="approach"></div><div class="approach off"></div>
+        <div class="approach"></div><div class="approach off"></div><div class="tell"></div><div class="tell-n"></div>
         <button id="baton" aria-label="baton"><svg class="groove" viewBox="0 0 100 100">${[0, 1, 2, 3].map((i) => `<circle class="seg" cx="50" cy="50" r="45" stroke-dasharray="${SEG.toFixed(1)} 400" transform="rotate(${-90 + 4.5 + i * 90} 50 50)"/>`).join('')}<circle class="prog" cx="50" cy="50" r="37" stroke-dasharray="232.5" stroke-dashoffset="232.5" transform="rotate(-90 50 50)"/></svg><div class="glyph">${BATON}</div></button>
         <div class="sparks"></div>
         <div id="power"><div class="bar"><div class="fill"></div><i style="bottom:20%"></i><i style="bottom:45%"></i><i style="bottom:70%"></i><i style="bottom:90%"></i></div><div class="side"><b class="mult">×1.00</b><b class="combo">0</b><div class="cresc"></div></div></div>
       </div>
       <div id="rhythm-sum"></div>
+      <div id="boss-bar"><div class="head"><i class="ico"></i><span class="name"></span></div><div class="track"><div class="fill"></div><div class="notches"></div></div></div>
+      <div id="boss-card"><i class="ico"></i><div class="name"></div></div>
     </div>`);
     parent.appendChild(this.root);
     const $ = (s: string) => this.root.querySelector(s) as HTMLElement;
@@ -616,6 +618,74 @@ export class Hud {
     el.innerHTML = `<div class="acc"><span class="ico">${BATON}</span><b>${Math.round(accuracy * 100)}%</b></div><div class="best"><span class="ico">${ICON.star}</span><b>${best}</b></div><div class="cresc">${stars}</div>`;
     el.classList.toggle('great', accuracy >= 0.85);
     requestAnimationFrame(() => el.classList.add('on'));
+  }
+
+  // ───────── the duel (v5) ─────────
+
+  private bossKey = '';
+  private tellOn = false;
+
+  /** the boss bar at the top: its name, its health, the notches where its phases turn */
+  setBoss(b: { name: string; kind: EnemyKind; hp: number; notches: number[]; phase: number; cls: 'mini' | 'guardian' | 'legend' } | null) {
+    const el = this.root.querySelector('#boss-bar') as HTMLElement;
+    if (!b) {
+      el.classList.remove('on');
+      this.bossKey = '';
+      return;
+    }
+    el.classList.add('on');
+    const key = `${b.kind}:${b.name}:${b.notches.join(',')}:${b.cls}`;
+    if (key !== this.bossKey) {
+      this.bossKey = key;
+      (el.querySelector('.name') as HTMLElement).textContent = b.name;
+      (el.querySelector('.ico') as HTMLElement).innerHTML = enemyIcon(b.kind);
+      (el.querySelector('.notches') as HTMLElement).innerHTML = b.notches.map((n) => `<b style="left:${(n * 100).toFixed(1)}%"></b>`).join('');
+      el.classList.remove('mini', 'guardian', 'legend');
+      el.classList.add(b.cls);
+    }
+    (el.querySelector('.fill') as HTMLElement).style.width = `${(Math.max(0, Math.min(1, b.hp)) * 100).toFixed(1)}%`;
+    el.dataset.phase = String(b.phase);
+  }
+
+  /** a boss enters: its name card (a proper name) */
+  bossCard(name: string, kind: EnemyKind, cls: 'mini' | 'guardian' | 'legend') {
+    const el = this.root.querySelector('#boss-card') as HTMLElement;
+    (el.querySelector('.ico') as HTMLElement).innerHTML = enemyIcon(kind);
+    (el.querySelector('.name') as HTMLElement).textContent = name;
+    el.classList.remove('mini', 'guardian', 'legend');
+    el.classList.add(cls);
+    this.retrigger(el, 'on');
+    clearTimeout((el as unknown as { _t: number })._t);
+    (el as unknown as { _t: number })._t = window.setTimeout(() => el.classList.remove('on'), 2600);
+  }
+
+  /** a boss turns to a new phase: the bar flares */
+  bossPhase(phase: number) {
+    const el = this.root.querySelector('#boss-bar') as HTMLElement;
+    el.dataset.phase = String(phase);
+    this.retrigger(el, 'phase');
+  }
+
+  /**
+   * The next blow: a red ring closing on the baton that meets it on the blow's beat (`k`: bars left,
+   * 0…1; < 0 hides it) and a red pip for each blow still to come.
+   */
+  setTell(k: number, count: number) {
+    const ring = this.batonWrap.querySelector('.tell') as HTMLElement;
+    const n = this.batonWrap.querySelector('.tell-n') as HTMLElement;
+    const on = k >= 0;
+    if (on !== this.tellOn) {
+      this.tellOn = on;
+      this.batonWrap.classList.toggle('duel', on);
+    }
+    if (!on) return;
+    ring.style.transform = `scale(${(1 + 1.4 * Math.min(1, k)).toFixed(3)})`;
+    ring.style.opacity = (0.35 + 0.65 * (1 - Math.min(1, k))).toFixed(3);
+    this.batonWrap.classList.toggle('strike', k < 0.08);
+    if (n.dataset.n !== String(count)) {
+      n.dataset.n = String(count);
+      n.innerHTML = Array.from({ length: Math.min(8, count) }, () => '<i></i>').join('');
+    }
   }
 
   /** the call was echoed right (or not) */

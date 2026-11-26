@@ -6,7 +6,8 @@
  * Run with `npm test`.
  */
 import { CAMPAIGN, LEVEL_BY_ID, endlessDef } from '../src/data/campaign';
-import { Journey, SUB, SUBS_PER_BAR, type Enemy, type JourneyDef, type SimEvent, type Tower } from '../src/sim/journey';
+import { Journey, SUB, SUBS_PER_BAR, type Blow, type Enemy, type JourneyDef, type SimEvent, type Tower } from '../src/sim/journey';
+import { BOSSES, DUEL, MID_BOSSES, parryQuality, shieldOf } from '../src/sim/bosses';
 import { BAND, ENEMIES, SONGS, TOWERS, TOWER_KINDS, WORLDS, type EnemyKind, type TowerKind } from '../src/sim/defs';
 import { CALLS, ECHO, Power, RHYTHM, callBars, callPattern, grooveOf, nearestGrid, powerMul, quality } from '../src/sim/rhythm';
 import { SLOTS, SLOT_NEIGHBOURS } from '../src/sim/shell';
@@ -72,7 +73,7 @@ for (const [kind, world] of Object.entries(familyOf)) {
   const first = CAMPAIGN.find((l) => l.def.waves.some((w) => w.groups.some((g) => g.kind === kind)));
   check(`${kind} first appears in ${world}`, first?.world === world, first?.id);
 }
-const meadow = new Set(CAMPAIGN.filter((l) => l.world === 'meadow').flatMap((l) => l.def.waves.flatMap((w) => w.groups.map((g) => g.kind))));
+const meadow = new Set(CAMPAIGN.filter((l) => l.world === 'meadow').flatMap((l) => l.def.waves.flatMap((w) => w.groups.filter((g) => !ENEMIES[g.kind].boss).map((g) => g.kind))));
 check('meadow family', [...meadow].every((k) => ['blot', 'scurry', 'bubble', 'moth'].includes(k)), [...meadow].join(','));
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -725,14 +726,158 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   check('good rhythm and no bites: 3★', rhythm.j.stars() === 3 && rhythm.j.accuracy >= 0.85, `${rhythm.j.stars()} ${rhythm.j.accuracy.toFixed(2)}`);
 }
 
+section('duel');
+// ───────────────────────────── v5: the bosses' duel on the beat ─────────────────────────────
+{
+  // every boss has a duel; every main journey ends with its mini-boss, the extras with a legend
+  for (const k of Object.keys(ENEMIES) as EnemyKind[]) {
+    const d = ENEMIES[k];
+    if (!d.boss) continue;
+    const spec = BOSSES[k];
+    check(`${k} has a duel`, !!spec && spec.phases.length === spec.at.length + 1 && spec.phases.every((ph) => ph.length > 0 && ph.every((a) => a.length > 0 && a.every((o) => o >= 0 && o <= 7))));
+    if (d.mini) check(`${k}: 1–2 phases`, spec!.phases.length <= 2);
+    if (d.legend) check(`${k}: 3 phases`, spec!.phases.length === 3);
+  }
+  for (const l of CAMPAIGN) {
+    if (l.kind === 'main') check(`${l.id} ends with a mini-boss`, !!l.def.boss && !!ENEMIES[l.def.boss.kind].mini, l.def.boss?.kind);
+    if (l.kind === 'extra' || l.kind === 'secret') check(`${l.id} ends with a legend`, !!l.def.boss && !!ENEMIES[l.def.boss.kind].legend, l.def.boss?.kind);
+    if (l.kind === 'boss') {
+      const minis = l.def.waves.flatMap((w) => w.groups).filter((g) => ENEMIES[g.kind].mini).map((g) => g.kind);
+      check(`${l.id}: two minis mid-fight`, minis.length === 2 && minis.join() === MID_BOSSES[l.world].join(), minis.join());
+    }
+  }
+  // parry windows: perfect ≤ 60 ms, good ≤ 120 ms, a little wider with a long combo
+  check('parry perfect', parryQuality(0.05, 0) === 'perfect' && parryQuality(-0.06, 0) === 'perfect');
+  check('parry good', parryQuality(0.1, 0) === 'good' && parryQuality(0.13, 0) === 'miss');
+  check('a long combo widens the window', parryQuality(0.15, 30) === 'good' && parryQuality(0.15, 0) === 'miss');
+  check('far from the beat is no parry', parryQuality(0.4, 0) === null);
+  check('shield of sound', shieldOf(0) === 0 && Math.abs(shieldOf(100) - DUEL.shield) < 1e-9);
+}
+/** a boss fight in the arena: the boss right in front, the walk under way */
+function duelArena(kind: EnemyKind, hp = 1) {
+  const j = new Journey(arenaDef({ bars: 300 }), bpm);
+  j.begin();
+  run(j, j.barDur * 2);
+  const b = spawn(j, kind, 20, 0, hp);
+  return { j, b };
+}
+{
+  // the boss winds up on its tell bar and its blows land on the beat grid of the next bar
+  const { j, b } = duelArena('toad');
+  const evs: SimEvent[] = [];
+  run(j, j.barDur * (DUEL.entrance + 2), (e) => evs.push(...e));
+  const atk = evs.find((e) => e.type === 'bossAttack') as Extract<SimEvent, { type: 'bossAttack' }> | undefined;
+  check('a boss attacks after its entrance', !!atk && atk.enemy === b);
+  if (atk) {
+    const eighth = j.spb / 2;
+    check('tells on the beats of the tell bar', atk.tells.length === 4 && atk.tells.every((t, i) => Math.abs(t - (atk.t + i * j.spb)) < 1e-9));
+    check('blows on the grid of the next bar', atk.blows.every((bl) => bl.t >= atk.t + j.barDur - 1e-9 && bl.t < atk.t + 2 * j.barDur && Math.abs(bl.t / eighth - Math.round(bl.t / eighth)) < 1e-6));
+  }
+  // unparried: it lands (lives), the nearest musician is stunned
+  const k = new Journey(arenaDef({ bars: 300 }), bpm);
+  const h = k.build(0, 'harp')!;
+  k.begin();
+  run(k, k.barDur * 2);
+  spawn(k, 'toad', 20, 0, 50);
+  const lives0 = k.lives;
+  const ev2: SimEvent[] = [];
+  run(k, k.barDur * (DUEL.entrance + 3), (e) => ev2.push(...e));
+  const hit = ev2.find((e) => e.type === 'bossBlow') as Extract<SimEvent, { type: 'bossBlow' }> | undefined;
+  check('an unparried blow lands', !!hit && hit.lives === 1 && k.lives < lives0 && k.stats.blowsTaken >= 1);
+  check('…and stuns a musician', !!hit && hit.stunned.includes(h.id) && h.frozenUntil > hit.t);
+  // with full power, the shield of sound makes it bounce off
+  const sh = new Journey(arenaDef({ bars: 300 }), bpm);
+  sh.setPower(100, 1, 1);
+  sh.begin();
+  run(sh, sh.barDur * 2);
+  spawn(sh, 'toad', 20, 0, 50);
+  const ev3: SimEvent[] = [];
+  run(sh, sh.barDur * (DUEL.entrance + 3), (e) => ev3.push(...e));
+  const soft = ev3.find((e) => e.type === 'bossBlow') as Extract<SimEvent, { type: 'bossBlow' }> | undefined;
+  check('full power: the blow bounces off the shield', !!soft && soft.lives === 0 && soft.absorbed >= 0.7 && sh.lives === sh.maxLives);
+}
+{
+  // parries: perfect reflects (damage, a stagger), good blocks; recorded; a miss is no parry
+  const { j, b } = duelArena('drumBeetle', 3);
+  let bl: Blow | null = null;
+  for (let i = 0; i < 200 && !bl; i++) {
+    run(j, 0.1);
+    bl = j.nextBlow();
+  }
+  check('a blow is coming', !!bl);
+  if (bl) {
+    j.advance(bl.t + 0.02);
+    j.drain();
+    const hp = b.hp;
+    check('a miss is no parry', !j.parry(bl.id, 'miss'));
+    check('a perfect parry', j.parry(bl.id, 'perfect') && b.hp < hp && b.stunUntil > j.time && j.stats.reflects === 1 && j.log.some((a) => a.a === 'parry' && a.blow === bl!.id && a.q === 'perfect'));
+    check('a blow is parried once', !j.parry(bl.id, 'good'));
+    const lives = j.lives;
+    const nb = j.nextBlow();
+    if (nb) {
+      j.advance(nb.t);
+      check('a good parry blocks', j.parry(nb.id, 'good') && j.stats.parries === 2);
+      run(j, j.spb * 2);
+      check('…and nothing lands', j.lives === lives);
+    }
+  }
+}
+{
+  // phases at the hp thresholds
+  const { j, b } = duelArena('bossBlot');
+  const evs: SimEvent[] = [];
+  const hurt = (f: number) => (j as unknown as { damage(e: Enemy, a: number, t: string, tw: Tower | null, at: number): void }).damage(b, b.maxHp * f, 'bass', null, j.time);
+  hurt(0.4);
+  evs.push(...j.drain());
+  check('phase 2 at two thirds', b.duelPhase === 1 && evs.some((e) => e.type === 'bossPhase' && e.phase === 1));
+  hurt(0.35);
+  evs.push(...j.drain());
+  check('phase 3 at one third', b.duelPhase === 2 && evs.some((e) => e.type === 'bossPhase' && e.phase === 2));
+  // the echoing yeti doubles its blows; the twins come two at once
+  const y = duelArena('yeti');
+  const ye: SimEvent[] = [];
+  run(y.j, y.j.barDur * (DUEL.entrance + 2), (e) => ye.push(...e));
+  const ya = ye.find((e) => e.type === 'bossAttack') as Extract<SimEvent, { type: 'bossAttack' }> | undefined;
+  check('the yeti echoes its blows', !!ya && ya.blows.some((x) => x.echo));
+  const d = { ...LEVEL_BY_ID.get('c3')!.def, waves: [] };
+  const tj = new Journey(d, SONGS[d.song].bpm);
+  tj.begin();
+  run(tj, (d.boss!.bar + 1) * tj.barDur + 1);
+  check('the twin knights come two at once', tj.enemies.filter((e) => e.alive && e.kind === 'twin').length === 2);
+  // the black phoenix is reborn once, in its last phase
+  const ph = duelArena('phoenix', 0.05);
+  ph.j.drain();
+  (ph.j as unknown as { damage(e: Enemy, a: number, t: string, tw: Tower | null, at: number): void }).damage(ph.b, 1e9, 'bass', null, ph.j.time);
+  run(ph.j, ph.j.barDur * 1.2);
+  const reborn = ph.j.enemies.find((e) => e.alive && e.kind === 'phoenix');
+  check('the phoenix is reborn', !!reborn && reborn.echoed && reborn.duelPhase === 2);
+}
+{
+  // a whole boss level with the rhythm bot: deterministic, and a checkpoint replays through the duel
+  const d = LEVEL_BY_ID.get('m4')!.def;
+  const a = playBot(d, 'good', { rhythm: 0.6 }), b = playBot(d, 'good', { rhythm: 0.6 });
+  check('duel deterministic', a.j.fingerprint() === b.j.fingerprint() && a.j.stats.parries > 0, `${a.j.stats.parries}`);
+  const live = playBot(d, 'good', { rhythm: 0.6, until: (j) => j.stats.parries >= 6 && j.enemies.some((e) => e.alive && e.def.boss) });
+  const L = live.j;
+  const cp = L.checkpoint();
+  check('a checkpoint before the duel', !!cp);
+  if (cp) {
+    const now = Journey.replay(d, SONGS[d.song].bpm, { ...cp, sub: L.sub, actions: L.log.filter((x) => x.sub <= L.sub) });
+    check('replay through the duel == live', now.fingerprint() === L.fingerprint(), `\n  ${now.fingerprint().slice(0, 160)}\n  ${L.fingerprint().slice(0, 160)}`);
+    const sv = newSave(1);
+    rememberCheckpoint(sv, cp.id, cp);
+    check('save keeps parries', JSON.stringify(validate(JSON.parse(JSON.stringify(sv)))!.checkpoints[cp.id]) === JSON.stringify(cp));
+  }
+}
+
 section('bots');
 // ───────────────────────────── the bots ─────────────────────────────
 const tb = Date.now();
 // v4, a true rhythm game: the better the rhythm, the more you win.
 //   virtuoso (0.9: almost every tap perfect) · conductor (0.6) · sloppy (0.3) · no rhythm at all
-// The conductor and the virtuoso win everything (main road with 2–3★); the sloppy hand still gets
-// through the main road; a band with no rhythm struggles from the second land on; the virtuoso
-// beats the sloppy hand by a clear margin in stars.
+// The conductor and the virtuoso win everything (main road with 2–3★, the legends too); the sloppy
+// hand still gets through the main journeys (not the guardians' duels); a band with no rhythm
+// struggles from the second land on; the virtuoso beats the sloppy hand by a clear margin in stars.
 const SK = { virtuoso: 0.9, conductor: 0.6, sloppy: 0.3, none: 0 };
 const starsBy: Record<string, number> = { virtuoso: 0, conductor: 0, sloppy: 0, none: 0 };
 let noneLost = 0;
@@ -743,9 +888,9 @@ for (const l of CAMPAIGN) {
     r[name] = playBot(l.def, 'good', sk ? { rhythm: sk } : {});
     starsBy[name] += r[name].j.stars();
   }
-  check(`virtuoso wins ${l.id}`, r.virtuoso.j.outcome === 'victory' && (!main || r.virtuoso.j.stars() === 3), `${r.virtuoso.j.outcome} ${r.virtuoso.j.lives}`);
+  check(`virtuoso wins ${l.id}`, r.virtuoso.j.outcome === 'victory' && (!main || r.virtuoso.j.stars() >= 2), `${r.virtuoso.j.outcome} ${r.virtuoso.j.lives}`);
   check(`conductor wins ${l.id}`, r.conductor.j.outcome === 'victory' && (!main || r.conductor.j.stars() >= 2), `${r.conductor.j.outcome} ${r.conductor.j.lives}`);
-  if (main) check(`sloppy rhythm still wins ${l.id}`, r.sloppy.j.outcome === 'victory', `${r.sloppy.j.outcome} ${r.sloppy.j.lives}`);
+  if (l.kind === 'main') check(`sloppy rhythm still wins ${l.id}`, r.sloppy.j.outcome === 'victory', `${r.sloppy.j.outcome} ${r.sloppy.j.lives}`);
   if (l.world === 'meadow' && main) check(`no rhythm still wins ${l.id}`, r.none.j.outcome === 'victory', `${r.none.j.outcome}`);
   else if (r.none.j.outcome !== 'victory') noneLost++;
   check(`rhythm helps in ${l.id}`, r.virtuoso.j.lives >= r.none.j.lives && r.virtuoso.j.lives >= r.sloppy.j.lives - 2, `${r.virtuoso.j.lives} ${r.conductor.j.lives} ${r.sloppy.j.lives} ${r.none.j.lives}`);

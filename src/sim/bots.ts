@@ -19,6 +19,7 @@ import { Journey, type JourneyDef, type Mode, type SimEvent, type Tower } from '
 import { ENEMIES, SONGS, TOWERS, SECTION_OF, duetOf, type EnemyKind, type TowerKind } from './defs';
 import { SLOTS, SLOT_NEIGHBOURS } from './shell';
 import { Power, callBars, type TapQuality } from './rhythm';
+import { DUEL } from './bosses';
 import { Rng } from '../core/rng';
 
 export type BotKind = 'good' | 'novice' | 'spam';
@@ -270,6 +271,8 @@ class BotRhythm {
   private rng: Rng;
   private beat = -1;
   private tried = new Set<string>();
+  private parried = new Set<number>();
+  private blowsSeen = 0;
   private readonly missP: number;
   private readonly perfectP: number;
   constructor(private j: Journey, private skill: number, private reach: number) {
@@ -289,6 +292,22 @@ class BotRhythm {
     while (this.beat < b) {
       this.beat++;
       this.tap();
+    }
+    // a boss's blow on its beat: parried as well as the hands allow (the tap feeds the meter)
+    for (const bl of j.blows) {
+      if (bl.resolved || bl.t > j.time + 1e-9 || this.parried.has(bl.id)) continue;
+      this.parried.add(bl.id);
+      const q = this.quality();
+      this.power.judge(q);
+      if (q !== 'miss') j.parry(bl.id, q);
+      this.sync();
+    }
+    // a blow that landed: the power drops
+    if (j.stats.blowsTaken > this.blowsSeen) {
+      this.power.power = Math.max(0, this.power.power - DUEL.powerHit * (j.stats.blowsTaken - this.blowsSeen));
+      this.power.combo = 0;
+      this.blowsSeen = j.stats.blowsTaken;
+      this.sync();
     }
     // the Maestro's call: after each echo bar of a breather, echoed right when its four taps land
     if (j.canEcho()) {

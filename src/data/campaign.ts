@@ -11,6 +11,7 @@ import type { EnemyKind, TowerKind, WorldId } from '../sim/defs';
 import type { Feature, JGroup, JMovement, JourneyDef, JWave, LandmarkKind, TutorialId } from '../sim/journey';
 import { Rng } from '../core/rng';
 import { ENEMIES } from '../sim/defs';
+import { END_BOSS, MID_BOSSES } from '../sim/bosses';
 
 export interface LevelEntry {
   id: string;
@@ -235,6 +236,16 @@ function lift(id: string, k: number): number {
   return k === 0 ? 1 + (L - 1) * 0.5 : L;
 }
 
+/**
+ * v5 (docs/DESIGN-v5.md): every main journey ends with a mini-boss near the bell (a duel on the
+ * beat), the guardian journeys bring two of the land's minis back mid-fight (2nd and 3rd
+ * movement), and the extra paths end with a legend. Their health × this (tuned with the bots);
+ * the guardians keep theirs.
+ */
+export const BOSS_HP = { mini: 1, midMini: 0.7, legend: 1.4 };
+const ENVB = (globalThis as { process?: { env?: Record<string, string> } }).process?.env ?? {};
+const BOSS_TUNE = { mini: Number(ENVB.BM ?? BOSS_HP.mini), midMini: Number(ENVB.BMM ?? BOSS_HP.midMini), legend: Number(ENVB.BL ?? BOSS_HP.legend) };
+
 const SPECS = new Map<string, JourneySpec>();
 
 function journey(o: JourneySpec, tune: number[] | undefined = TUNE[o.id]): JourneyDef {
@@ -262,16 +273,30 @@ function journey(o: JourneySpec, tune: number[] | undefined = TUNE[o.id]): Journ
       if (same) same.groups.push(...s.groups.map((g) => ({ ...scaled(g), at: (g.at ?? 0) + 2 })));
       else rel.push({ bar: s.bar, groups: s.groups.map(scaled) });
     }
+    // the guardian journeys: the land's minis come back in the 2nd and 3rd movement
+    if (o.id[1] === '4' && (k === 1 || k === 2)) {
+      const kind = MID_BOSSES[o.world][k - 1];
+      const bar = Math.min(6, Math.max(1, m.bars - 14));
+      const w = rel.find((x) => x.bar === bar);
+      const g: JGroup = { kind, count: 1, every: 1, dir: k === 1 ? -40 : 40, spread: 4, hp: fh * BOSS_TUNE.midMini };
+      if (w) w.groups.push({ ...g, at: 2 });
+      else rel.push({ bar, groups: [g] });
+    }
     for (const w of rel) waves.push({ bar: cur + w.bar, groups: w.groups });
     cur += m.bars;
   });
   waves.sort((a, b) => a.bar - b.bar);
   const lastStart = movements[movements.length - 1].bar;
+  const lastBars = o.moves[o.moves.length - 1].bars;
+  // the end of every main journey (and of the extra paths): its mini-boss or legend near the bell
+  const end = END_BOSS[o.id];
+  const legend = !!end && !!ENEMIES[end].legend;
+  const boss = o.boss ?? (end ? { kind: end, at: Math.max(2, lastBars - (legend ? 20 : 14)), hp: legend ? BOSS_TUNE.legend : BOSS_TUNE.mini } : undefined);
   return {
     id: o.id, world: o.world, song: o.song ?? o.world, name: o.name, bars: cur, slots: o.slots, coins: o.coins, towers: o.towers,
     waves, movements, features: o.features, pickups: o.pickups ?? Math.round(cur / 9), obelisks: o.obelisks,
     // the guardian grows with the difficulty of its movement
-    boss: o.boss ? { kind: o.boss.kind, bar: lastStart + o.boss.at, hp: (o.boss.hp ?? 1) * Math.pow((tune?.[o.moves.length - 1] ?? 1) * lift(o.id, o.moves.length - 1), 0.6) } : undefined,
+    boss: boss ? { kind: boss.kind, bar: lastStart + boss.at, hp: (boss.hp ?? 1) * Math.pow((tune?.[o.moves.length - 1] ?? 1) * lift(o.id, o.moves.length - 1), 0.6) } : undefined,
     tutorial: o.tutorial, newTower: o.newTower, ff: o.ff ?? true, seed, landmark: LANDMARK[o.world], curviness: o.curviness,
   };
 }
@@ -305,7 +330,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm1', world: 'meadow', map: [14, 74], kind: 'main', requires: [],
     def: journey({
       id: 'm1', world: 'meadow', name: { pt: 'O Despertar', en: 'The Awakening' }, slots: 2, coins: 150, towers: T1, newTower: 'harp',
-      tutorial: ['basics', 'baton', 'coin', 'strike', 'echo'], pickups: 9, curviness: 0.6,
+      tutorial: ['basics', 'baton', 'coin', 'strike', 'echo', 'parry'], pickups: 9, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 70 }, { kind: 'lake', from: 40, to: 100, side: 1 }, { kind: 'hills', from: 100, to: 140 }, { kind: 'meadow', from: 140, to: 190 }],
       moves: [
         {

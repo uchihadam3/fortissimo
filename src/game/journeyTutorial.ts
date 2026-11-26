@@ -11,12 +11,13 @@
  *
  * v4: after the baton, the glove shows the power meter rising and the musicians brighter for it,
  * then taps a golden note on the beat and a creature on the beat (the colossus strikes it).
+ * v5: in the toad's duel at the end of the first journey it taps the baton on the blow's beat (a parry).
  */
 import type { JourneyBattle } from './journeyBattle';
 import type { TutorialId } from '../sim/journey';
 import { TOWERS } from '../sim/defs';
 
-type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'echo' | 'coinBeat' | 'strike' | 'none';
+type Signal = 'slotOpen' | 'built' | 'go' | 'towerOpen' | 'upgraded' | 'ff' | 'ffReady' | 'pickup' | 'plate' | 'baton' | 'groove' | 'solo' | 'echo' | 'coinBeat' | 'strike' | 'parry' | 'none';
 
 interface Step {
   where: () => { x: number; y: number } | null;
@@ -155,6 +156,19 @@ export class JourneyTutorial {
           return best;
         };
         this.steps.push({ when: () => sim.started, where: nearestFoe, press: () => b.beatPress(), until: 'strike', timeout: 14 });
+      }
+      if (id === 'parry') {
+        // the duel: the glove taps the baton right on the beat the boss's blow lands
+        this.steps.push({
+          when: () => b.nextBlowTime() !== null,
+          where: () => (b.nextBlowTime() !== null ? hud.batonCenter() : null),
+          press: () => {
+            const t = b.nextBlowTime();
+            return t === null ? 0 : b.pressAt(t);
+          },
+          until: 'parry',
+          timeout: 24,
+        });
       }
       if (id === 'echo') {
         // the first breather: the glove listens to the Maestro, then taps the echo

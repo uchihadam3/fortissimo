@@ -208,3 +208,57 @@
   #rhythm-sum { gap: 12px; padding: 10px 16px; }
   #rhythm-sum b { font-size: 26px; }
 }
+
+/* ───────── v5: the duel — tell ring on the baton, the boss bar, the name card ───────── */
+
+#baton-wrap .tell {
+  position: absolute; inset: -6px; border-radius: 50%; border: 5px solid #ff4a5e; pointer-events: none; display: none;
+  box-shadow: 0 0 16px rgba(255, 60, 80, .9), inset 0 0 10px rgba(255, 60, 80, .6);
+}
+#baton-wrap.duel .tell { display: block; }
+#baton-wrap.duel.strike .tell { border-color: #fff1c2; box-shadow: 0 0 26px 6px rgba(255, 233, 168, .95); }
+#baton-wrap.duel #baton { box-shadow: 0 6px 0 #0c0916, 0 10px 26px rgba(0, 0, 0, .45), 0 0 18px 4px rgba(255, 70, 90, .55); }
+#baton-wrap .tell-n { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); display: none; gap: 4px; }
+#baton-wrap.duel .tell-n { display: flex; }
+#baton-wrap .tell-n i { width: 9px; height: 9px; border-radius: 50%; background: #ff4a5e; box-shadow: 0 0 8px #ff4a5e; display: block; }
+
+#boss-bar {
+  position: absolute; left: 50%; top: calc(66px + var(--safe-t)); transform: translate(-50%, -10px); width: min(56vw, 520px);
+  opacity: 0; transition: opacity .4s, transform .4s; pointer-events: none;
+}
+#boss-bar.on { opacity: 1; transform: translate(-50%, 0); }
+#boss-bar .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#boss-bar .ico { width: 30px; height: 30px; display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+#boss-bar .ico svg { width: 100%; height: 100%; display: block; }
+#boss-bar .name { font-family: var(--serif, serif); font-weight: 700; font-size: 18px; color: #ffe0e4; text-shadow: 0 2px 0 rgba(0, 0, 0, .6), 0 0 10px rgba(255, 70, 90, .6); letter-spacing: .04em; }
+#boss-bar .track { position: relative; height: 14px; border-radius: 7px; background: rgba(20, 14, 36, .85); box-shadow: inset 0 0 0 2px rgba(255, 140, 150, .45), 0 4px 12px rgba(0, 0, 0, .4); overflow: hidden; }
+#boss-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #a0122e, #ff4a5e 70%, #ff9aa6); box-shadow: 0 0 12px rgba(255, 70, 90, .8); transition: width .2s; }
+#boss-bar.legend .fill { background: linear-gradient(90deg, #5a1aa0, #c84aff 60%, #ffd36b); box-shadow: 0 0 14px rgba(200, 74, 255, .9); }
+#boss-bar.legend .name { color: #ffe9a8; text-shadow: 0 2px 0 rgba(0, 0, 0, .6), 0 0 14px rgba(255, 211, 107, .9); }
+#boss-bar .notches b { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: rgba(255, 247, 230, .85); box-shadow: 0 0 6px #fff; }
+#boss-bar.phase .track { animation: bossphase .8s ease-out; }
+@keyframes bossphase { 0% { transform: scale(1.06); box-shadow: 0 0 30px 10px rgba(255, 70, 90, .95); } 100% { transform: none; } }
+
+#boss-card {
+  position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%) scale(.7); opacity: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity .4s, transform .5s cubic-bezier(.2, 1.6, .4, 1);
+}
+#boss-card.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#boss-card .ico { width: 110px; height: 110px; display: block; filter: drop-shadow(0 0 20px rgba(255, 70, 90, .8)) drop-shadow(0 6px 8px rgba(0, 0, 0, .6)); }
+#boss-card .ico svg { width: 100%; height: 100%; display: block; }
+#boss-card .name { font-family: var(--serif, serif); font-weight: 700; font-size: 44px; color: #ffe0e4; letter-spacing: .06em; text-shadow: 0 4px 0 #3a0a18, 0 0 30px rgba(255, 70, 90, .8); white-space: nowrap; }
+#boss-card.legend .name { color: #ffe9a8; text-shadow: 0 4px 0 #4a2a08, 0 0 34px rgba(255, 211, 107, .9); }
+#boss-card.legend .ico { width: 140px; height: 140px; filter: drop-shadow(0 0 30px rgba(255, 211, 107, .9)); }
+
+@media (max-width: 720px), (max-height: 520px) {
+  #boss-bar { width: min(72vw, 420px); top: calc(56px + var(--safe-t)); }
+  #boss-bar .name { font-size: 14px; }
+  #boss-bar .ico { width: 24px; height: 24px; }
+  #boss-card .name { font-size: 28px; }
+  #boss-card .ico { width: 80px; height: 80px; }
+}
+@media (max-width: 980px) { #boss-bar { top: calc(112px + var(--safe-t)); } }
+@media (max-height: 460px) { #boss-bar { top: calc(94px + var(--safe-t)); } }
+@media (orientation: portrait) and (max-width: 640px) {
+  #boss-bar { top: calc(156px + var(--safe-t)); width: calc(100vw - 40px); }
+}

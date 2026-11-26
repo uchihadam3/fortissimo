@@ -21,6 +21,11 @@
  * v4, everything on the beat: the baton (or any empty spot of the screen), the golden notes, the
  * creatures (the colossus strikes them), the glowing musicians (always their solo: weaker off the
  * beat) and the Maestro's echo all go through one judge and feed one power meter.
+ *
+ * v5, the duel: bosses wind up blows on the beat (red marks close in on the baton; singers and
+ * legends play the rhythm a bar ahead). A tap on the landing beat (baton, empty ground or the boss)
+ * parries: perfect reflects it, good blocks it; the parry is recorded (`Journey.parry`). Unparried,
+ * the blow lands — softened by the golden shield of sound that the power meter raises.
  */
 import * as THREE from 'three';
 import { audio } from './sound';
@@ -34,7 +39,8 @@ import type { BandMix, SongClock } from '../audio/api';
 import { JourneyTutorial } from './journeyTutorial';
 import { ICON } from '../ui/icons';
 import { Power, RHYTHM, CRESCENDO, callBars, callPattern, grooveOf, powerMul, quality, type TapQuality, type TapTarget } from '../sim/rhythm';
-import type { Enemy } from '../sim/journey';
+import type { Enemy, Blow } from '../sim/journey';
+import { BOSSES, DUEL, parryQuality, shieldOf } from '../sim/bosses';
 import { TowerView } from '../view/towers';
 import type { Tower } from '../sim/journey';
 
@@ -153,6 +159,12 @@ export class JourneyBattle {
   private noteRun = 0;
   private lastAudioPower = -1;
   private lastGrooveLevel = 0;
+  /** v5: the bosses in the fight now (their music plays while any lives), the shield of sound */
+  private bossIds = new Set<number>();
+  private shield: THREE.Mesh | null = null;
+  private shieldFlash = 0;
+  private bossCine = -1;
+  private tellBeat = -1;
   private calls: Call[] = [];
   private glows = new Map<number, Glow>();
   private soloEnds = new Map<number, number>();
@@ -577,6 +589,7 @@ export class JourneyBattle {
     if (this.paused || this.ended || this.cardOpen || this.disposed) return;
     const heard = this.heardAt(ts);
     this.tutorial?.notify('baton');
+    if (this.tryParry(heard, x, y)) return;
     const c = this.echoCall(heard);
     if (c) {
       this.echoTap(c, heard, x, y);
@@ -612,6 +625,8 @@ export class JourneyBattle {
   private strikeTap(e: Enemy, ts?: number, x?: number, y?: number) {
     if (this.paused || this.ended || this.cardOpen) return;
     const heard = this.heardAt(ts);
+    // a tap on the boss on the beat of its blow is a parry
+    if (e.def.boss && this.tryParry(heard, x, y)) return;
     const r = this.power.tap(heard, this.sim.spb, 'creature');
     const pan = this.view.pan(e.x, e.z);
     audio.strike(this.soundAt(r.at, r.q), r.q, pan);
@@ -706,6 +721,161 @@ export class JourneyBattle {
       this.hud.kick(1);
       v.bloomWave({ x: tp.x, z: tp.z });
     }
+  }
+
+  // ───────────────────────────── the duel (v5) ─────────────────────────────
+
+  /** the blow a tap heard at `heard` is aimed at (the nearest one still to land), if any is close */
+  private blowAt(heard: number): Blow | null {
+    let best: Blow | null = null;
+    for (const b of this.sim.blows) {
+      if (b.resolved || Math.abs(b.t - heard) > 0.3) continue;
+      if (!best || Math.abs(b.t - heard) < Math.abs(best.t - heard)) best = b;
+    }
+    return best;
+  }
+
+  /** a tap near a blow's beat: a parry (perfect reflects, good blocks) or a miss; true when it was about a blow */
+  private tryParry(heard: number, x?: number, y?: number): boolean {
+    const b = this.blowAt(heard);
+    if (!b) return false;
+    const q = parryQuality(heard - b.t, this.power.combo);
+    if (!q) return false;
+    this.power.lastTap = heard;
+    this.power.judge(q);
+    if (q !== 'miss' && this.sim.parry(b.id, q)) {
+      audio.parry(this.soundAt(b.t, q), q, this.view.pan(b.enemy.x, b.enemy.z));
+      this.tutorial?.notify('parry');
+      this.consume(this.sim.drain());
+    }
+    this.judged(q, b.t, x, y);
+    return true;
+  }
+
+  /** a boss enters: its name, the camera turns to it for a moment */
+  private bossEntrance(e: Enemy) {
+    const spec = BOSSES[e.kind];
+    if (!spec || this.ended) return;
+    const v = this.view.enemies.get(e.id) as unknown as { bossAct?: (a: string, k?: number) => void; pos: THREE.Vector3 } | undefined;
+    v?.bossAct?.('enter');
+    const pt = document.documentElement.lang.startsWith('pt');
+    this.hud.bossCard(pt ? spec.name.pt : spec.name.en, e.kind, e.def.legend ? 'legend' : e.def.mini ? 'mini' : 'guardian');
+    if (v && (!this.view.cine || this.bossCine >= 0)) {
+      const cam = this.view.engine.camera.position.clone();
+      const tp = this.view.turtle.group.position.clone().setY(this.view.turtle.group.position.y + 3);
+      this.view.cineRate = 2;
+      this.view.cine = { pos: cam.clone().lerp(tp, 0.12).setY(cam.y + 2), look: tp.lerp(v.pos, 0.7).setY(v.pos.y + 3) };
+      this.bossCine = this.lastVt + this.sim.barDur * 1.5;
+    }
+  }
+
+  /** a parried blow: a gold bolt back to the boss (perfect) or a bright ring around the colossus (good) */
+  private parryFx(b: Blow, q: TapQuality) {
+    const v = this.view;
+    const ev = v.enemies.get(b.enemy.id) as unknown as { bossAct?: (a: string, k?: number) => void; pos: THREE.Vector3 } | undefined;
+    const heart = v.turtle.heartWorld(new THREE.Vector3());
+    const tp = v.turtle.group.position;
+    const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.4, tp.z);
+    v.fx.ring(g, 9, q === 'perfect' ? '#ffd36b' : '#fff7e6', 0.45, 0.1);
+    this.shieldFlash = 1;
+    if (q === 'perfect' && ev) {
+      const to = ev.pos.clone().setY(ev.pos.y + 2.5);
+      v.fx.lightning([heart.clone().setY(heart.y + 1), heart.clone().lerp(to, 0.5).setY(Math.max(heart.y, to.y) + 5), to], '#ffe9a8');
+      v.fx.burst(to, '#ffd36b', 50, 6, 0.3, 0.9);
+      v.fx.flash(to, 4, '#fff1c2', 0.35);
+      ev.bossAct?.('parried');
+      ev.bossAct?.('stagger');
+      v.punch = 1.6;
+      v.shake(0.35);
+      this.hud.kick(1);
+    } else {
+      v.fx.burst(heart, '#fff7e6', 24, 4, 0.2, 0.6);
+      v.shake(0.15);
+    }
+  }
+
+  /** a blow lands: the colossus shudders — or the golden shield makes it bounce off */
+  private blowFx(e: Enemy, absorbed: number, lives: number) {
+    const v = this.view;
+    const ev = v.enemies.get(e.id) as unknown as { bossAct?: (a: string, k?: number) => void } | undefined;
+    ev?.bossAct?.('blow');
+    const tp = v.turtle.group.position;
+    const g = new THREE.Vector3(tp.x, v.land.heightAt(tp.x, tp.z) + 0.3, tp.z);
+    if (lives > 0) {
+      this.hud.hurt();
+      v.fx.ring(g, 10, '#ff5a6a', 0.6, 0.12);
+      v.fx.dust(g, v.look.land.dirt, 50);
+      v.shake(0.7);
+      v.turtle.rear = 0.6;
+    } else {
+      // it bounces off the shield of sound
+      v.fx.ring(g, 10, '#ffd36b', 0.6, 0.12);
+      v.fx.burst(v.turtle.heartWorld(new THREE.Vector3()), '#ffd36b', 40, 5, 0.24, 0.7);
+      v.shake(0.3);
+    }
+    if (absorbed > 0.05) this.shieldFlash = 1;
+  }
+
+  /** the golden shield of sound around the colossus: as strong as the power, shown in a boss fight */
+  private updateShield(dt: number, u: number) {
+    const fight = this.bossIds.size > 0 && !this.ended;
+    if (!this.shield && !fight) return;
+    if (!this.shield) {
+      const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd36b').multiplyScalar(1.4), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.DoubleSide });
+      this.shield = new THREE.Mesh(new THREE.SphereGeometry(8.5, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), mat);
+      this.shield.renderOrder = 5;
+      this.view.scene.add(this.shield);
+    }
+    const sh = shieldOf(this.power.power) / DUEL.shield;
+    this.shieldFlash = Math.max(0, this.shieldFlash - dt * 2.5);
+    const mat = this.shield.material as THREE.MeshBasicMaterial;
+    mat.opacity = fight ? sh * (0.07 + 0.06 * Math.exp(-u * 5)) + this.shieldFlash * 0.35 : 0;
+    this.shield.visible = mat.opacity > 0.002;
+    const tp = this.view.turtle.group.position;
+    this.shield.position.set(tp.x, tp.y - 0.5, tp.z);
+    this.shield.scale.setScalar(1 + this.shieldFlash * 0.12 + Math.exp(-u * 6) * 0.02);
+  }
+
+  /** the boss bar and the tell marks on the baton, every frame */
+  private updateDuel(vt: number, dt: number, u: number) {
+    const s = this.sim;
+    this.updateShield(dt, u);
+    if (this.bossCine >= 0 && vt >= this.bossCine) {
+      this.bossCine = -1;
+      if (!this.ended && this.soloCineUntil < 0) this.view.cine = null;
+    }
+    // the boss bar: the boss of the fight (the biggest one alive)
+    let lead: Enemy | null = null;
+    for (const e of s.enemies) if (e.alive && e.def.boss && BOSSES[e.kind] && (!lead || e.maxHp > lead.maxHp)) lead = e;
+    if (lead && !this.ended) {
+      const spec = BOSSES[lead.kind]!;
+      const pt = document.documentElement.lang.startsWith('pt');
+      this.hud.setBoss({ name: pt ? spec.name.pt : spec.name.en, kind: lead.kind, hp: Math.max(0, lead.hp) / lead.maxHp, notches: spec.at, phase: lead.duelPhase, cls: lead.def.legend ? 'legend' : lead.def.mini ? 'mini' : 'guardian' });
+    } else if (!this.bossIds.size) this.hud.setBoss(null);
+    // the next blow: a red ring closing on the baton, landing on its beat
+    let next: Blow | null = null;
+    let left = 0;
+    for (const b of s.blows) {
+      if (b.resolved || b.t < vt - 0.15) continue;
+      left++;
+      if (!next || b.t < next.t) next = b;
+    }
+    if (next && next.t - vt <= s.barDur + 0.05 && !this.ended) {
+      this.hud.setTell((next.t - vt) / s.barDur, left);
+      // a red mark at the boss's feet on each beat of the wind-up
+      const beat = Math.floor(vt / s.spb);
+      if (beat !== this.tellBeat) {
+        this.tellBeat = beat;
+        const ev = this.view.enemies.get(next.enemy.id);
+        if (ev && !this.paused) this.view.fx.ring(new THREE.Vector3(ev.pos.x, this.view.land.heightAt(ev.pos.x, ev.pos.z) + 0.25, ev.pos.z), 5 + next.enemy.def.radius, '#ff5a6a', 0.45, 0.08);
+      }
+    } else this.hud.setTell(-1, 0);
+  }
+
+  /** the next blow's beat (for the glove), or null */
+  nextBlowTime(): number | null {
+    const b = this.sim.nextBlow();
+    return b && b.t >= this.lastVt - 0.15 ? b.t : null;
   }
 
   // ───────────────────────────── solos ─────────────────────────────
@@ -1139,6 +1309,7 @@ export class JourneyBattle {
     }
     this.updateGlows(vt, u);
     this.updateCalls(vt);
+    this.updateDuel(vt, 1 / 60, u);
   }
 
   private consume(events: SimEvent[]) {
@@ -1172,6 +1343,20 @@ export class JourneyBattle {
           break;
         case 'death': {
           if (ev.bounty > 0 || ev.enemy.def.boss) audio.enemyDeath(ev.enemy.kind, at, this.view.pan(ev.enemy.x, ev.enemy.z));
+          if (this.bossIds.delete(ev.enemy.id)) {
+            const reborn = ev.enemy.def.echo && !ev.enemy.echoed;
+            if (this.bossIds.size === 0 && !reborn) audio.bossTheme(null, at);
+            const e = ev.enemy;
+            this.later(ev.t, () => {
+              // a boss freed: a great golden chord of light
+              const p = new THREE.Vector3(e.x, this.view.land.heightAt(e.x, e.z) + 2, e.z);
+              this.view.fx.burst(p, '#ffd36b', 90, 7, 0.32, 1.6, true, -0.6);
+              this.view.fx.ring(p.clone().setY(p.y - 1.7), 18, '#fff1c2', 1.2, 0.06);
+              this.view.fx.flash(p, 5, '#fff1c2', 0.5);
+              this.view.shake(0.6);
+              if (this.bossIds.size === 0) this.hud.setBoss(null);
+            });
+          }
           if (ev.bounty > 0) {
             const wp = new THREE.Vector3(ev.enemy.x, this.view.land.heightAt(ev.enemy.x, ev.enemy.z) + 1.5, ev.enemy.z);
             const bounty = ev.bounty;
@@ -1204,7 +1389,22 @@ export class JourneyBattle {
           break;
         }
         case 'spawn':
-          if (ev.enemy.def.boss && !this.bossAnnounced) {
+          if (ev.enemy.def.boss && !this.bossIds.has(ev.enemy.id) && BOSSES[ev.enemy.kind] && ev.enemy.alive) {
+            // a boss enters: its own music, its name, the camera turns to it
+            const first = this.bossIds.size === 0;
+            this.bossIds.add(ev.enemy.id);
+            if (first) audio.bossTheme(ev.enemy.kind, at);
+            if (ev.enemy.echoed) break;
+            audio.bossAppear(at);
+            this.intensity = 3;
+            audio.setIntensity(3);
+            const e = ev.enemy;
+            this.later(ev.t, () => this.bossEntrance(e));
+            if (!this.bossAnnounced) {
+              this.bossAnnounced = true;
+              this.later(ev.t, () => this.introduce([e.kind]), 2600);
+            }
+          } else if (ev.enemy.def.boss && !this.bossAnnounced) {
             this.bossAnnounced = true;
             audio.bossAppear(at);
             this.intensity = 3;
@@ -1212,6 +1412,47 @@ export class JourneyBattle {
             this.later(ev.t, () => this.introduce([ev.enemy.kind]), 600);
           }
           break;
+        // ── v5: the duel ──
+        case 'bossAttack': {
+          const pan = this.view.pan(ev.enemy.x, ev.enemy.z);
+          for (const tt of ev.tells) audio.bossTell(this.ctx(tt), pan, false);
+          for (const b of ev.blows) audio.bossTell(this.ctx(b.t), pan, true);
+          const e = ev.enemy;
+          const beats = Math.round((ev.blows[0].t - ev.t) / this.sim.spb);
+          this.later(ev.t, () => (this.view.enemies.get(e.id) as unknown as { bossAct?: (a: string, k?: number) => void } | undefined)?.bossAct?.('tell', beats));
+          break;
+        }
+        case 'parry':
+          this.later(ev.t, () => this.parryFx(ev.blow, ev.q));
+          break;
+        case 'bossBlow': {
+          const e = ev.blow.enemy;
+          audio.bossBlow(at, this.view.pan(e.x, e.z), ev.blow.strength * (1 - ev.absorbed));
+          // the blow shakes the meter
+          this.power.power = Math.max(0, this.power.power - DUEL.powerHit);
+          this.power.combo = 0;
+          this.syncPower();
+          const absorbed = ev.absorbed, lives = ev.lives;
+          this.later(ev.t, () => this.blowFx(e, absorbed, lives));
+          break;
+        }
+        case 'bossPhase': {
+          audio.bossPhase(ev.phase + 1, at);
+          const e = ev.enemy;
+          this.later(ev.t, () => {
+            const v = this.view.enemies.get(e.id) as unknown as { bossAct?: (a: string, k?: number) => void; setPhase?: (n: number) => void; pos: THREE.Vector3 } | undefined;
+            v?.setPhase?.(ev.phase);
+            v?.bossAct?.('phase', ev.phase);
+            this.hud.bossPhase(ev.phase);
+            if (v) {
+              this.view.fx.ring(new THREE.Vector3(v.pos.x, this.view.land.heightAt(v.pos.x, v.pos.z) + 0.3, v.pos.z), 14, '#ff5a6a', 0.9, 0.06);
+              this.view.fx.flash(v.pos.clone().setY(v.pos.y + 3), 5, '#ffb0b8', 0.4);
+            }
+            this.view.shake(0.5);
+            this.view.punch = 1.2;
+          });
+          break;
+        }
         case 'ffReady':
           audio.ffReady();
           this.tutorial?.notify('ffReady');
@@ -1488,6 +1729,12 @@ export class JourneyBattle {
   private finish(outcome: 'victory' | 'defeat', t: number) {
     if (this.ended) return;
     this.ended = true;
+    this.hud.setTell(-1, 0);
+    this.hud.setBoss(null);
+    if (this.bossIds.size) {
+      audio.bossTheme(null, audio.now());
+      this.bossIds.clear();
+    }
     this.hud.rhythmSummary(this.sim.accuracy, this.sim.stats.judged, this.power.best, this.sim.crescendo, this.sim.movements.length);
     this.soloCineUntil = -1;
     this.calls = [];
@@ -1545,6 +1792,12 @@ export class JourneyBattle {
 
   dispose() {
     this.disposed = true;
+    if (this.bossIds.size) audio.bossTheme(null, audio.now());
+    if (this.shield) {
+      this.shield.removeFromParent();
+      this.shield.geometry.dispose();
+      (this.shield.material as THREE.Material).dispose();
+    }
     audio.setGroove(0);
     audio.setPower(0);
     TowerView.groove = 0;
