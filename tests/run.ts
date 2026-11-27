@@ -453,9 +453,9 @@ section('rhythm');
 {
   const spb = 60 / bpm;
   // judgement windows against the beat as heard
-  check('perfect within 60 ms', quality(0.059) === 'perfect' && quality(-0.059) === 'perfect');
-  check('good within 120 ms', quality(0.1) === 'good' && quality(-0.119) === 'good');
-  check('miss beyond', quality(0.13) === 'miss' && quality(-0.2) === 'miss');
+  check('perfect within 75 ms', quality(0.074) === 'perfect' && quality(-0.074) === 'perfect');
+  check('good within 150 ms', quality(0.1) === 'good' && quality(-0.149) === 'good');
+  check('miss beyond', quality(0.16) === 'miss' && quality(-0.2) === 'miss');
   check('quarters below groove 3', nearestGrid(spb * 0.5 + 0.01, spb, 2).grid === spb);
   check('eighths from groove 3', nearestGrid(spb * 0.5 + 0.01, spb, 3).grid === spb / 2 && quality(nearestGrid(spb * 0.5 + 0.01, spb, 3).delta) === 'perfect');
   // the power meter: on-beat taps fill it (perfect more than good), the combo lifts the gains
@@ -622,7 +622,8 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   check('a silenced musician cannot solo', !j.canSolo(m));
 }
 {
-  // the viradas: every breather has them; on a streak at a phrase end, not too often; recorded
+  // the viradas (off in the game for now; the machinery is tested switched on): every breather has them; on a streak at a phrase end, not too often; recorded
+  VIRADA.enabled = true;
   const d = LEVEL_BY_ID.get('m2')!.def;
   const j = new Journey(d, SONGS[d.song].bpm);
   j.build(0, 'harp');
@@ -682,6 +683,7 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
 }
 {
   // a boss holds its blows around a cued virada
+  VIRADA.enabled = true;
   const { j } = duelArena('toad');
   let cued: number | null = null;
   const blows: number[] = [];
@@ -693,13 +695,14 @@ function soloTrial(kind: TowerKind, perfect: boolean, enemy: EnemyKind = 'blot',
   const v = j.viradas[0];
   check('a virada cued in a duel', !!v && cued !== null);
   if (v) check('no blow lands in a virada', blows.length > 0 && !blows.some((t) => t > v.start - j.spb && t < v.end), blows.map((t) => (t / j.barDur).toFixed(2)).join(' '));
+  VIRADA.enabled = false;
 }
 {
   // rhythm actions replay exactly (checkpoints), and saves keep them
   const d = LEVEL_BY_ID.get('d2')!.def;
   const live = playBot(d, 'good', { rhythm: 0.7, until: (j) => j.movement >= 2 && j.journeyBar! >= j.movements[2].bar + 3 });
   const L = live.j;
-  check('rhythm bot plays solos, viradas, strikes, notes, power', L.stats.solos > 0 && L.stats.viradas > 0 && L.stats.viradaFull > 0 && L.stats.strikes > 0 && L.stats.onBeatNotes > 0 && L.log.some((a) => a.a === 'power'), `${L.stats.solos} ${L.stats.viradas} ${L.stats.strikes}`);
+  check('rhythm bot plays solos, strikes, notes, power (no viradas while they are off)', L.stats.solos > 0 && L.stats.viradas === 0 && L.stats.strikes > 0 && L.stats.onBeatNotes > 0 && L.log.some((a) => a.a === 'power'), `${L.stats.solos} ${L.stats.viradas} ${L.stats.strikes}`);
   const cp = L.checkpoint()!;
   const now = Journey.replay(d, SONGS[d.song].bpm, { ...cp, sub: L.sub, actions: L.log.filter((a) => a.sub <= L.sub) });
   check('rhythm replay == live', now.fingerprint() === L.fingerprint(), `\n  ${now.fingerprint().slice(0, 160)}\n  ${L.fingerprint().slice(0, 160)}`);
@@ -825,8 +828,8 @@ section('duel');
   }
   // parry windows: perfect ≤ 60 ms, good ≤ 120 ms, a little wider with a long combo
   check('parry perfect', parryQuality(0.05, 0) === 'perfect' && parryQuality(-0.06, 0) === 'perfect');
-  check('parry good', parryQuality(0.1, 0) === 'good' && parryQuality(0.13, 0) === 'miss');
-  check('a long combo widens the window', parryQuality(0.15, 30) === 'good' && parryQuality(0.15, 0) === 'miss');
+  check('parry good', parryQuality(0.1, 0) === 'good' && parryQuality(0.16, 0) === 'miss');
+  check('a long combo widens the window', parryQuality(0.17, 30) === 'good' && parryQuality(0.17, 0) === 'miss');
   check('far from the beat is no parry', parryQuality(0.4, 0) === null);
   check('shield of sound', shieldOf(0) === 0 && Math.abs(shieldOf(100) - DUEL.shield) < 1e-9);
 }
@@ -995,7 +998,7 @@ check('no rhythm struggles from the second land on', noneLost >= 6, `${noneLost}
 // v7: a flawless run is always possible (perfect rhythm, a strike on every beat, every blow parried, every virada)
 for (const id of ['m1', 'mx', 'i1', 'd4']) {
   const r = playBot(LEVEL_BY_ID.get(id)!.def, 'flawless');
-  check(`flawless keeps every life in ${id}`, r.j.outcome === 'victory' && r.j.lives === r.j.maxLives && r.j.stats.viradas > 0 && r.j.stats.viradaFull === r.j.stats.viradas, `${r.j.outcome} ${r.j.lives} ${r.j.stats.viradaFull}/${r.j.stats.viradas}`);
+  check(`flawless keeps every life in ${id}`, r.j.outcome === 'victory' && r.j.lives === r.j.maxLives, `${r.j.outcome} ${r.j.lives}`);
 }
 {
   const st = (sk: number) => {

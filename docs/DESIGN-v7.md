@@ -108,3 +108,17 @@ The player found the first viradas too fast and too much "on the screen". Now:
   nothing changes.
 - **Bosses:** a virada can come during a duel when no blow already on its way would land in it;
   the bosses hold their next tells until it is over.
+
+## 5. v7.2: viradas off, the baton in time
+
+The player did not like the pads on the map: **viradas are switched off** (`VIRADA.enabled =
+false`; the code stays and is tested switched on), and the boss calls no longer draw marks
+(the parry is on the baton, on the beat, as before).
+
+The finger's beat felt out of sync. A sound made only when the finger lands always arrives late
+by the device's output latency. So:
+- **The baton in time:** once the player keeps the beat (two on-beat baton taps in a row), the
+  next beat's tap sound is scheduled ahead, exactly on the music's beat. The tap that lands on
+  it makes no second sound. If no tap comes, the run stops after that one beat.
+- **Easier windows:** perfect ±75 ms (was 60), good ±150 ms (was 120), parries too.
+- The flawless bot still keeps 20/20 on all 25 levels (it now uses FORTÍSSIMO on smaller crowds).

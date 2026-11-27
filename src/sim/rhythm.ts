@@ -24,8 +24,8 @@ export type TapTarget = 'baton' | 'coin' | 'creature' | 'musician' | 'virada';
 
 export const RHYTHM = {
   /** seconds from the beat (as heard) for a perfect / a good tap */
-  perfect: 0.06,
-  good: 0.12,
+  perfect: 0.075,
+  good: 0.15,
   /** power gained by a perfect / good tap (× the combo bonus) and lost by a miss */
   gainPerfect: 5,
   gainGood: 2.5,
@@ -212,6 +212,11 @@ export class Power {
  * (a combo or a groove, ending at a phrase end, not too often) and in every breather. Full viradas in a row raise its level (one more mark, a bigger reward).
  */
 export const VIRADA = {
+  /**
+   * off (v7.2): the player did not like marks to tap in the world; the journeys play without
+   * viradas (the machinery stays for the tests and for a better idea later)
+   */
+  enabled: false,
   /** a streak: this combo, or this groove */
   combo: 8,
   groove: 2,

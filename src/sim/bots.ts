@@ -218,7 +218,8 @@ function tapNotes(j: Journey, reach: number, pick: (id: number) => boolean = () 
   }
 }
 
-function useFF(j: Journey) {
+/** FORTÍSSIMO on a crowd at the shell or a big one (the flawless hands use it on smaller crowds too) */
+function useFF(j: Journey, crowd = 8) {
   if (!j.ffReady()) return;
   let near = 0;
   let big = false;
@@ -228,13 +229,13 @@ function useFF(j: Journey) {
     if (d < 16) near += e.def.threat >= 3 ? 2 : 1;
     if (d < 19 && (e.def.boss || e.elite)) big = true;
   }
-  if (near >= 8 || big || (near >= 3 && j.lives <= 8)) j.unleash();
+  if (near >= crowd || big || (near >= 3 && j.lives <= 8)) j.unleash();
 }
 
 /** one decision of the good (or spam) bot */
-function goodStep(j: Journey, kinds: TowerKind[], hands: boolean) {
+function goodStep(j: Journey, kinds: TowerKind[], hands: boolean, crowd = 8) {
   if (!hands) tapNotes(j, 30);
-  useFF(j);
+  useFF(j, crowd);
   const th = threats(j);
   for (let guard = 0; guard < 4; guard++) {
     const opts = options(j, kinds, th);
@@ -466,7 +467,7 @@ export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spa
   const dt = kind === 'novice' ? 4 : 0.2;
   // before setting off
   if (kind === 'novice') noviceStep(j, nov, !!rhythm);
-  else for (let i = 0; i < 6; i++) goodStep(j, kinds, !!rhythm);
+  else for (let i = 0; i < 6; i++) goodStep(j, kinds, !!rhythm, kind === 'flawless' ? 4 : 8);
   j.begin();
   let t = 0;
   const limit = opts.limit ?? 1500;
@@ -477,7 +478,7 @@ export function playBot(def: JourneyDef, kind: BotKind, opts: { mode?: Mode; spa
     opts.onEvents?.(evs, j);
     rhythm?.step();
     if (kind === 'novice') noviceStep(j, nov, !!rhythm);
-    else goodStep(j, kinds, !!rhythm);
+    else goodStep(j, kinds, !!rhythm, kind === 'flawless' ? 4 : 8);
     opts.onTick?.(j);
     if (opts.until?.(j)) break;
   }

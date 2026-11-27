@@ -943,7 +943,7 @@ export class Journey {
    */
   viradaDue(vb: number, streak: boolean): boolean {
     const jb = this.journeyBar;
-    if (jb === null || this.outcome !== 'playing' || !this.walking || vb !== jb + VIRADA.cueBars) return false;
+    if (!VIRADA.enabled || jb === null || this.outcome !== 'playing' || !this.walking || vb !== jb + VIRADA.cueBars) return false;
     const span = this.viradaSpanNow();
     const last = this.viradas[this.viradas.length - 1];
     if (last && last.bar >= vb - span) return false;

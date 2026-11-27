@@ -12,7 +12,7 @@
  * taps and records the parries (`Journey.parry`). This module is pure data and helpers.
  */
 import type { EnemyKind, WorldId } from './defs';
-import type { TapQuality } from './rhythm';
+import { RHYTHM, type TapQuality } from './rhythm';
 
 export type BossAbility = 'echo' | 'burrow' | 'mirage' | 'mute' | 'stone' | 'rebirth' | 'twin';
 
@@ -125,8 +125,8 @@ export function bossClass(d: { mini?: boolean; legend?: boolean }): 'mini' | 'gu
 export function parryQuality(delta: number, combo: number): TapQuality | null {
   const extra = Math.min(DUEL.windowMax, combo * DUEL.windowPerCombo);
   const d = Math.abs(delta);
-  if (d <= 0.06 + extra * 0.5) return 'perfect';
-  if (d <= 0.12 + extra) return 'good';
+  if (d <= RHYTHM.perfect + extra * 0.5) return 'perfect';
+  if (d <= RHYTHM.good + extra) return 'good';
   return d <= 0.3 ? 'miss' : null;
 }
 

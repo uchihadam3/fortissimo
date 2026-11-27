@@ -330,7 +330,7 @@ export const CAMPAIGN: LevelEntry[] = [
     id: 'm1', world: 'meadow', map: [14, 74], kind: 'main', requires: [],
     def: journey({
       id: 'm1', world: 'meadow', name: { pt: 'O Despertar', en: 'The Awakening' }, slots: 2, coins: 150, towers: T1, newTower: 'harp',
-      tutorial: ['basics', 'baton', 'coin', 'strike', 'virada', 'parry'], pickups: 9, curviness: 0.6,
+      tutorial: ['basics', 'baton', 'coin', 'strike', 'parry'], pickups: 9, curviness: 0.6,
       features: [{ kind: 'meadow', from: 0, to: 70 }, { kind: 'lake', from: 40, to: 100, side: 1 }, { kind: 'hills', from: 100, to: 140 }, { kind: 'meadow', from: 140, to: 190 }],
       moves: [
         {

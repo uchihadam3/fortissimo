@@ -27,6 +27,9 @@
  * parries: perfect reflects it, good blocks it; the parry is recorded (`Journey.parry`). Unparried,
  * the blow lands — softened by the golden shield of sound that the power meter raises.
  *
+ * v7.2: the viradas are switched off (VIRADA.enabled), and a steady baton's next beat is scheduled
+ * ahead on the music's beat (see `bat`), so the player's beat sounds in time whatever the latency.
+ *
  * v7, the viradas (docs/DESIGN-v7.md): on a streak (cued two bars ahead, at a phrase end) and in every
  * breather, golden marks appear in the world around the colossus; each one's ring closes on a stroke of
  * the fill and the player taps it there (judged like any tap, as heard). How it went is recorded
@@ -161,6 +164,13 @@ export class JourneyBattle {
   readonly power: Power;
   /** consecutive golden notes taken on the beat (their melody climbs) */
   private noteRun = 0;
+  /**
+   * v7.2, the baton in time: once the player keeps the beat (two on-beat taps in a row), the next
+   * beat's tap sound is scheduled ahead, exactly on the music's beat (a sound made only when the
+   * finger lands always comes late by the device's output latency). The tap that lands on that beat
+   * then makes no second sound; if no tap comes, the run stops there.
+   */
+  private bat = { run: 0, last: -1, q: 'good' as TapQuality, pan: -0.35, pred: -1 };
   private lastAudioPower = -1;
   private lastGrooveLevel = 0;
   /** v5: the bosses in the fight now (their music plays while any lives), the shield of sound */
@@ -601,8 +611,44 @@ export class JourneyBattle {
     this.tutorial?.notify('baton');
     if (this.tryParry(heard, x, y)) return;
     const r = this.power.tap(heard, this.sim.spb, 'baton');
-    audio.beatTap(this.soundAt(r.at, r.q), r.q, x === undefined ? -0.35 : (x / window.innerWidth) * 1.4 - 0.7);
+    const pan = x === undefined ? -0.35 : (x / window.innerWidth) * 1.4 - 0.7;
+    const B = this.bat;
+    const spb = this.sim.spb;
+    const predicted = B.pred >= 0 && Math.abs(r.at - B.pred) < 1e-6;
+    // the beat already sounding (scheduled ahead) is this tap's sound; anything else sounds now
+    if (!(predicted && r.q !== 'miss')) audio.beatTap(this.soundAt(r.at, r.q), r.q, pan);
+    const onBeat = Math.abs(r.at / spb - Math.round(r.at / spb)) < 1e-6;
+    if (r.q === 'miss') {
+      B.run = 0;
+      B.last = -1;
+    } else if (onBeat) {
+      B.run = B.last >= 0 && Math.abs(r.at - B.last - spb) < 1e-6 ? B.run + 1 : 1;
+      B.last = r.at;
+      B.q = r.q;
+      B.pan = pan;
+    }
     this.judged(r.q, r.at, x, y);
+  }
+
+  /** every frame: the next beat of a steady baton is scheduled ahead, on the music's beat */
+  private batonAhead(vt: number) {
+    const B = this.bat;
+    if (B.last < 0 || this.paused || this.ended) return;
+    const spb = this.sim.spb;
+    const next = B.last + spb;
+    // the beat passed without a tap: the run stops
+    if (vt > next + RHYTHM.good + 0.05) {
+      B.run = 0;
+      B.last = -1;
+      return;
+    }
+    if (B.run < 2 || B.pred >= next - 1e-6) return;
+    const at = this.ctx(next);
+    const lead = at - audio.now();
+    if (lead > 0.005 && lead <= 0.12) {
+      audio.beatTap(at, B.q, B.pan);
+      B.pred = next;
+    }
   }
 
   /** a golden note tapped: on the beat it is worth more and its melody climbs; off the beat, half */
@@ -1461,6 +1507,7 @@ export class JourneyBattle {
     }
     this.updateGlows(vt, u);
     this.updateVirada(vt);
+    this.batonAhead(vt);
     this.updateDuel(vt, 1 / 60, u);
   }
 
@@ -1571,11 +1618,6 @@ export class JourneyBattle {
           for (const b of ev.blows) audio.bossTell(this.ctx(b.t), pan, true);
           const e = ev.enemy;
           const beats = Math.round((ev.blows[0].t - ev.t) / this.sim.spb);
-          // a boss that calls: its rhythm lights marks in the world (the player answers them)
-          if (ev.call) {
-            const tells = ev.tells, blows = ev.blows;
-            this.later(ev.t - 0.3, () => !this.ended && this.startCall(e, tells, blows));
-          }
           this.later(ev.t, () => this.view.enemies.get(e.id)?.bossAct('tell', beats));
           // each blow lands on its beat: the boss strikes (unless it was parried right then)
           for (const b of ev.blows) this.later(b.t + 0.13, () => {
